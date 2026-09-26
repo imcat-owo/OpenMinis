@@ -2703,6 +2703,9 @@ struct ContentView: View {
         // Painting the backdrop on the CONTENT root (inside the stack, like
         // AIChatView does for .chat) makes it the list's direct background.
         .background(AppearanceBackdrop(scope: .home))
+        // Wallpaper fullscreen: transparent nav bar over the home backdrop,
+        // so the wallpaper runs under the soul-name title + search strip.
+        .toolbarBackground(.hidden, for: .navigationBar)
         // [T-home-top-search][v3 醒醒 09-10] QQ-style permanent search strip
         // pinned under the nav bar — always visible, no FAB toggle. Both the
         // iPhone stack and the iPad split get it (lives on the Group).

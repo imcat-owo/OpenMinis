@@ -5043,10 +5043,10 @@ private struct NavBarStyleModifier: ViewModifier {
                 .ignoresSafeArea(.container, edges: .top)
                 .toolbarBackgroundVisibility(.visible, for: .navigationBar)
         } else {
-            // iOS 16–18: opaque navbar background
+            // iOS 16–18: transparent navbar so the chat wallpaper runs
+            // fullscreen under the title (the old opaque band hid it).
             content
-                .toolbarBackground(ChatColors.background, for: .navigationBar)
-                .toolbarBackground(.visible, for: .navigationBar)
+                .toolbarBackground(.hidden, for: .navigationBar)
                 .overlay(alignment: .top) {
                     // [T-ios-geometry-observer-crash] onGeometryChange replaces
                     // the GeometryReader scaffold (async-renderer SIGTRAP — see

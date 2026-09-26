@@ -543,6 +543,10 @@ private struct AppearancePageModifier: ViewModifier {
             .foregroundStyle(studio.color(.primaryText, scope: scope))
             .tint(studio.color(.accent, scope: scope))
             .background(AppearanceBackdrop(scope: scope))
+            // Wallpaper-fullscreen pages: the nav bar sits transparently over
+            // the backdrop instead of a material/opaque band at the top, so
+            // the wallpaper runs edge to edge under the title.
+            .toolbarBackground(.hidden, for: .navigationBar)
     }
 }
 
