@@ -45,9 +45,7 @@ enum AppearanceColorRole: String, CaseIterable, Identifiable {
         case .secondaryText: return "次文字"
         case .accent: return "强调色"
         case .userBubble: return "我的气泡"
-        case .assistantBubble:
-            let n = SoulStore.cachedMetadata.name
-            return "\(n.isEmpty ? "AI" : n)气泡"
+        case .assistantBubble: return "AI 气泡"
         case .input: return "输入框"
         case .border: return "边线"
         case .success: return "成功"

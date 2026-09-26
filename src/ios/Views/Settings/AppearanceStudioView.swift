@@ -27,7 +27,7 @@ struct AppearanceStudioView: View {
     @State private var showThemeLibrary = false
 
     /// #5: AI 侧名字跟灵魂名走（不用写死名字）
-    private var aiName: String {
+    @MainActor private var aiName: String {
         let n = SoulStore.cachedMetadata.name
         return n.isEmpty ? "AI" : n
     }
