@@ -166,7 +166,7 @@ final class CorrectionAdmissionTests: XCTestCase {
         XCTAssertEqual(judge("linux", "minis"), .latinPhonetic)
         // Case variations — the normalizer lowercases, so these behave the same.
         XCTAssertEqual(judge("Linux", "minis"), .latinPhonetic)
-        XCTAssertEqual(judge("Linux", "我的小家"), .latinPhonetic)
+        XCTAssertEqual(judge("Linux", "Minis"), .latinPhonetic)
     }
 
     // MARK: - Aggregate: collection rate over the classified real-data spans

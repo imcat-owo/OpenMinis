@@ -49,7 +49,7 @@
 static NSString *const TOOL_NAME = @"minis-sessions-cli";
 
 static NSString *const HELP_TEXT =
-    @"minis-sessions-cli - Query and send Minis chat sessions\n"
+    @"minis-sessions-cli - Query and send 我的小家 chat sessions\n"
      "\n"
      "USAGE:\n"
      "  minis-sessions-cli <command> [options]\n"

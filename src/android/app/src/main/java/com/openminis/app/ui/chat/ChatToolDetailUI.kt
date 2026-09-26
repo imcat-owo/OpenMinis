@@ -303,7 +303,7 @@ internal fun ToolDetailSheet(
                 .fillMaxHeight(0.85f)
                 .background(ChatColors.secondaryBg),
         ) {
-            // ── Top Nav Bar (iOS: X button + "Minis Computer" + action button) ──
+            // ── Top Nav Bar (iOS: X button + "我的小家 Computer" + action button) ──
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -337,7 +337,7 @@ internal fun ToolDetailSheet(
                 // the elapsed-duration text) so it sits next to where the
                 // user is already scanning timing info.
                 Text(
-                    text = "Minis Computer",
+                    text = "我的小家 Computer",
                     fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = ChatColors.primaryText,
@@ -647,14 +647,14 @@ internal fun ToolDetailSheet(
                                     .fillMaxWidth()
                                     // T260: bound the Column to the parent
                                     // BoxWithConstraints' maxHeight so the inner
-                                    // verticalScroll ribbon (Minis Computer sheet
+                                    // verticalScroll ribbon (我的小家 Computer sheet
                                     // edit-card body) actually scrolls. Without
                                     // fillMaxHeight the Column's vertical constraint
                                     // is unbounded, the inner Column.verticalScroll
                                     // degenerates (each row laid out at full height
                                     // instead of scrolling), and the overflow
                                     // bleeds past the parent Box(weight=1f) onto
-                                    // the footer ("Minis is editing File / 2/3 /
+                                    // the footer ("我的小家 is editing File / 2/3 /
                                     // prev-next" at L5094). Mirrors the shell
                                     // branch (L4489) which already does this.
                                     .fillMaxHeight()

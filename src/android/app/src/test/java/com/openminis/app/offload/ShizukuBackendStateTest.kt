@@ -37,7 +37,7 @@ class ShizukuBackendStateTest {
 
     @Test
     fun `sui - live unauthorized binder with NO manager apk asks for permission`() {
-        // Must be NEED_PERMISSION (an actionable "Authorize Minis" prompt),
+        // Must be NEED_PERMISSION (an actionable "Authorize 我的小家" prompt),
         // never NOT_INSTALLED (a dead-end "go install something" screen).
         assertEquals(
             ShizukuManager.State.NEED_PERMISSION,

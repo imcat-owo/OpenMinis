@@ -73,7 +73,7 @@ class AccessibilityRecoveryManagerTest {
     @Test
     fun `other services present but ours absent reads as revoked`() {
         // The exact post-force-stop state observed when two services were
-        // enabled and only Minis was stopped: the framework surgically removed
+        // enabled and only 我的小家 was stopped: the framework surgically removed
         // ours and kept TalkBack.
         val talkback = "com.google.android.marvin.talkback/.TalkBackService"
         assertTrue(revoked(talkback))

@@ -16,7 +16,7 @@ import okhttp3.Request
  * **Fallback policy (T-android-default-ua):** when `customUserAgent` is
  * null/blank, we now apply [MinisUserAgent.DEFAULT] instead of leaving
  * the builder UA-less (which lets OkHttp insert its own `okhttp/4.12.0`).
- * The default carries the Minis version so request logs upstream can be
+ * The default carries the 我的小家 version so request logs upstream can be
  * traced back to the app build that issued them — matching the
  * "branded UA except where a specific client identity is required"
  * intent of the feature.
@@ -41,7 +41,7 @@ fun Request.Builder.applyUserAgentOverride(
 }
 
 /**
- * [T-android-default-ua] Branded User-Agent used by every Minis-originated
+ * [T-android-default-ua] Branded User-Agent used by every 我的小家-originated
  * outbound request that doesn't have a SDK-specific UA requirement.
  *
  * Format mirrors iOS exactly:

@@ -308,7 +308,7 @@ class ShareReceiverActivity : ComponentActivity() {
      * [T-android-share-launch-crash] Hand off to MainActivity, tolerating a
      * failure to start it.
      *
-     * Field report (vivo V2352A / Android 14): sharing into Minis crashed the
+     * Field report (vivo V2352A / Android 14): sharing into 我的小家 crashed the
      * app on launch, repeatedly —
      *
      *   RuntimeException: Unable to start activity …ShareReceiverActivity

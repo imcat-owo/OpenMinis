@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""minis-mcp-cli — MCP client CLI for the Minis agent (iSH / PRoot).
+"""minis-mcp-cli — MCP client CLI for the 我的小家 agent (iSH / PRoot).
 
 Subcommands:
   list [--all] [--pretty]                       list configured servers
@@ -503,7 +503,7 @@ def cmd_add(args, pretty):
     if wants_oauth:
         out["oauth_note"] = (
             "OAuth config saved%s. The interactive PKCE login cannot run from "
-            "the CLI — open Minis Settings > MCP Integrations > %s and tap "
+            "the CLI — open 我的小家 Settings > MCP Integrations > %s and tap "
             "Authorize to complete sign-in."
             % (" (client secret seeded for the app to import)" if seeded_secret else "",
                name))
@@ -528,7 +528,7 @@ def cmd_set_enabled(args, pretty, enabled):
     _emit({"server": name, "enabled": enabled}, pretty)
 
 
-USAGE = """minis-mcp-cli — MCP (Model Context Protocol) client for the Minis agent.
+USAGE = """minis-mcp-cli — MCP (Model Context Protocol) client for the 我的小家 agent.
 
 Usage: minis-mcp-cli <command> [args] [--pretty]
 
@@ -556,7 +556,7 @@ Commands:
                                         to import into the Keychain. NOTE: the
                                         CLI only prepares the config; the
                                         interactive login must be completed in
-                                        Minis Settings > MCP Integrations >
+                                        我的小家 Settings > MCP Integrations >
                                         <server> > Authorize.
                                         Add (or overwrite) an HTTP or STDIO server.
                                         --startup-timeout: how long to wait for a
@@ -588,7 +588,7 @@ Examples:
       --oauth-token-endpoint "https://oauth2.googleapis.com/token" \
       --oauth-scopes "openid email https://www.googleapis.com/auth/calendar"
 
-Server startup timeout (Minis config, not part of the MCP protocol):
+Server startup timeout (我的小家 config, not part of the MCP protocol):
   A STDIO server's first `initialize` handshake must complete within its
   startup timeout or the server is declared failed. Default 60s; set a larger
   per-server value for servers that install/compile on first launch.

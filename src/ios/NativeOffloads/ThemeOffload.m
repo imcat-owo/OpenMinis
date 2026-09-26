@@ -30,7 +30,7 @@
 static NSString *const TOOL_NAME = @"minis-theme";
 
 static NSString *const HELP_TEXT =
-    @"minis-theme - Apply and export Minis AI theme packs\n"
+    @"minis-theme - Apply and export 我的小家 AI theme packs\n"
      "\n"
      "USAGE:\n"
      "  minis-theme <command> [options]\n"

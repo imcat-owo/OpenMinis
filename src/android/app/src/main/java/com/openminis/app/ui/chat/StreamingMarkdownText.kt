@@ -447,7 +447,7 @@ private fun MdText(
                     // was correct for bidi-pure runs but regressed when an
                     // inline code span itself contains an internal space and
                     // sits inside CJK prose (e.g. prose like "put it next to
-                    // `Hermes Agent notes.md` and `Minis tutorial.md`"). The
+                    // `Hermes Agent notes.md` and `我的小家 tutorial.md`"). The
                     // path returned for that range can include zero-width
                     // sub-paths at run boundaries; getBounds()'s union then
                     // expands left to a coordinate from a sibling run, which

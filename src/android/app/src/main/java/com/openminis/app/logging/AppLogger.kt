@@ -168,7 +168,7 @@ object AppLogger {
 
     /**
      * Append a logcat tail line to today's log file. Lines that AppLogger
-     * itself produced (tag prefix `Minis.`) are skipped — [log] already wrote
+     * itself produced (tag prefix `我的小家.`) are skipped — [log] already wrote
      * them via [writer], so without this filter every `info()` / `warning()`
      * / etc. call would appear twice in the file (once from [log], once
      * echoed back through logcat).
@@ -181,7 +181,7 @@ object AppLogger {
         val parenIdx = if (slashIdx >= 0) rawLine.indexOf('(', slashIdx) else -1
         if (slashIdx >= 0 && parenIdx > slashIdx) {
             val tag = rawLine.substring(slashIdx + 1, parenIdx).trim()
-            if (tag.startsWith("Minis.") || tag == "AppLogger") return
+            if (tag.startsWith("我的小家.") || tag == "AppLogger") return
         }
         try {
             val now = Date()
@@ -306,7 +306,7 @@ object AppLogger {
         val timestamp = timestampFormat.format(now)
 
         // Also output to logcat
-        val logcatTag = "Minis.$category"
+        val logcatTag = "我的小家.$category"
         when (level) {
             "ERROR" -> Log.e(logcatTag, message)
             "WARN" -> Log.w(logcatTag, message)

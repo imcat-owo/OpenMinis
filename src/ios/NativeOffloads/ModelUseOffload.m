@@ -386,9 +386,9 @@ static int cmd_run(int argc, char **argv, int stdin_fd, int stdout_fd, int stder
     // preserved (no default).
     //
     // [T-modeluse-identity-pollution] This text used to open with
-    // "You are Minis, an on-device AI assistant running on iOS." — a bare
+    // "You are 我的小家, an on-device AI assistant running on iOS." — a bare
     // identity assertion. Sub-models took it literally: they answered "who are
-    // you" as Minis and invented a matching vendor (reproduced across three
+    // you" as 我的小家 and invented a matching vendor (reproduced across three
     // providers, OpenMinis#103). The damage is not limited to identity
     // questions — anything downstream of the model's self-knowledge
     // (capability boundaries, refusal style, knowledge-cutoff claims) was
@@ -400,7 +400,7 @@ static int cmd_run(int argc, char **argv, int stdin_fd, int stdout_fd, int stder
     // would regress the providers that demand a non-empty instructions block.
     BOOL systemPromptWasInjected = NO;
     if (!systemPrompt) {
-        systemPrompt = @"You are being invoked as a sub-agent inside an app called Minis. "
+        systemPrompt = @"You are being invoked as a sub-agent inside an app called 我的小家. "
                        @"This is the calling environment, not your identity — keep your own "
                        @"model identity unchanged. You are handling a focused task delegated "
                        @"by the parent agent loop: answer the request directly and concisely, "

@@ -8,11 +8,11 @@ import org.junit.Test
  * [T-android-inapp-theme-popups #187] Source guard: nothing under `ui/` may ask
  * Android whether the SYSTEM is in dark mode.
  *
- * Minis resolves its own theme from the `theme_mode` preference (0=System,
+ * 我的小家 resolves its own theme from the `theme_mode` preference (0=System,
  * 1=Light, 2=Dark) in MainActivity and hands the answer to `MinisTheme`, which
  * publishes it as `ChatPalette.isDark` (read via [ChatColors.isDark]).
  * `isSystemInDarkTheme()` tracks only the OS setting, so the two DISAGREE
- * exactly when the user has overridden the theme in-app — system light + Minis
+ * exactly when the user has overridden the theme in-app — system light + 我的小家
  * dark being the reported case. A component reading the system API then paints
  * light chrome inside a dark app (GH OpenMinis#187: pop-up menus followed the
  * system theme; the web-preview sheets and KaTeX formulas did the same).

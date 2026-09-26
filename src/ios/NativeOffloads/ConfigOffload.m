@@ -57,7 +57,7 @@ static NSString *const TOOL_NAME = @"minis-config";
 #define EXIT_PERMISSION_DENIED 126
 
 static NSString *const HELP_TEXT =
-    @"minis-config - read or change Minis app settings (logged + revertable)\n"
+    @"minis-config - read or change 我的小家 app settings (logged + revertable)\n"
      "\n"
      "USAGE:\n"
      "  minis-config <subcommand> [args]\n"

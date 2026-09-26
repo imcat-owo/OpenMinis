@@ -205,7 +205,7 @@ class WebAppActivity : ComponentActivity() {
 
     /**
      * T-pwa-3: replaces the prior toast-and-finish with an inline error
-     * screen offering an "Open in Minis" escape hatch.
+     * screen offering an "Open in 我的小家" escape hatch.
      */
     @OptIn(ExperimentalMaterial3Api::class)
     private fun renderSourceMissing(sourceSessionId: String?) {
