@@ -2464,6 +2464,11 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
         // If editing a previous message, truncate conversation from that point first
         if let editIdx = editingMessageIndex {
             editingMessageIndex = nil
+            // [T-ios-retry-db-drift 09-27] Captured BEFORE removal: true only
+            // when the edited row was the LAST user row, the condition under
+            // which the no-id fallback below can locate its twin as the last
+            // history bubble.
+            let editRowWasLastUserRow = (messages.lastIndex(where: { $0.role == .user }) == editIdx)
             // Remove the edited message and everything after it from UI
             if editIdx < messages.count {
                 messages.removeSubrange(editIdx...)
@@ -2481,15 +2486,34 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
                 logger.info("✏️[RetryDiag] edit path id-anchored dbRowId=\(lastRowId.prefix(8)) → historyIdx=\(hi)")
             } else {
                 var usersSeen = 0
+                var cutFound = false
                 for (i, entry) in agentHistory.enumerated() {
                     if Self.isUserBubbleEntry(entry) {
                         usersSeen += 1
                         if usersSeen > remainingUserCount {
                             // This is the edited message's entry — stop before it
+                            cutFound = true
                             break
                         }
                     }
                     keepUpTo = i
+                }
+                // [T-ios-retry-db-drift 09-27] Fail-safe: the count never
+                // reached its target (queued N-in-1 merges shrink the bubble
+                // total) — the loop above then left keepUpTo at the last index
+                // and the edit-resend would keep the edited entry's old answer
+                // in the model's context. If the edited row was the LAST user
+                // row its twin is the last user bubble — cut strictly before
+                // it. A middle-row edit with a missing id can't be located
+                // exactly; keep the full history and let the log show it.
+                if !cutFound {
+                    if editRowWasLastUserRow,
+                       let lastBubble = agentHistory.lastIndex(where: { Self.isUserBubbleEntry($0) }) {
+                        logger.error("✏️[RetryDiag] edit path bubble-count not found (remainingUserCount=\(remainingUserCount), history=\(agentHistory.count)) — fail-safe: cutting before last user bubble @\(lastBubble)")
+                        keepUpTo = lastBubble - 1
+                    } else {
+                        logger.error("✏️[RetryDiag] edit path bubble-count not found and not safely locatable (remainingUserCount=\(remainingUserCount), history=\(agentHistory.count), editRowWasLastUserRow=\(editRowWasLastUserRow)) — keeping full history")
+                    }
                 }
             }
             if remainingUserCount == 0 {
@@ -2961,7 +2985,19 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
         //   ... user(tool_results) assistant(failed/partial)
         // We need to remove just the trailing assistant entry so the API call retries
         // with the tool results as the last message.
+        // [T-ios-retry-db-drift 09-27] Capture the DB ids of everything we roll
+        // back and DELETE those rows below. The truncation paths
+        // (retryFromMessage / edit / deleteFromMessage) pass
+        // `keepCount = agentHistory.count` to deleteMessagesAfter and trust
+        // agentHistory:DB == 1:1. Leaving these rows behind made the DB run
+        // ahead of agentHistory, so every LATER truncation cut one row too
+        // early — 1-2 (usually the most recent) AI turns vanished after the
+        // next reload. They must also be gone here because the rerun persists
+        // its answer as a NEW row; keeping the old one would merge the stale
+        // partial content back into the bubble on reload.
+        var rolledBackDbIds: [String] = []
         if agentHistory.last?.role == .assistant {
+            if let staleId = agentHistory.last?.dbMessageId { rolledBackDbIds.append(staleId) }
             agentHistory.removeLast()
         }
 
@@ -2978,10 +3014,18 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
                 if case .toolResult(let id, _, _, _, _, _, _, _) = part { return allRetryToolUseIds.contains(id) }
                 return true
             }
-            if cleaned.isEmpty { agentHistory.remove(at: i) }
-            else if cleaned.count < agentHistory[i].parts.count {
-                agentHistory[i] = AgentMessage(role: .user, parts: cleaned)
+            if cleaned.isEmpty {
+                if let orphanId = agentHistory[i].dbMessageId { rolledBackDbIds.append(orphanId) }
+                agentHistory.remove(at: i)
+            } else if cleaned.count < agentHistory[i].parts.count {
+                // [T-ios-retry-db-drift 09-27] Preserve dbMessageId — the old
+                // rebuild dropped it, silently unlinking the entry from its DB
+                // row and breaking the id anchor for every later truncation.
+                agentHistory[i] = AgentMessage(role: .user, parts: cleaned, dbMessageId: agentHistory[i].dbMessageId)
             }
+        }
+        if !rolledBackDbIds.isEmpty, let sid = sessionId {
+            Task { await ChatStore.shared.deleteMessagesByIds(sessionId: sid, ids: rolledBackDbIds) }
         }
 
         let existingMsgIdx = messages.count - 1
@@ -3384,6 +3428,11 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
         }
 
         // Remove everything AFTER the selected user message (keep the user message itself)
+        // [T-ios-retry-db-drift 09-27] Captured BEFORE truncation: true only
+        // when this row had no user turns after it — the condition under which
+        // the no-id fallback below can use the LAST history bubble as the
+        // selected row's exact twin.
+        let wasLastUserRow = (messages.lastIndex(where: { $0.role == .user }) == idx)
         if idx + 1 < messages.count {
             messages.removeSubrange((idx + 1)...)
         }
@@ -3431,14 +3480,27 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
                 logger.info("[RetryDiag] retryFromMessage bubble-count fallback (no dbRowId) targetUserCount=\(targetUserCount) → historyIdx=\(keepUpTo)")
             }
         }
-        // [T-ios-retry-anchor-synthetic-user] Fail OPEN on a UI↔history
-        // mismatch: anchor to the end (truncation becomes a no-op) and let the
-        // rerun proceed with full history. Keeping too much is recoverable;
-        // the old behavior (keepUpTo = 0) silently nuked the session down to
-        // one entry.
+        // [T-ios-retry-anchor-synthetic-user] Fail SAFE on a UI↔history
+        // mismatch (id anchor missing AND the bubble count above didn't land —
+        // count stops short when queued N-in-1 merges shrink the bubble total).
+        // If the selected row had NO user turns after it, its twin is the LAST
+        // user-bubble entry in the history — trim to there. The old fail-open
+        // (anchor to the end, keep the FULL history) let the rerun run with
+        // the model's own previous answer still in context — "regenerate
+        // quotes the old answer" (09-27 report). Losing a little pre-context
+        // is recoverable (re-send); feeding the model its own last answer
+        // poisons every rerun, so over-keep is the wrong direction to fail.
+        // A MIDDLE-row rerun with a missing id can't be located exactly
+        // (merges make counting ambiguous) — keep the full history there and
+        // log it, since over-trimming would drop turns the UI still shows.
         if keepUpTo < 0 {
-            logger.error("[RetryDiag] retryFromMessage anchor NOT FOUND (dbRowId=\(messages[idx].dbRowId?.prefix(8) ?? "nil"), targetUserCount=\(targetUserCount), history=\(self.agentHistory.count)) — keeping full history")
-            keepUpTo = agentHistory.count - 1
+            if wasLastUserRow, let lastBubble = agentHistory.lastIndex(where: { Self.isUserBubbleEntry($0) }) {
+                logger.error("[RetryDiag] retryFromMessage anchor NOT FOUND (dbRowId=\(messages[idx].dbRowId?.prefix(8) ?? "nil"), targetUserCount=\(targetUserCount), history=\(self.agentHistory.count)) — fail-safe: trimming to last user bubble @\(lastBubble)")
+                keepUpTo = lastBubble
+            } else {
+                logger.error("[RetryDiag] retryFromMessage anchor NOT FOUND and not safely locatable (dbRowId=\(messages[idx].dbRowId?.prefix(8) ?? "nil"), targetUserCount=\(targetUserCount), history=\(self.agentHistory.count), wasLastUserRow=\(wasLastUserRow)) — keeping full history")
+                keepUpTo = agentHistory.count - 1
+            }
         }
         // Keep entries 0...keepUpTo, remove the rest
         if keepUpTo + 1 < agentHistory.count {
@@ -3542,6 +3604,10 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
         let deletedRowId = messages[idx].dbRowId
 
         // Remove the selected user message AND everything after it.
+        // [T-ios-retry-db-drift 09-27] Captured BEFORE removal: true only when
+        // the deleted row was the LAST user row, the condition under which the
+        // no-id fallback below can locate its twin as the last history bubble.
+        let deletedWasLastUserRow = (messages.lastIndex(where: { $0.role == .user }) == idx)
         messages.removeSubrange(idx...)
         // [T-ios-retry-ui-clear] Force a top-level publish so the cells clear on
         // this tick; the $messages sink alone fires off-tick.
@@ -3582,15 +3648,23 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
                 logger.info("[DeleteDiag] no dbRowId on deleted row — legacy bubble-count path used")
             }
         }
-        // [T-ios-retry-anchor-synthetic-user] Fail OPEN on a UI↔history
-        // mismatch, same as retry: keep the full history rather than silently
-        // nuking the session. The UI + DB still truncate, so the worst case is
-        // an over-long context, not a corrupt one. Deleting the FIRST user
-        // bubble legitimately yields keepUpTo = -1 with anchorFound = true —
-        // that clears the whole history and is not an error.
+        // [T-ios-retry-anchor-synthetic-user] Fail SAFE on a UI↔history
+        // mismatch (09-27): when the deleted row was the LAST user row, its
+        // twin is the last user-bubble entry — cut strictly before it. The old
+        // fail-open kept the full history, so the deleted turn's AI answer
+        // stayed in the model's context for every later message. A middle-row
+        // delete with a missing id can't be located exactly — keep the full
+        // history there and log it, since over-trimming would drop turns the
+        // UI still shows. Deleting the FIRST user bubble legitimately yields
+        // keepUpTo = -1 (cut before bubble 0) and is not an error.
         if !anchorFound {
-            logger.error("[DeleteDiag] deleteFromMessage anchor NOT FOUND (keepUserCount=\(keepUserCount), history=\(self.agentHistory.count)) — keeping full history")
-            keepUpTo = agentHistory.count - 1
+            if deletedWasLastUserRow, let lastBubble = agentHistory.lastIndex(where: { Self.isUserBubbleEntry($0) }) {
+                logger.error("[DeleteDiag] deleteFromMessage anchor NOT FOUND (keepUserCount=\(keepUserCount), history=\(self.agentHistory.count)) — fail-safe: cutting before last user bubble @\(lastBubble)")
+                keepUpTo = lastBubble - 1
+                anchorFound = true
+            } else {
+                logger.error("[DeleteDiag] deleteFromMessage anchor NOT FOUND (keepUserCount=\(keepUserCount), history=\(self.agentHistory.count), deletedWasLastUserRow=\(deletedWasLastUserRow)) — keeping full history")
+            }
         }
         if keepUpTo + 1 < agentHistory.count {
             agentHistory.removeSubrange((keepUpTo + 1)...)
@@ -4333,8 +4407,16 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
                 // history entry — every folded row gets the same dbRowId, so a
                 // retry from ANY of them anchors at this merged entry (exactly
                 // the bubble-counting bug: 2 UI rows vs 1 history bubble).
-                for msg in self.messages where msg.queuedPromptId != nil {
-                    msg.dbRowId = pid
+                // [T-ios-retry-db-drift 09-27] Stamp ONLY this batch's rows.
+                // queuedPromptId is never cleared after a drain, so the old
+                // `!= nil` filter re-stamped rows from PREVIOUS batches with
+                // this entry's id: their retry anchor then landed on a LATER
+                // merged entry and kept the model's own previous answer (plus
+                // user turns no longer visible in the UI) in the rerun context.
+                for msg in self.messages {
+                    if let qid = msg.queuedPromptId, queuedIds.contains(qid) {
+                        msg.dbRowId = pid
+                    }
                 }
             }
 
@@ -4492,8 +4574,13 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
             agentHistory[queueIdx].dbMessageId = pid
             // [T-retry-id-anchor 09-13] N queued UI rows fold into ONE history
             // entry here too — give every folded row the shared dbRowId.
-            for msg in messages where msg.queuedPromptId != nil {
-                msg.dbRowId = pid
+            // [T-ios-retry-db-drift 09-27] Same scope fix as the drain site:
+            // rows from earlier batches keep the id stamped when THEY drained
+            // (their own merged entry), not this batch's.
+            for msg in messages {
+                if let qid = msg.queuedPromptId, queuedIds.contains(qid) {
+                    msg.dbRowId = pid
+                }
             }
         }
         // Cache markdown on the completed assistant message before starting a new one
@@ -5100,7 +5187,14 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
         // cleanly from the previous user/tool_result turn.
         //
         // First handle the last message specially (may need to be dropped entirely if interrupted).
+        // [T-ios-retry-db-drift 09-27] If this interrupted entry was already
+        // persisted (the deferred persist stamps dbMessageId before the batch
+        // flush), its DB row must go with the entry or the 1:1 invariant the
+        // truncation paths rely on breaks and a later reload drops real rows.
         if let lastAssistant = agentHistory.last, lastAssistant.role == .assistant, lastAssistant.isInterrupted {
+            if let droppedId = lastAssistant.dbMessageId, let sid = sessionId {
+                Task { await ChatStore.shared.deleteMessagesByIds(sessionId: sid, ids: [droppedId]) }
+            }
             agentHistory.removeLast()
             logger.warning("Dropped interrupted assistant message with partial tool_use(s) — will retry from previous turn")
         }
@@ -5131,6 +5225,7 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
         // 1. Remove orphaned tool_results (tool_result without matching tool_use).
         //    These cause API 400: "unexpected tool_use_id found in tool_result blocks".
         var removedOrphanedResults = 0
+        var orphanedDbIds: [String] = []
         for i in (0..<agentHistory.count).reversed() {
             let msg = agentHistory[i]
             guard msg.role == .user else { continue }
@@ -5147,12 +5242,21 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
             }
             if cleanedParts.count < beforeCount {
                 if cleanedParts.isEmpty {
-                    // All parts were orphaned tool_results — remove entire message
+                    // All parts were orphaned tool_results — remove entire message.
+                    // [T-ios-retry-db-drift 09-27] Drop the DB row too if it was
+                    // persisted, keeping agentHistory:DB 1:1 for truncation paths.
+                    if let orphanId = msg.dbMessageId { orphanedDbIds.append(orphanId) }
                     agentHistory.remove(at: i)
                 } else {
-                    agentHistory[i] = AgentMessage(role: .user, parts: cleanedParts)
+                    // [T-ios-retry-db-drift 09-27] Preserve dbMessageId — the old
+                    // rebuild dropped it, silently unlinking the entry from its
+                    // DB row and breaking the id anchor for later truncations.
+                    agentHistory[i] = AgentMessage(role: .user, parts: cleanedParts, dbMessageId: msg.dbMessageId)
                 }
             }
+        }
+        if !orphanedDbIds.isEmpty, let sid = sessionId {
+            Task { await ChatStore.shared.deleteMessagesByIds(sessionId: sid, ids: orphanedDbIds) }
         }
         if removedOrphanedResults > 0 {
             logger.warning("Removed \(removedOrphanedResults) orphaned tool_result(s) without matching tool_use")

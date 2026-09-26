@@ -3051,6 +3051,38 @@ actor ChatStore {
         sqlite3_finalize(stmt)
     }
 
+    /// Delete specific message rows by id (local-initiated).
+    /// [T-ios-retry-db-drift 09-27] retry() rolls failed entries back from
+    /// agentHistory (the failed assistant + orphaned tool_result carriers);
+    /// their DB rows must go with them. The truncation paths
+    /// (retryFromMessage / edit / deleteFromMessage) pass
+    /// `keepCount = agentHistory.count` to deleteMessagesAfter and trust
+    /// agentHistory:DB == 1:1 — rows left behind by retry() made every later
+    /// truncation cut one row too early, and the "extra" rows (usually the
+    /// most recent AI turns) vanished after the next reload.
+    /// markDirty(op: delete) first, mirroring deleteMessages, so the removal
+    /// propagates to other devices instead of being re-hydrated by sync.
+    func deleteMessagesByIds(sessionId: String, ids: [String]) {
+        guard !ids.isEmpty else { return }
+        invalidateSessionListCache()
+        for id in ids {
+            markDirty(recordType: "Message", recordId: id, operation: "delete")
+        }
+        let placeholders = ids.map { _ in "?" }.joined(separator: ",")
+        let sql = "DELETE FROM messages WHERE session_id = ? AND id IN (\(placeholders))"
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, (sessionId as NSString).utf8String, -1, nil)
+            for (i, id) in ids.enumerated() {
+                sqlite3_bind_text(stmt, Int32(i + 2), (id as NSString).utf8String, -1, nil)
+            }
+            sqlite3_step(stmt)
+        }
+        let changes = Int(sqlite3_changes(db))
+        sqlite3_finalize(stmt)
+        logger.info("[DeleteByIds] sid=\(sessionId.prefix(8)) requested=\(ids.count) deleted=\(changes) ids=\(ids.map { $0.prefix(8) }.joined(separator: ","))")
+    }
+
     /// [T-ios-rerun-from-tool-block-position] Rewrite a single message row's
     /// parts in place. Used by retryFromToolBlock's sub-message cut: when the
     /// re-run anchor is a tool_use that is NOT the first block of its assistant
