@@ -87,15 +87,6 @@ struct MinisShortcutsProvider: AppShortcutsProvider {
             shortTitle: "Open Session",
             systemImageName: "arrow.up.right.square"
         )
-        AppShortcut(
-            intent: ActiveReachWakeIntent(),
-            phrases: [
-                "Wake \(.applicationName) for Xingxing",
-                "Run \(.applicationName) active reach",
-            ],
-            shortTitle: "小梦主动唤醒",
-            systemImageName: "hand.wave"
-        )
         // [T-ios-remove-open-webapp-shortcut-intent] OpenWebAppIntent removed —
         // the Home-Screen WebApp tile path was replaced by another mechanism,
         // so the Shortcuts/AppIntents action is no longer registered.

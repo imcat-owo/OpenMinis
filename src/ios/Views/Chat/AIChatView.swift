@@ -1416,8 +1416,7 @@ struct AIChatView: View {
                   let updatedId = note.object as? String,
                   updatedId == sid else { return }
             refreshTitlePillSession()
-            // R2-001: ChatStore.appendMessage (e.g. ActiveReach
-            // persistAssistantBubble) posts .sessionDidUpdate. Previously only
+            // R2-001: ChatStore.appendMessage posts .sessionDidUpdate. Previously only
             // the title pill refreshed, so an open transcript missed the new
             // bubble until leave/re-enter. Mirror onAppear-reuse: reload from
             // DB when the live VM is idle. reloadMessagesFromDB also self-

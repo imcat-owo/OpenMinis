@@ -615,7 +615,7 @@ struct QuietAppIcon: View {
 }
 
 enum QuietIconSlot: String, CaseIterable, Identifiable {
-    case decorate, appearance, active, skills, soul, memory, mcp, env
+    case decorate, appearance, skills, soul, memory, mcp, env
     case storage, shared, mounts, icloud, backup, permissions, lock
     case logs, about, privacy, feedback
     /// [T-user-manual 09-11] Settings → About section's 使用手册 row.
@@ -626,7 +626,6 @@ enum QuietIconSlot: String, CaseIterable, Identifiable {
         switch self {
         case .decorate: return "装扮"
         case .appearance: return "外观"
-        case .active: return "小梦主动"
         case .skills: return "技能"
         case .soul: return "Soul"
         case .memory: return "记忆"
@@ -650,7 +649,6 @@ enum QuietIconSlot: String, CaseIterable, Identifiable {
         switch self {
         case .decorate: return "paintpalette"
         case .appearance: return "paintbrush"
-        case .active: return "hand.wave"
         case .skills: return "puzzlepiece.extension"
         case .soul: return "sparkles"
         case .memory: return "brain.head.profile"

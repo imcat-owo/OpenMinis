@@ -1530,7 +1530,6 @@ final class BackgroundKeepAliveManager: NSObject, ObservableObject, CLLocationMa
         let remainStr = bgRemaining > 99999 ? "unlimited" : String(format: "%.0fs", bgRemaining)
         logger.info("[LiveActivity][update] src=\(source) sessions=\(count) ids=[\(idList)] appState=\(appState) silentAudio=\(silentAudio) bgRemaining=\(remainStr)")
         AgentLiveActivityManager.shared.updateActivity(sessions: buildSessionSnapshots())
-        ActiveReachStore.shared.considerKeepAlive()
     }
 
     /// [T-ios-live-activity-audio-toggle] Public accessor so the Live Activity

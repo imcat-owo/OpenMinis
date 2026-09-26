@@ -262,14 +262,6 @@
 		XMSTYLE007 /* AppearanceThemeLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = XMSTYLE107 /* AppearanceThemeLibrary.swift */; };
 		XMSTYLE004 /* ThemeOffload.m in Sources */ = {isa = PBXBuildFile; fileRef = XMSTYLE104 /* ThemeOffload.m */; };
 		XMSTYLE005 /* ThemeOffloadBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = XMSTYLE105 /* ThemeOffloadBridge.swift */; };
-		XMREACH001 /* ActiveReachConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = XMREACH101 /* ActiveReachConfig.swift */; };
-		XMREACH002 /* ActiveReachSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = XMREACH102 /* ActiveReachSettingsView.swift */; };
-		XMREACH003 /* ActiveReachWake.swift in Sources */ = {isa = PBXBuildFile; fileRef = XMREACH103 /* ActiveReachWake.swift */; };
-		XMREACH004 /* ActiveReachWakeIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = XMREACH104 /* ActiveReachWakeIntent.swift */; };
-		XMREACH005 /* ActiveReachScore.swift in Sources */ = {isa = PBXBuildFile; fileRef = XMREACH105 /* ActiveReachScore.swift */; };
-		XMREACH006 /* ActiveReachSend.swift in Sources */ = {isa = PBXBuildFile; fileRef = XMREACH106 /* ActiveReachSend.swift */; };
-		XMREACH007 /* ActiveReachKeepAlive.swift in Sources */ = {isa = PBXBuildFile; fileRef = XMREACH107 /* ActiveReachKeepAlive.swift */; };
-		XMREACH008 /* ActiveReachPresence.swift in Sources */ = {isa = PBXBuildFile; fileRef = XMREACH108 /* ActiveReachPresence.swift */; };
 		E5G000004 /* AgentActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5G000014 /* AgentActivityAttributes.swift */; };
 		E5GWF0003 /* GeminiWireFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5GWF0013 /* GeminiWireFormat.swift */; };
 		E5GWF0004 /* GeminiWireFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5GWF0013 /* GeminiWireFormat.swift */; };
@@ -1085,14 +1077,6 @@
 		XMSTYLE104 /* ThemeOffload.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ThemeOffload.m; sourceTree = "<group>"; };
 		XMSTYLE105 /* ThemeOffloadBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeOffloadBridge.swift; sourceTree = "<group>"; };
 		XMSTYLE106 /* ThemeOffload.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ThemeOffload.h; sourceTree = "<group>"; };
-		XMREACH101 /* ActiveReachConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveReachConfig.swift; sourceTree = "<group>"; };
-		XMREACH102 /* ActiveReachSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveReachSettingsView.swift; sourceTree = "<group>"; };
-		XMREACH103 /* ActiveReachWake.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveReachWake.swift; sourceTree = "<group>"; };
-		XMREACH104 /* ActiveReachWakeIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveReachWakeIntent.swift; sourceTree = "<group>"; };
-		XMREACH105 /* ActiveReachScore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveReachScore.swift; sourceTree = "<group>"; };
-		XMREACH106 /* ActiveReachSend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveReachSend.swift; sourceTree = "<group>"; };
-		XMREACH107 /* ActiveReachKeepAlive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveReachKeepAlive.swift; sourceTree = "<group>"; };
-		XMREACH108 /* ActiveReachPresence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveReachPresence.swift; sourceTree = "<group>"; };
 		E5QA0101 /* QuickActionRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionRouter.swift; sourceTree = "<group>"; };
 		E5QA0102 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		E5QA0103 /* QuickActionWorkflow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionWorkflow.swift; sourceTree = "<group>"; };
@@ -1862,12 +1846,6 @@
 				XMSTYLE101 /* AppearanceStudio.swift */,
 				XMSTYLE103 /* AppearanceThemePack.swift */,
 				XMSTYLE107 /* AppearanceThemeLibrary.swift */,
-				XMREACH101 /* ActiveReachConfig.swift */,
-				XMREACH103 /* ActiveReachWake.swift */,
-				XMREACH105 /* ActiveReachScore.swift */,
-				XMREACH106 /* ActiveReachSend.swift */,
-				XMREACH107 /* ActiveReachKeepAlive.swift */,
-				XMREACH108 /* ActiveReachPresence.swift */,
 				E5J000022 /* FileHandleSafeWrite.h */,
 				E5J000021 /* FileHandleSafeWrite.m */,
 				E5J000052 /* ObjCExceptionCatcher.h */,
@@ -2011,7 +1989,6 @@
 				E5SD00019 /* ShortcutRunTracker.swift */,
 				E5T00001A /* RetryRunIntent.swift */,
 				E5T00001B /* UserMessageEntity.swift */,
-				XMREACH104 /* ActiveReachWakeIntent.swift */,
 			);
 			path = Intents;
 			sourceTree = "<group>";
@@ -2308,7 +2285,6 @@
 				F1T0003E /* TTSFirstUseNudgeCard.swift */,
 				F1T00029 /* SystemVoiceEditorView.swift */,
 				XMSTYLE102 /* AppearanceStudioView.swift */,
-				XMREACH102 /* ActiveReachSettingsView.swift */,
 				E5P000012 /* EnvironmentVariablesView.swift */,
 				E5J000012 /* LogManagementView.swift */,
 				E5J000013 /* ConfigAuditView.swift */,
@@ -3059,14 +3035,6 @@
 				XMSTYLE007 /* AppearanceThemeLibrary.swift in Sources */,
 				XMSTYLE004 /* ThemeOffload.m in Sources */,
 				XMSTYLE005 /* ThemeOffloadBridge.swift in Sources */,
-				XMREACH001 /* ActiveReachConfig.swift in Sources */,
-				XMREACH002 /* ActiveReachSettingsView.swift in Sources */,
-				XMREACH003 /* ActiveReachWake.swift in Sources */,
-				XMREACH004 /* ActiveReachWakeIntent.swift in Sources */,
-				XMREACH005 /* ActiveReachScore.swift in Sources */,
-				XMREACH006 /* ActiveReachSend.swift in Sources */,
-				XMREACH007 /* ActiveReachKeepAlive.swift in Sources */,
-				XMREACH008 /* ActiveReachPresence.swift in Sources */,
 				E5G000004 /* AgentActivityAttributes.swift in Sources */,
 				E5AT00004 /* AudioTogglePlaybackIntent.swift in Sources */,
 				E5I000001 /* SpeechRecognitionManager.swift in Sources */,
