@@ -428,6 +428,7 @@ struct AppearanceStudioView: View {
         .appearancePage(.settings)
         .navigationTitle("装扮")
         .navigationBarTitleDisplayMode(.inline)
+        .listSectionSpacing(.compact)
         .onChange(of: wallpaperItem) { item in
             guard let item else { return }
             Task { await importImage(item) { studio.setWallpaper($0, for: wallpaperScope) } }

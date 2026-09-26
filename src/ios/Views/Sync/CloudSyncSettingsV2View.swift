@@ -69,7 +69,7 @@ struct CloudSyncSettingsV2View: View {
                     }
                 }
             } footer: {
-                Text("Uses this clone's own iCloud container, not the official Minis one. If CloudKit is unavailable, sync turns itself off so the app still opens.")
+                Text("Uses this clone's own iCloud container, not the official 我的小家 one. If CloudKit is unavailable, sync turns itself off so the app still opens.")
                     .font(.caption)
             }
 
@@ -197,7 +197,7 @@ struct CloudSyncSettingsV2View: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Friendly name shown to your other Minis devices.")
+            Text("Friendly name shown to your other 我的小家 devices.")
         }
     }
 

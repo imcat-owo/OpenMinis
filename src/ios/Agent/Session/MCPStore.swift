@@ -262,7 +262,7 @@ final class MCPStore: ObservableObject {
         var command: String?
         var args: [String]?
         var env: [String: String]?
-        var startupTimeoutSeconds: Int?   // Minis STDIO startup timeout; round-tripped verbatim
+        var startupTimeoutSeconds: Int?   // 我的小家 STDIO startup timeout; round-tripped verbatim
     }
 
     func load() {

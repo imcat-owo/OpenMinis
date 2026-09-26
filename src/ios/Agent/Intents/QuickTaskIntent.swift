@@ -52,7 +52,7 @@ enum QuickTask: String, AppEnum {
 /// Runs a predefined quick task — enables single-utterance Siri invocation.
 struct QuickTaskIntent: AppIntent {
     static var title: LocalizedStringResource = "Quick Task"
-    static var description = IntentDescription("Runs a predefined Minis task like sleep analysis, weather check, or morning briefing.")
+    static var description = IntentDescription("Runs a predefined 我的小家 task like sleep analysis, weather check, or morning briefing.")
     static var openAppWhenRun = false
 
     @Parameter(title: "Task")
@@ -181,7 +181,7 @@ struct QuickTaskIntent: AppIntent {
         if sendCompletionNotification {
             ShortcutNotification.post(
                 id: "shortcut-start-\(sid)",
-                title: AppLocalized("Minis: \(taskName)"),
+                title: AppLocalized("我的小家: \(taskName)"),
                 body: AppLocalized("\(modelName) is working on it…"),
                 sessionId: sid
             )
@@ -203,7 +203,7 @@ struct QuickTaskIntent: AppIntent {
             if sendCompletionNotification {
                 ShortcutNotification.post(
                     id: "shortcut-done-\(sid)",
-                    title: AppLocalized("Minis: \(taskName) Done"),
+                    title: AppLocalized("我的小家: \(taskName) Done"),
                     body: "\(modelName): \(String(responseText.prefix(200)))",
                     sessionId: sid
                 )
@@ -239,7 +239,7 @@ struct QuickTaskIntent: AppIntent {
             if capturedSendCompletionNotification {
                 ShortcutNotification.post(
                     id: "shortcut-done-\(capturedSid)",
-                    title: AppLocalized("Minis: \(capturedTaskName) Done"),
+                    title: AppLocalized("我的小家: \(capturedTaskName) Done"),
                     body: "\(capturedModelName): \(summary)",
                     sessionId: capturedSid
                 )
@@ -264,7 +264,7 @@ struct QuickTaskIntent: AppIntent {
     // `task` goes on the Summary line since it is the one required choice; the
     // rest are optional refinements under "Show More".
     static var parameterSummary: some ParameterSummary {
-        Summary("Run \(\.$task) in Minis") {
+        Summary("Run \(\.$task) in 我的小家") {
             \.$files
             \.$model
             \.$waitForResult

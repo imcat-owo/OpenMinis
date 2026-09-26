@@ -385,10 +385,10 @@ Do not create extraneous files: README.md, INSTALLATION_GUIDE.md, CHANGELOG.md, 
 ---
 name: minis-theme
 version: 1.1.0
-description: 设计并贴上 Minis 分身的 AI 主题包。当用户说做主题、换皮肤、改气泡、改 thinking 卡片、改壁纸、粉嫩主题、minis-theme、AppearanceStudio、主题包 JSON 时使用。不要问这是不是 PPT 或网页。
+description: 设计并贴上 我的小家 分身的 AI 主题包。当用户说做主题、换皮肤、改气泡、改 thinking 卡片、改壁纸、粉嫩主题、minis-theme、AppearanceStudio、主题包 JSON 时使用。不要问这是不是 PPT 或网页。
 ---
 
-# Minis 主题包
+# 我的小家 主题包
 
 分身有整套皮肤。用户说「做主题」就是这份，不是 PPT、不是网页。
 

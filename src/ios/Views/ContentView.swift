@@ -959,7 +959,7 @@ struct ContentView: View {
     /// Soul name shown as the sidebar title. Sourced from SOUL.md, falls
     /// back to "Minis". Refreshed whenever SoulStore posts .soulMdChanged.
     @State private var soulName: String = SoulStore.cachedMetadata.name.isEmpty
-        ? "Minis" : SoulStore.cachedMetadata.name
+        ? "我的小家" : SoulStore.cachedMetadata.name
     /// Subtitle state shown under the "Minis" sidebar title. nil hides the
     /// row; otherwise it renders as small capsules per type or a single
     /// status string. Refreshed by a 5s timer.
@@ -2747,7 +2747,7 @@ struct ContentView: View {
         // and can't drop a .soulMdChanged notification arriving during reconstruction.
         .onReceive(NotificationCenter.default.publisher(for: .soulMdChanged)) { _ in
             let n = SoulStore.cachedMetadata.name
-            soulName = n.isEmpty ? "Minis" : n
+            soulName = n.isEmpty ? "我的小家" : n
         }
     }
 
@@ -3488,29 +3488,20 @@ struct ContentView: View {
         .buttonStyle(.plain)
     }
 
-    /// [T-home-bottom-bar-skin] Theme-token background — NO hardcoded colour.
-    /// Reads the `.bottomBar` appearance scope: surface token for the fill,
-    /// and its own wallpaper slot (外观页 → 页面背景 → 壁纸用于 → 底部栏), so the
-    /// bar can take its own image; no image = pure token surface. Fully
-    /// transparent surfaces fall back to the list row fill so tabs never
-    /// float unbacked.
+    /// [T-home-bottom-bar-skin] #2 醒醒: 默认完全透明（无底色）；只有放了壁纸才出图。
+    /// 壁纸 scaledToFit + clipped 不撑满遮挡内容；图延伸到 home indicator（贴底，#8）。
     @ViewBuilder private var homeBottomBarBackground: some View {
         let studio = AppearanceStudio.shared
-        let surface = studio.color(.surface, scope: .bottomBar).opacity(studio.surfaceOpacity)
-        if studio.surfaceOpacity > 0.05 || studio.hasWallpaper(.bottomBar) {
-            ZStack {
-                if let wp = studio.wallpaper(for: .bottomBar) {
-                    Image(uiImage: wp)
-                        .resizable()
-                        .scaledToFill()
-                        .clipped()
-                    studio.color(.canvas, scope: .bottomBar)
-                        .opacity(studio.wallpaperShade)
-                }
-                surface
-            }
+        if let wp = studio.wallpaper(for: .bottomBar) {
+            Image(uiImage: wp)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+                .overlay(studio.color(.canvas, scope: .bottomBar).opacity(studio.wallpaperShade))
+                .ignoresSafeArea(edges: .bottom)
         } else {
-            MinisThemeList.rowFill.opacity(0.92)
+            Color.clear
         }
     }
 
@@ -4028,7 +4019,7 @@ struct ContentView: View {
                 .padding(.bottom, 4)
 
             VStack(spacing: 8) {
-                Text("Welcome to Minis")
+                Text("Welcome to 我的小家")
                     .font(.title2.bold())
                 Text("Your first On-Device Agent is almost ready.")
                     .font(.subheadline)
@@ -5358,7 +5349,7 @@ struct ContentView: View {
                 done += 1
                 if msg.isToolResultOnly { continue }
 
-                let role = msg.role == .user ? "User" : "Minis"
+                let role = msg.role == .user ? "User" : "我的小家"
                 let time = timeFmt.string(from: msg.createdAt)
                 var parts: [String] = []
                 for part in msg.parts {
@@ -7517,7 +7508,7 @@ private struct SettingsSheet: View {
                         AboutView()
                     } label: {
                         Label {
-                            Text("About Minis")
+                            Text("About 我的小家")
                         } icon: {
                             QuietAppIcon(id: QuietIconSlot.about.id, systemName: QuietIconSlot.about.systemName)
                         }
@@ -7747,7 +7738,7 @@ private struct SettingsSheet: View {
         components.scheme = "mailto"
         components.path = "dev@openminis.app"
         components.queryItems = [
-            URLQueryItem(name: "subject", value: "Minis Feedback"),
+            URLQueryItem(name: "subject", value: "我的小家 Feedback"),
             URLQueryItem(name: "body", value: body),
         ]
         return components.url
@@ -7775,7 +7766,7 @@ private struct SettingsSheet: View {
         |-------|-------|
         | Platform | iOS |
         | OS Version | iOS \(iosVersion) |
-        | Minis Version | \(appVersion) (build \(build)) |
+        | 我的小家 Version | \(appVersion) (build \(build)) |
         | Device Model | \(device) |
 
         ## 🔁 Steps to Reproduce

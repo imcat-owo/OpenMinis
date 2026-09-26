@@ -231,7 +231,7 @@ private struct BridgedAssistantHeaderV3: View {
     var body: some View {
         HStack(spacing: 10) {
             PersonAvatarView(kind: .assistant, size: 38)
-            Text(soulMeta.name.isEmpty ? "Minis" : soulMeta.name)
+            Text(soulMeta.name.isEmpty ? "我的小家" : soulMeta.name)
                 .font(.body.weight(.semibold))
                 .foregroundStyle(ChatColors.primaryText)
         }

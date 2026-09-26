@@ -533,7 +533,7 @@ struct ToolLiveSheet: View {
                 // out to the step pill's trailing column (under the
                 // elapsed-duration "5s" text) so it lives next to where the
                 // user is already scanning timing info.
-                Text("Minis Computer")
+                Text("我的小家 Computer")
                     .font(.system(size: 15, weight: .semibold))
 
                 Spacer()
@@ -1978,16 +1978,16 @@ struct ToolLiveSheet: View {
 
     private var toolTitle: String {
         switch block.kind {
-        case .shellTool: return "Minis is using Shell"
-        case .fileReadTool: return "Minis is reading File"
-        case .fileWriteTool: return "Minis is using Editor"
-        case .fileEditTool: return "Minis is editing File"
-        case .browserTool: return "Minis is using Browser"
-        case .readImageTool: return "Minis is reading Image"
-        case .memoryTool: return "Minis is using Memory"
-        case .info: return "Minis"
-        case .text: return "Minis"
-        case .thinking: return "Minis"
+        case .shellTool: return "我的小家 is using Shell"
+        case .fileReadTool: return "我的小家 is reading File"
+        case .fileWriteTool: return "我的小家 is using Editor"
+        case .fileEditTool: return "我的小家 is editing File"
+        case .browserTool: return "我的小家 is using Browser"
+        case .readImageTool: return "我的小家 is reading Image"
+        case .memoryTool: return "我的小家 is using Memory"
+        case .info: return "我的小家"
+        case .text: return "我的小家"
+        case .thinking: return "我的小家"
         }
     }
 

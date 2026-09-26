@@ -43,7 +43,7 @@ struct AboutView: View {
                                     .stroke(Color(UIColor.separator), lineWidth: 0.5)
                             )
                     }
-                    Text("Minis")
+                    Text("我的小家")
                         .font(.title2.bold())
                     Text("Version \(appVersion)")
                         .font(.subheadline)
@@ -53,7 +53,7 @@ struct AboutView: View {
                         .foregroundStyle(.tertiary)
                         // Selectable so it can be copied into a bug report.
                         .textSelection(.enabled)
-                    Text("Minis is Your Fully Local, Fully Private On-Device Agent.")
+                    Text("我的小家 is Your Fully Local, Fully Private On-Device Agent.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }

@@ -156,9 +156,10 @@ private struct UserBubbleSurface: ViewModifier {
             // already carries it), with ONE untinted glass layer OVER the fill
             // for the highlight/edge. Both bubbles now respond to the slider
             // identically: slider = how see-through the coloured surface is.
+            // #3 醒醒: 跟 AI 气泡一样，纯实心主题色——去掉 Liquid Glass（玻璃调高亮度刺眼）。
+            // 透明度滑杆仍生效（ChatColors.userBubble 自带 alpha）。
             content
                 .background(shape.fill(ChatColors.userBubble))
-                .glassEffect(.regular, in: shape)
         } else {
             content.background(shape.fill(ChatColors.userBubble))
         }
