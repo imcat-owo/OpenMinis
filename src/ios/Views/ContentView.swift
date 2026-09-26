@@ -4165,7 +4165,8 @@ struct ContentView: View {
         .padding(.leading, 12)
         .padding(.trailing, 8)
         .frame(height: 36)
-        .background(Capsule().fill(MinisThemeList.rowFill))
+        .background(Capsule().fill(AppearanceStudio.shared.color(.searchField, scope: .home)
+            .opacity(AppearanceStudio.shared.surfaceOpacity)))
         // [T-home-top-search] Permanent strip: token rowFill capsule, no
         // glass surface (it used to be a FAB-morph). No auto-focus on appear
         // — the keyboard only comes up when she taps it (or ⌘F).

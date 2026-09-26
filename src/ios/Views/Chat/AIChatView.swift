@@ -103,7 +103,7 @@ enum ChatColors {
         studio.bubbleOpacity
     }
     static var toolBg: Color {
-        studio.color(.mutedSurface, scope: .chat).opacity(studio.surfaceOpacity)
+        studio.color(.toolCard, scope: .chat).opacity(studio.surfaceOpacity)
     }
     static var toolBorder: Color { studio.color(.border, scope: .chat).opacity(0.75) }
     static var accent: Color { studio.color(.accent, scope: .chat) }

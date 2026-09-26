@@ -6,6 +6,8 @@ struct AppearanceStudioView: View {
     @ObservedObject private var studio = AppearanceStudio.shared
     @State private var variant: AppearanceVariant = .light
     @State private var wallpaperScope: AppearanceScope = .global
+    /// 色盘作用域：全局 = 底色盘；选某一页 = 只给该页单独换色（覆盖全局，可恢复继承）。
+    @State private var paletteScope: AppearanceScope = .global
     @State private var wallpaperItem: PhotosPickerItem?
     @State private var userAvatarItem: PhotosPickerItem?
     @State private var assistantAvatarItem: PhotosPickerItem?
@@ -80,7 +82,7 @@ struct AppearanceStudioView: View {
             }
 
             CollapsibleSection(title: "色盘",
-                               footer: "这些颜色会流过每一页、卡片、文字、气泡和输入框。浅色和深色会跟着系统外观切换。",
+                               footer: "每行下面标了它管哪里。「作用于」可以只给某一页单独换色，该页会盖过全局，点「恢复继承」取消。浅色和深色会跟着系统外观切换。",
                                isExpanded: $showPalette) {
                 Picker("色盘", selection: $variant) {
                     ForEach(AppearanceVariant.allCases) { item in
@@ -89,17 +91,36 @@ struct AppearanceStudioView: View {
                 }
                 .pickerStyle(.segmented)
 
+                Picker("作用于", selection: $paletteScope) {
+                    ForEach(AppearanceScope.allCases) { item in
+                        Text(item.title).tag(item)
+                    }
+                }
+
                 ForEach(AppearanceColorRole.allCases.filter { $0 != .userBubble && $0 != .assistantBubble }) { role in
-                    HStack(spacing: 12) {
-                        ColorPicker(role.title,
-                                    selection: studio.colorBinding(role,
-                                                                   scope: .global,
-                                                                   variant: variant),
-                                    supportsOpacity: false)
-                        Text("#\(studio.hex(role, scope: .global, variant: variant))")
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(studio.color(.secondaryText, scope: .global,
-                                                          variant: variant))
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 12) {
+                            ColorPicker(role.title,
+                                        selection: studio.colorBinding(role,
+                                                                       scope: paletteScope,
+                                                                       variant: variant),
+                                        supportsOpacity: false)
+                            Text("#\(studio.hex(role, scope: paletteScope, variant: variant))")
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(studio.color(.secondaryText, scope: paletteScope,
+                                                              variant: variant))
+                            Spacer()
+                            if paletteScope != .global,
+                               studio.hasOverride(role, scope: paletteScope, variant: variant) {
+                                Button("恢复继承") {
+                                    studio.clearOverride(role, scope: paletteScope, variant: variant)
+                                }
+                                .font(.caption)
+                            }
+                        }
+                        Text(role.hint)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
                     }
                 }
             }

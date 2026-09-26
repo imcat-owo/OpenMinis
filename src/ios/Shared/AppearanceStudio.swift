@@ -32,6 +32,7 @@ enum AppearanceColorRole: String, CaseIterable, Identifiable {
     case canvas, surface, raised, mutedSurface
     case primaryText, secondaryText
     case accent, userBubble, assistantBubble, input, border
+    case searchField, toolCard
     case success, warning, destructive
 
     var id: String { rawValue }
@@ -48,9 +49,34 @@ enum AppearanceColorRole: String, CaseIterable, Identifiable {
         case .assistantBubble: return "AI 气泡"
         case .input: return "输入框"
         case .border: return "边线"
+        case .searchField: return "搜索栏"
+        case .toolCard: return "工具卡"
         case .success: return "成功"
         case .warning: return "警告"
         case .destructive: return "危险"
+        }
+    }
+
+    /// Where this role actually paints — shown under each 色盘 row so the
+    /// mapping is unambiguous ("调色的时候对应的地方准确一点").
+    var hint: String {
+        switch self {
+        case .canvas: return "每页底衬，卡片间隙和空区透出"
+        case .surface: return "卡片背景：设置卡片、会话列表、浮层卡片"
+        case .raised: return "浮层：弹窗、菜单、悬浮面板"
+        case .mutedSurface: return "浅底小组件：输入框图标等"
+        case .primaryText: return "主文字：标题、正文"
+        case .secondaryText: return "次文字：说明、时间戳"
+        case .accent: return "强调色：按钮、选中、开关"
+        case .userBubble: return "你的聊天气泡"
+        case .assistantBubble: return "AI 聊天气泡"
+        case .input: return "聊天输入框"
+        case .border: return "分隔线、卡片描边"
+        case .searchField: return "首页顶部搜索栏"
+        case .toolCard: return "聊天工具卡：终端、浏览器、工具调用"
+        case .success: return "成功状态（绿）"
+        case .warning: return "警告状态（黄）"
+        case .destructive: return "危险操作（红）"
         }
     }
 }
@@ -415,14 +441,18 @@ private enum AppearancePaletteBook {
         .canvas: "FFF8F4", .surface: "FFFDFC", .raised: "FFFFFF",
         .mutedSurface: "F8ECE8", .primaryText: "3E312B", .secondaryText: "8D786F",
         .accent: "D4778B", .userBubble: "F6DDE3", .assistantBubble: "FFFDFC",
-        .input: "FFFBF8", .border: "EADAD3", .success: "6E987A",
+        .input: "FFFBF8", .border: "EADAD3",
+        .searchField: "FFFDFC", .toolCard: "F8ECE8",
+        .success: "6E987A",
         .warning: "C9956A", .destructive: "C75D5D"
     ]
     static let dark: [AppearanceColorRole: String] = [
         .canvas: "1B1716", .surface: "25201E", .raised: "302925",
         .mutedSurface: "332824", .primaryText: "F5ECE7", .secondaryText: "BCAAA1",
         .accent: "E09AAA", .userBubble: "573C43", .assistantBubble: "25201E",
-        .input: "2B2522", .border: "493C37", .success: "8EB69A",
+        .input: "2B2522", .border: "493C37",
+        .searchField: "25201E", .toolCard: "332824",
+        .success: "8EB69A",
         .warning: "D4B07A", .destructive: "E18484"
     ]
 }
