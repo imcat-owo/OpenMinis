@@ -530,7 +530,7 @@ struct ToolCapsuleView: View {
             }
             .padding(.horizontal, 12)
             .frame(height: 36)
-            .background(Color(UIColor.systemGray6))
+            .background(ChatColors.toolBg)
             .clipShape(Capsule())
             .overlay(
                 Group {
