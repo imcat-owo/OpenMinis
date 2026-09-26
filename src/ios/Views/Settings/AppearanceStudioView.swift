@@ -428,7 +428,7 @@ struct AppearanceStudioView: View {
         .appearancePage(.settings)
         .navigationTitle("装扮")
         .navigationBarTitleDisplayMode(.inline)
-        .listSectionSpacing(.compact)
+        .modifier(CompactListSections())
         .onChange(of: wallpaperItem) { item in
             guard let item else { return }
             Task { await importImage(item) { studio.setWallpaper($0, for: wallpaperScope) } }
@@ -691,6 +691,19 @@ private struct CollapsibleSection<Content: View>: View {
             if let footer, isExpanded {
                 Text(footer)
             }
+        }
+    }
+}
+
+
+/// #11 装扮页 section 紧凑间距。`.listSectionSpacing` 是 iOS 17+ API，
+/// 部署目标 16.0 —— 低版本退回默认间距，不炸编译。
+private struct CompactListSections: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 17.0, *) {
+            content.listSectionSpacing(.compact)
+        } else {
+            content
         }
     }
 }
