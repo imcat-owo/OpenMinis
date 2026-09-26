@@ -64,6 +64,7 @@ struct ScheduledPromptsView: View {
                 ScheduledPromptEditor(prompt: p)
             }
         }
+        .listRowBackground(AppearanceStudio.shared.color(.surface, scope: .settings))
     }
 
     private func row(_ p: ScheduledPrompt) -> some View {

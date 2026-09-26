@@ -112,6 +112,7 @@ struct MCPIntegrationsView: View {
         .sheet(item: $toolsServer) { server in
             MCPToolsSheet(serverName: server.id)
         }
+        .settingsPage()
     }
 
     private var emptyState: some View {

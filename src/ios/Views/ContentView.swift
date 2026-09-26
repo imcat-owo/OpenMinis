@@ -7141,6 +7141,7 @@ private struct AppearanceSettingsView: View {
         .navigationTitle("Appearance")
         .navigationBarTitleDisplayMode(.inline)
         .appearancePage(.settings)
+        .listRowBackground(AppearanceStudio.shared.color(.surface, scope: .settings))
         .background(InteractivePopGestureDisabler())
     }
 
@@ -7549,6 +7550,7 @@ private struct SettingsSheet: View {
 
             }
             .appearancePage(.settings)
+            .listRowBackground(AppearanceStudio.shared.color(.surface, scope: .settings))
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

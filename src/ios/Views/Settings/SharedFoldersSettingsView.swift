@@ -43,6 +43,7 @@ struct SharedFoldersSettingsView: View {
                 }
             }
         }
+        .settingsPage()
         .navigationTitle("Shared Folders")
         .navigationBarTitleDisplayMode(.inline)
     }

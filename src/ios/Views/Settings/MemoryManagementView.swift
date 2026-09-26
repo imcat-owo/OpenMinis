@@ -95,6 +95,7 @@ struct MemoryManagementView: View {
         .onReceive(NotificationCenter.default.publisher(for: .memoryFilesDidChange)) { _ in
             loadFiles()
         }
+        .settingsPage()
     }
 
     @available(iOS 17.0, *)

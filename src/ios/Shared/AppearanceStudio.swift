@@ -554,6 +554,16 @@ extension View {
     func appearancePage(_ scope: AppearanceScope) -> some View {
         modifier(AppearancePageModifier(scope: scope))
     }
+
+    /// One-line theming for a settings-scope page: palette canvas/accent/text
+    /// + transparent nav bar (via appearancePage) + List section cards that
+    /// follow the palette "卡片" (surface) color instead of the system
+    /// grouped background — so the 色盘 卡片 row actually controls them.
+    func settingsPage() -> some View {
+        self
+            .appearancePage(.settings)
+            .listRowBackground(AppearanceStudio.shared.color(.surface, scope: .settings))
+    }
 }
 
 struct PersonAvatarView: View {

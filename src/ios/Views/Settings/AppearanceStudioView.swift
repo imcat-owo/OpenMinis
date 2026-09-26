@@ -480,6 +480,7 @@ struct AppearanceStudioView: View {
         } message: {
             Text(errorText ?? "")
         }
+        .listRowBackground(AppearanceStudio.shared.color(.surface, scope: .settings))
     }
 
     private var themePreview: some View {

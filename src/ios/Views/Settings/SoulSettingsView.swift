@@ -149,6 +149,7 @@ struct SoulSettingsView: View {
                     .transition(.opacity)
             }
         }
+        .settingsPage()
     }
 
     // MARK: - Subviews

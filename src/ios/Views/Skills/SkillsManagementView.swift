@@ -177,6 +177,7 @@ struct SkillsManagementView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
+        .settingsPage()
         .animation(.spring(response: 0.3), value: forceSyncAllToast)
     }
 

@@ -224,6 +224,7 @@ struct ModelGroupsView: View {
         } message: {
             Text("Enter a name for the new model group.")
         }
+        .settingsPage()
     }
 
     // MARK: - Actions

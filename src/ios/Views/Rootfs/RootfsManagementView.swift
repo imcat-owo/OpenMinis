@@ -188,6 +188,7 @@ struct RootfsManagementView: View {
                 FileBrowserView(rootPath: RootfsManager.shared.dataPath, rootLabel: "/")
             }
         }
+        .settingsPage()
     }
 }
 

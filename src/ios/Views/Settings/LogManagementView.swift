@@ -79,6 +79,7 @@ struct LogManagementView: View {
             tab = (initialTab == "crashes") ? "logs" : initialTab
             vm.load()
         }
+        .settingsPage()
     }
 
     @ViewBuilder

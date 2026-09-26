@@ -94,6 +94,7 @@ struct AboutView: View {
                 }
             }
         }
+        .settingsPage()
         .navigationTitle("About")
         .navigationBarTitleDisplayMode(.inline)
     }

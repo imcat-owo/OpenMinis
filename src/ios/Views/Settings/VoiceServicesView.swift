@@ -74,6 +74,7 @@ struct VoiceServicesView: View {
                 SystemVoiceEditorView()
             }
         }
+        .listRowBackground(AppearanceStudio.shared.color(.surface, scope: .settings))
     }
 
     // MARK: Services

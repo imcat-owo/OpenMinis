@@ -31,6 +31,7 @@ struct UserManualView: View {
                     .padding(.vertical, 12)
             }
         }
+        .settingsPage()
         .frame(maxWidth: .infinity)
         .background(MinisTheme.canvas.ignoresSafeArea())
         .navigationTitle("使用手册")

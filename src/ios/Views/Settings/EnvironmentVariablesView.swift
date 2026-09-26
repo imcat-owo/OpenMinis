@@ -135,6 +135,7 @@ struct EnvironmentVariablesView: View {
                 }
             )
         }
+        .settingsPage()
     }
 
     @ViewBuilder

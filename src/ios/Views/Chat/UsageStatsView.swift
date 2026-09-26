@@ -276,6 +276,7 @@ struct UsageStatsView: View {
         .task {
             await vm.load()
         }
+        .settingsPage()
     }
 
     @ViewBuilder

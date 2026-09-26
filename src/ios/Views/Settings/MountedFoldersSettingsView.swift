@@ -166,6 +166,7 @@ struct MountedFoldersSettingsView: View {
         } message: {
             Text(errorText ?? "")
         }
+        .settingsPage()
     }
 
     /// Build the MountDetailView context for an external-mount entry.

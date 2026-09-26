@@ -199,6 +199,7 @@ struct CloudSyncSettingsV2View: View {
         } message: {
             Text("Friendly name shown to your other 我的小家 devices.")
         }
+        .settingsPage()
     }
 
     /// [T-ios-migration-timer-sessionlist-uaf-crash] Self-cancelling 5s refresh loop

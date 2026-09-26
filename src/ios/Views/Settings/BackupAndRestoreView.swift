@@ -72,6 +72,7 @@ struct BackupAndRestoreView: View {
                     .accessibilityHidden(tab != .restore)
             }
         }
+        .settingsPage()
         .navigationTitle("Backup & Restore")
         .navigationBarTitleDisplayMode(.inline)
     }

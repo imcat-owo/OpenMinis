@@ -150,6 +150,7 @@ struct StorageManagementView: View {
         .navigationTitle("Storage")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { vm.load() }
+        .settingsPage()
     }
 
     private func storageRow(icon: String, color: Color, label: String, value: String) -> some View {

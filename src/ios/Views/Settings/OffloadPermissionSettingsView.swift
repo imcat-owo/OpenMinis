@@ -88,6 +88,7 @@ struct OffloadPermissionSettingsView: View {
                 }
             }
         }
+        .settingsPage()
     }
 
     private var settingsCommands: [OffloadCommandInfo] {
