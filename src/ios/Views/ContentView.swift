@@ -1333,371 +1333,16 @@ struct ContentView: View {
     }
 
     var body: some View {
-        GeometryReader { geo in
-            let wide = isIPad && geo.size.width >= compactThreshold
-            Group {
-                if wide {
-                    splitLayout
-                } else {
-                    stackLayout
-                }
-            }
-            .overlay(alignment: .top) {
-                if let toast = forceSyncToast {
-                    ForceSyncToastBanner(text: toast)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                        .padding(.top, 8)
-                }
-            }
-            .animation(.easeInOut(duration: 0.25), value: forceSyncToast)
-            .onChange(of: wide) { newWide in
-                isWideLayout = newWide
-            }
-            .onAppear {
-                isWideLayout = wide
-                wireMenuActions()
-            }
-        }
-        .appearancePage(.home)
-        .onReceive(
-            NotificationCenter.default.publisher(for: .sessionDidCreate),
-            perform: handleSessionCreatedForPendingFolder
-        )
-        .onReceive(NotificationCenter.default.publisher(for: .newChatRequested)) { _ in
-            handleNewChatRequest()
-        }
-        // Cold-launch belt-and-braces: a Home Screen Quick Action that
-        // fires before `.onReceive(.newChatRequested)` is attached
-        // (WindowGroup still mounting) would otherwise be lost. The
-        // router bumps `newChatTrigger` whenever it handles a shortcut.
-        //
-        // `quickActionRouter` is an `@ObservedObject`, so SwiftUI re-runs
-        // body on every bump and `onChange` actually fires. The
-        // `consumedQuickActionTrigger` state below tracks the last value
-        // we've already routed — on cold launch the router might bump to
-        // 1 (or higher, if the user invokes shortcuts multiple times
-        // before the WindowGroup mounts) BEFORE our `.onAppear` runs;
-        // we therefore also check the initial value on appear and route
-        // any unconsumed bumps then.
-        .onChange(of: quickActionRouter.newChatTrigger) { newValue in
-            guard newValue != consumedQuickActionTrigger else { return }
-            consumedQuickActionTrigger = newValue
-            handleNewChatRequest()
-        }
-        .onReceive(QuickActionWorkflow.shared.$state) { newState in
-            // Workflow advanced to pendingDispatch (either same-runloop
-            // because we were already home, or after markHome fired
-            // from a navigation change). Open the new session now.
-            if case .pendingDispatch = newState {
-                openSessionForPendingQuickAction()
-            }
-        }
-        .onAppear {
-            if quickActionRouter.newChatTrigger != consumedQuickActionTrigger {
-                consumedQuickActionTrigger = quickActionRouter.newChatTrigger
-                // Defer one runloop so the NavigationStack body has a
-                // chance to attach `$navigationPath` before we append to
-                // it — otherwise the append on a freshly-mounted stack
-                // can be lost.
-                DispatchQueue.main.async {
-                    handleNewChatRequest()
-                }
-            }
-            // The Appearance language picker wrote "pendingSettingsReopen"
-            // right before changing appLanguage, which forced the root
-            // `.id(appLanguage)` rebuild that just dropped + re-mounted us.
-            // Reopen the Settings sheet so the user lands back where they
-            // were instead of stranded on the chat list. SettingsSheet's
-            // own onAppear pushes the saved destination onto its navPath.
-            if UserDefaults.standard.string(forKey: "pendingSettingsReopen") != nil {
-                DispatchQueue.main.async {
-                    activeToolSheet = .settings
-                }
-            }
-            // [T-ios-bg-nav-push-watchdog] Backstop for the scenePhase flush.
-            // `.onChange(of: scenePhase)` only fires on a TRANSITION, so a
-            // deferral that happened before this view mounted — a cold launch
-            // straight into the background, or a root remount (the
-            // `.id(appLanguage)` rebuild above) — would leave the push stranded
-            // with no later transition to release it. Deferred one runloop for
-            // the same reason the quick-action path above is: the
-            // NavigationStack must have attached `$navigationPath` first.
-            DispatchQueue.main.async {
-                flushPendingBackgroundNavigation()
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .sessionDidCreate)) { note in
-            guard isWideLayout, let newId = note.object as? String else { return }
-            let noteDraftId = (note.userInfo as? [String: String])?["draftId"]
-            draftLog.info("🔑DRAFT sessionDidCreate realId=\(newId) noteDraftId=\(noteDraftId ?? "nil") selId=\(selectedSessionId ?? "nil") curReal=\(newSessionRealId ?? "nil") curDraft=\(activeDraftId ?? "nil")")
-            // Verify this notification came from the currently active draft.
-            // A late notification from a previous (now-destroyed) draft must be ignored.
-            guard let selId = selectedSessionId, Self.isNewSessionId(selId),
-                  noteDraftId == selId else {
-                draftLog.info("🔑DRAFT sessionDidCreate IGNORED (draftId mismatch or not a draft)")
-                // [T-ios-state-publish-offmain-crash] ChatStore (an actor) posts
-                // .sessionDidCreate/.sessionDidUpdate from its background
-                // executor; NotificationCenter delivers synchronously on that
-                // thread, so this onReceive closure can run off-main. A bare
-                // Task{} started here inherits the (background) execution context,
-                // so `sessions =` (a @State write) lands off-main → "Publishing
-                // changes from background threads" + AttributeGraph corruption of
-                // the [ChatSession]/[String:ChatSession] state it deep-compares,
-                // crashing in ChatSession.== / deinit during flushTransactions.
-                // This onReceive can be delivered off-main, so hop explicitly —
-                // refreshSessionList's @State writes must land on the main thread.
-                Task { @MainActor in
-                    refreshSessionList()
-                }
-                return
-            }
-            newSessionRealId = newId
-            activeDraftId = selId
-            draftLog.info("🔑DRAFT sessionDidCreate ACCEPTED newSessionRealId=\(newId) activeDraftId=\(selId)")
-            // [T-ios-state-publish-offmain-crash] force main-thread @State write
-            Task { @MainActor in
-                refreshSessionList()
-            }
-        }
-        .onReceive(
-            // Throttle (not debounce): session-list updates are infrequent (one
-            // per agent tool round, seconds apart), but a long multi-tool task
-            // emits a steady stream of them. `.debounce` was reset by every new
-            // event, so during a continuously-running task the list NEVER
-            // refreshed until the task fully stopped — the row stayed on its
-            // stale preview ("No messages yet") the whole time. `.throttle`
-            // fires the first event right away and then at most once per second,
-            // so the preview keeps up with each tool round without thrashing
-            // `listSessions`.
-            NotificationCenter.default.publisher(for: .sessionDidUpdate)
-                .throttle(for: .seconds(1), scheduler: RunLoop.main, latest: true)
-        ) { _ in
-            // [T-ios-state-publish-offmain-crash] force main-thread @State write
-            Task { @MainActor in
-                refreshSessionList()
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .moveInputToSession)) { note in
-            guard let targetId = (note.userInfo as? [String: String])?["targetId"] else { return }
-            // Skip navigation if the target session is already visible
-            if isWideLayout {
-                guard selectedSessionId != targetId && newSessionRealId != targetId else { return }
-                // Wide layout replaces selection — no stack to worry about
-                openSession(targetId)
-            } else {
-                // [T-ios-moveto-transfer-race] No early-return when the target
-                // already reads as current: a swallowed push leaves
-                // `currentStackSessionId` set to a target that never appeared,
-                // and bailing here is exactly what made a retry do nothing.
-                // switchToSession is idempotent, so re-running it for a target
-                // that genuinely is on screen is harmless.
-                switchToSession(targetId)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .openSessionFromIntent)) { note in
-            guard let sessionId = (note.userInfo as? [String: String])?["sessionId"] else { return }
-            // [T-notification-tap-vs-launch-session] Warm path owns this
-            // navigation: drop the cold-launch buffer copy and stamp the
-            // handling time so an in-flight launch `.task` (the post can land
-            // during its `await listSessions()`) doesn't clobber the target
-            // session with the Launch Session default afterwards.
-            NotificationNavigationStore.shared.markHandled()
-            // Skip navigation if the target session is already visible
-            if isWideLayout {
-                guard selectedSessionId != sessionId && newSessionRealId != sessionId else { return }
-                openSession(sessionId)
-            } else {
-                // [T-ios-moveto-transfer-race] Same atomic replacement as the
-                // move path — the old animated-pop-then-delayed-push had the
-                // same swallowed-push failure mode here.
-                guard currentStackSessionId != sessionId else { return }
-                switchToSession(sessionId)
-            }
-        }
-        // [T-home-bottom-bar][v3] The old fullScreenCover terminal is gone —
-        // the terminal now pushes from Settings → Agent Runtime; AIChatView
-        // keeps its own terminal entry.
-        .sheet(isPresented: $showAlarmList, onDismiss: { fetchAlarmsIfNeeded() }) {
-            AlarmListView()
-        }
-        .sheet(item: $activeToolSheet) { sheet in
-            switch sheet {
-            case .settings:
-                SettingsSheet(browserPool: browserPool) // sheet keeps its own stack
-            case .rootfsManagement:
-                NavigationStack {
-                    RootfsManagementView()
-                        .toolbar {
-                            ToolbarItem(placement: .topBarTrailing) {
-                                Button("Done") { activeToolSheet = nil }
-                            }
-                        }
-                }
-            case .browser:
-                BrowserSheetView(pool: browserPool)
-            case .browserManagement:
-                NavigationStack {
-                    BrowserManagementView(pool: browserPool)
-                }
-            case .syncMigrationDetail:
-                NavigationStack {
-                    SyncMigrationDetailView()
-                        .toolbar {
-                            ToolbarItem(placement: .topBarTrailing) {
-                                Button("Done") { activeToolSheet = nil }
-                            }
-                        }
-                }
-            }
-        }
-        // Something else is taking over the screen (an incoming share, a
-        // WebApp deep link, a `.minisbak` opened from Files). iOS will not
-        // present a second sheet from the same root while one is up, so a tool
-        // sheet left open here silently swallows the new presentation — which
-        // is exactly how opening a backup while sitting in Settings did
-        // nothing at all. Clearing it lets the incoming content surface.
-        .onReceive(NotificationCenter.default.publisher(for: .dismissAllImmersivePresentations)) { _ in
-            if activeToolSheet != nil { activeToolSheet = nil }
-        }
-        .sheet(item: $sessionToDelete) { session in
-            DeleteConfirmSheet(info: $singleDeleteInfo, isLoading: false) {
-                print("[DELETE] onDelete called for session: \(session.id)")
-                deleteSession(session)
-                sessionToDelete = nil
-                singleDeleteInfo = nil
-            }
-            .onAppear {
-                print("[DELETE] Sheet appeared. singleDeleteInfo is \(singleDeleteInfo == nil ? "nil" : "non-nil, sessionCount=\(singleDeleteInfo!.sessionCount)")")
-            }
-            .presentationDetents([.medium])
-        }
-        .sheet(item: $sessionToEdit) { session in
-            SessionEditSheet(session: session) { newTitle, newCategory in
-                // [T-ios-state-publish-offmain-crash] @MainActor so the @State
-                // write after the actor-hop await stays on the main thread.
-                Task { @MainActor in
-                    await ChatStore.shared.updateSessionTitle(session.id, title: newTitle, category: newCategory)
-                    refreshSessionList()
-                }
-                sessionToEdit = nil
-            }
-            .presentationDetents([.medium])
-        }
-        .sheet(isPresented: $showDeleteConfirm, onDismiss: {
-            if deleteInfo == nil {
-                // Deletion was performed — reset selection mode after sheet is fully dismissed
-                isSelecting = false
-                selectedIds.removeAll()
-            } else {
-                // Cancelled — a pending delete-folder-with-sessions must not
-                // linger and attach itself to a later unrelated delete.
-                pendingDeleteFolderId = nil
-            }
-        }) {
-            DeleteConfirmSheet(info: $deleteInfo, isLoading: isComputingDelete) {
-                deleteSelectedSessions()
-                showDeleteConfirm = false
-            }
-            .presentationDetents([.medium])
-        }
-        .sheet(isPresented: $showExportPreview) {
-            ExportPreviewSheet(fileURL: exportFileURL, previewURL: exportPreviewURL, summary: exportSummary)
-        }
-        .sheet(item: $folderPickerRequest, onDismiss: {
-            // Mirror the delete sheet's pattern (see the comment near
-            // computeDeleteInfo): selection state is reset only after the
-            // sheet is fully dismissed to avoid animation conflicts.
-            if folderMoveApplied {
-                folderMoveApplied = false
-                isSelecting = false
-                selectedIds.removeAll()
-            }
-        }) { req in
-            FolderPickerSheet(
-                items: folderPickerItems(),
-                sessionIds: Array(req.sessionIds),
-                anyFiled: req.anyFiled
-            ) { choice in
-                Task { @MainActor in
-                    switch choice {
-                    case .existing(let folderId):
-                        await ChatStore.shared.setFolder(folderId, forSessions: Array(req.sessionIds))
-                    case .create(let name, let desc):
-                        let folder = await ChatStore.shared.createFolder(name: name, desc: desc)
-                        await ChatStore.shared.setFolder(folder.id, forSessions: Array(req.sessionIds))
-                    case .removeFromFolder:
-                        await ChatStore.shared.setFolder(nil, forSessions: Array(req.sessionIds))
-                    }
-                    refreshSessionList()
-                }
-                if req.fromMultiSelect { folderMoveApplied = true }
-                folderPickerRequest = nil
-            }
-            .presentationDetents([.medium, .large])
-        }
-        .modifier(FolderAlertsModifier(
-            folderToRename: $folderToRename,
-            renameFolderText: $renameFolderText,
-            renameFolderDesc: $renameFolderDesc,
-            folderToDissolve: $folderToDissolve,
-            allFolders: folders,
-            memberCount: { fid in sessions.filter { $0.folderId == fid }.count },
-            onRename: { folder, name, desc in
-                Task { @MainActor in
-                    // Always pass desc (empty clears): the dialog is seeded with
-                    // the stored value when it opens ([T-folder-rename-desc-wipe]),
-                    // so whatever is in the field on Rename is the user's
-                    // intended state.
-                    await ChatStore.shared.renameFolder(folder.id, name: name, desc: desc)
-                    refreshSessionList()
-                }
-            },
-            onDissolve: { folder in
-                Task { @MainActor in
-                    _ = await ChatStore.shared.dissolveFolder(folder.id)
-                    refreshSessionList()
-                }
-            },
-            // [T-folder-duplicate-name] Merge the renamed group into the
-            // existing same-named one: move its chats over, then dissolve the
-            // now-empty source. Dissolve (not delete) is deliberate — it only
-            // ever ungroups, so a mistake here can never cost a session.
-            onMergeInto: { source, target in
-                Task { @MainActor in
-                    let memberIds = sessions.filter { $0.folderId == source.id }.map(\.id)
-                    if !memberIds.isEmpty {
-                        await ChatStore.shared.setFolder(target.id, forSessions: memberIds)
-                    }
-                    _ = await ChatStore.shared.dissolveFolder(source.id)
-                    refreshSessionList()
-                }
-            }
-        ))
-        .overlay {
-            if isExporting {
-                ZStack {
-                    Color.black.opacity(0.3).ignoresSafeArea()
-                    VStack(spacing: 12) {
-                        ProgressView()
-                            .controlSize(.large)
-                        if let p = exportProgress, p.total > 0 {
-                            Text(AppLocalized("Exporting… \(p.done) / \(p.total)"))
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text(AppLocalized("Exporting…"))
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(24)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
-                }
-                .transition(.opacity)
-                .animation(.easeInOut(duration: 0.2), value: isExporting)
-            }
-        }
+        effectsWired
+    }
 
+    /// [T-ios-task-typecheck-overflow] The body's modifier chain used to be
+    /// one ~700-line expression. At deployment target 26 the compiler timed
+    /// out type-checking it, so the chain is split into these layers — each
+    /// layer is a separate expression with its own type-check budget.
+    /// Behavior (modifier order) is unchanged.
+    private var effectsWired: some View {
+        overlaysWired
         .task {
             sessions = await ChatStore.shared.listSessions()
             // Folders must load WITH the first session batch: groupedSessionIDs
@@ -2035,6 +1680,387 @@ struct ContentView: View {
             }
         }
     }
+
+    private var overlaysWired: some View {
+        sheetsWired
+        .modifier(FolderAlertsModifier(
+            folderToRename: $folderToRename,
+            renameFolderText: $renameFolderText,
+            renameFolderDesc: $renameFolderDesc,
+            folderToDissolve: $folderToDissolve,
+            allFolders: folders,
+            memberCount: { fid in sessions.filter { $0.folderId == fid }.count },
+            onRename: { folder, name, desc in
+                Task { @MainActor in
+                    // Always pass desc (empty clears): the dialog is seeded with
+                    // the stored value when it opens ([T-folder-rename-desc-wipe]),
+                    // so whatever is in the field on Rename is the user's
+                    // intended state.
+                    await ChatStore.shared.renameFolder(folder.id, name: name, desc: desc)
+                    refreshSessionList()
+                }
+            },
+            onDissolve: { folder in
+                Task { @MainActor in
+                    _ = await ChatStore.shared.dissolveFolder(folder.id)
+                    refreshSessionList()
+                }
+            },
+            // [T-folder-duplicate-name] Merge the renamed group into the
+            // existing same-named one: move its chats over, then dissolve the
+            // now-empty source. Dissolve (not delete) is deliberate — it only
+            // ever ungroups, so a mistake here can never cost a session.
+            onMergeInto: { source, target in
+                Task { @MainActor in
+                    let memberIds = sessions.filter { $0.folderId == source.id }.map(\.id)
+                    if !memberIds.isEmpty {
+                        await ChatStore.shared.setFolder(target.id, forSessions: memberIds)
+                    }
+                    _ = await ChatStore.shared.dissolveFolder(source.id)
+                    refreshSessionList()
+                }
+            }
+        ))
+        .overlay {
+            if isExporting {
+                ZStack {
+                    Color.black.opacity(0.3).ignoresSafeArea()
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .controlSize(.large)
+                        if let p = exportProgress, p.total > 0 {
+                            Text(AppLocalized("Exporting… \(p.done) / \(p.total)"))
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text(AppLocalized("Exporting…"))
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(24)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                }
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.2), value: isExporting)
+            }
+        }
+
+    }
+
+    private var sheetsWired: some View {
+        signalsWired
+        .sheet(isPresented: $showAlarmList, onDismiss: { fetchAlarmsIfNeeded() }) {
+            AlarmListView()
+        }
+        .sheet(item: $activeToolSheet) { sheet in
+            switch sheet {
+            case .settings:
+                SettingsSheet(browserPool: browserPool) // sheet keeps its own stack
+            case .rootfsManagement:
+                NavigationStack {
+                    RootfsManagementView()
+                        .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button("Done") { activeToolSheet = nil }
+                            }
+                        }
+                }
+            case .browser:
+                BrowserSheetView(pool: browserPool)
+            case .browserManagement:
+                NavigationStack {
+                    BrowserManagementView(pool: browserPool)
+                }
+            case .syncMigrationDetail:
+                NavigationStack {
+                    SyncMigrationDetailView()
+                        .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button("Done") { activeToolSheet = nil }
+                            }
+                        }
+                }
+            }
+        }
+        // Something else is taking over the screen (an incoming share, a
+        // WebApp deep link, a `.minisbak` opened from Files). iOS will not
+        // present a second sheet from the same root while one is up, so a tool
+        // sheet left open here silently swallows the new presentation — which
+        // is exactly how opening a backup while sitting in Settings did
+        // nothing at all. Clearing it lets the incoming content surface.
+        .onReceive(NotificationCenter.default.publisher(for: .dismissAllImmersivePresentations)) { _ in
+            if activeToolSheet != nil { activeToolSheet = nil }
+        }
+        .sheet(item: $sessionToDelete) { session in
+            DeleteConfirmSheet(info: $singleDeleteInfo, isLoading: false) {
+                print("[DELETE] onDelete called for session: \(session.id)")
+                deleteSession(session)
+                sessionToDelete = nil
+                singleDeleteInfo = nil
+            }
+            .onAppear {
+                print("[DELETE] Sheet appeared. singleDeleteInfo is \(singleDeleteInfo == nil ? "nil" : "non-nil, sessionCount=\(singleDeleteInfo!.sessionCount)")")
+            }
+            .presentationDetents([.medium])
+        }
+        .sheet(item: $sessionToEdit) { session in
+            SessionEditSheet(session: session) { newTitle, newCategory in
+                // [T-ios-state-publish-offmain-crash] @MainActor so the @State
+                // write after the actor-hop await stays on the main thread.
+                Task { @MainActor in
+                    await ChatStore.shared.updateSessionTitle(session.id, title: newTitle, category: newCategory)
+                    refreshSessionList()
+                }
+                sessionToEdit = nil
+            }
+            .presentationDetents([.medium])
+        }
+        .sheet(isPresented: $showDeleteConfirm, onDismiss: {
+            if deleteInfo == nil {
+                // Deletion was performed — reset selection mode after sheet is fully dismissed
+                isSelecting = false
+                selectedIds.removeAll()
+            } else {
+                // Cancelled — a pending delete-folder-with-sessions must not
+                // linger and attach itself to a later unrelated delete.
+                pendingDeleteFolderId = nil
+            }
+        }) {
+            DeleteConfirmSheet(info: $deleteInfo, isLoading: isComputingDelete) {
+                deleteSelectedSessions()
+                showDeleteConfirm = false
+            }
+            .presentationDetents([.medium])
+        }
+        .sheet(isPresented: $showExportPreview) {
+            ExportPreviewSheet(fileURL: exportFileURL, previewURL: exportPreviewURL, summary: exportSummary)
+        }
+        .sheet(item: $folderPickerRequest, onDismiss: {
+            // Mirror the delete sheet's pattern (see the comment near
+            // computeDeleteInfo): selection state is reset only after the
+            // sheet is fully dismissed to avoid animation conflicts.
+            if folderMoveApplied {
+                folderMoveApplied = false
+                isSelecting = false
+                selectedIds.removeAll()
+            }
+        }) { req in
+            FolderPickerSheet(
+                items: folderPickerItems(),
+                sessionIds: Array(req.sessionIds),
+                anyFiled: req.anyFiled
+            ) { choice in
+                Task { @MainActor in
+                    switch choice {
+                    case .existing(let folderId):
+                        await ChatStore.shared.setFolder(folderId, forSessions: Array(req.sessionIds))
+                    case .create(let name, let desc):
+                        let folder = await ChatStore.shared.createFolder(name: name, desc: desc)
+                        await ChatStore.shared.setFolder(folder.id, forSessions: Array(req.sessionIds))
+                    case .removeFromFolder:
+                        await ChatStore.shared.setFolder(nil, forSessions: Array(req.sessionIds))
+                    }
+                    refreshSessionList()
+                }
+                if req.fromMultiSelect { folderMoveApplied = true }
+                folderPickerRequest = nil
+            }
+            .presentationDetents([.medium, .large])
+        }
+    }
+
+    private var signalsWired: some View {
+        geoRoot
+        .appearancePage(.home)
+        .onReceive(
+            NotificationCenter.default.publisher(for: .sessionDidCreate),
+            perform: handleSessionCreatedForPendingFolder
+        )
+        .onReceive(NotificationCenter.default.publisher(for: .newChatRequested)) { _ in
+            handleNewChatRequest()
+        }
+        // Cold-launch belt-and-braces: a Home Screen Quick Action that
+        // fires before `.onReceive(.newChatRequested)` is attached
+        // (WindowGroup still mounting) would otherwise be lost. The
+        // router bumps `newChatTrigger` whenever it handles a shortcut.
+        //
+        // `quickActionRouter` is an `@ObservedObject`, so SwiftUI re-runs
+        // body on every bump and `onChange` actually fires. The
+        // `consumedQuickActionTrigger` state below tracks the last value
+        // we've already routed — on cold launch the router might bump to
+        // 1 (or higher, if the user invokes shortcuts multiple times
+        // before the WindowGroup mounts) BEFORE our `.onAppear` runs;
+        // we therefore also check the initial value on appear and route
+        // any unconsumed bumps then.
+        .onChange(of: quickActionRouter.newChatTrigger) { newValue in
+            guard newValue != consumedQuickActionTrigger else { return }
+            consumedQuickActionTrigger = newValue
+            handleNewChatRequest()
+        }
+        .onReceive(QuickActionWorkflow.shared.$state) { newState in
+            // Workflow advanced to pendingDispatch (either same-runloop
+            // because we were already home, or after markHome fired
+            // from a navigation change). Open the new session now.
+            if case .pendingDispatch = newState {
+                openSessionForPendingQuickAction()
+            }
+        }
+        .onAppear {
+            if quickActionRouter.newChatTrigger != consumedQuickActionTrigger {
+                consumedQuickActionTrigger = quickActionRouter.newChatTrigger
+                // Defer one runloop so the NavigationStack body has a
+                // chance to attach `$navigationPath` before we append to
+                // it — otherwise the append on a freshly-mounted stack
+                // can be lost.
+                DispatchQueue.main.async {
+                    handleNewChatRequest()
+                }
+            }
+            // The Appearance language picker wrote "pendingSettingsReopen"
+            // right before changing appLanguage, which forced the root
+            // `.id(appLanguage)` rebuild that just dropped + re-mounted us.
+            // Reopen the Settings sheet so the user lands back where they
+            // were instead of stranded on the chat list. SettingsSheet's
+            // own onAppear pushes the saved destination onto its navPath.
+            if UserDefaults.standard.string(forKey: "pendingSettingsReopen") != nil {
+                DispatchQueue.main.async {
+                    activeToolSheet = .settings
+                }
+            }
+            // [T-ios-bg-nav-push-watchdog] Backstop for the scenePhase flush.
+            // `.onChange(of: scenePhase)` only fires on a TRANSITION, so a
+            // deferral that happened before this view mounted — a cold launch
+            // straight into the background, or a root remount (the
+            // `.id(appLanguage)` rebuild above) — would leave the push stranded
+            // with no later transition to release it. Deferred one runloop for
+            // the same reason the quick-action path above is: the
+            // NavigationStack must have attached `$navigationPath` first.
+            DispatchQueue.main.async {
+                flushPendingBackgroundNavigation()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .sessionDidCreate)) { note in
+            guard isWideLayout, let newId = note.object as? String else { return }
+            let noteDraftId = (note.userInfo as? [String: String])?["draftId"]
+            draftLog.info("🔑DRAFT sessionDidCreate realId=\(newId) noteDraftId=\(noteDraftId ?? "nil") selId=\(selectedSessionId ?? "nil") curReal=\(newSessionRealId ?? "nil") curDraft=\(activeDraftId ?? "nil")")
+            // Verify this notification came from the currently active draft.
+            // A late notification from a previous (now-destroyed) draft must be ignored.
+            guard let selId = selectedSessionId, Self.isNewSessionId(selId),
+                  noteDraftId == selId else {
+                draftLog.info("🔑DRAFT sessionDidCreate IGNORED (draftId mismatch or not a draft)")
+                // [T-ios-state-publish-offmain-crash] ChatStore (an actor) posts
+                // .sessionDidCreate/.sessionDidUpdate from its background
+                // executor; NotificationCenter delivers synchronously on that
+                // thread, so this onReceive closure can run off-main. A bare
+                // Task{} started here inherits the (background) execution context,
+                // so `sessions =` (a @State write) lands off-main → "Publishing
+                // changes from background threads" + AttributeGraph corruption of
+                // the [ChatSession]/[String:ChatSession] state it deep-compares,
+                // crashing in ChatSession.== / deinit during flushTransactions.
+                // This onReceive can be delivered off-main, so hop explicitly —
+                // refreshSessionList's @State writes must land on the main thread.
+                Task { @MainActor in
+                    refreshSessionList()
+                }
+                return
+            }
+            newSessionRealId = newId
+            activeDraftId = selId
+            draftLog.info("🔑DRAFT sessionDidCreate ACCEPTED newSessionRealId=\(newId) activeDraftId=\(selId)")
+            // [T-ios-state-publish-offmain-crash] force main-thread @State write
+            Task { @MainActor in
+                refreshSessionList()
+            }
+        }
+        .onReceive(
+            // Throttle (not debounce): session-list updates are infrequent (one
+            // per agent tool round, seconds apart), but a long multi-tool task
+            // emits a steady stream of them. `.debounce` was reset by every new
+            // event, so during a continuously-running task the list NEVER
+            // refreshed until the task fully stopped — the row stayed on its
+            // stale preview ("No messages yet") the whole time. `.throttle`
+            // fires the first event right away and then at most once per second,
+            // so the preview keeps up with each tool round without thrashing
+            // `listSessions`.
+            NotificationCenter.default.publisher(for: .sessionDidUpdate)
+                .throttle(for: .seconds(1), scheduler: RunLoop.main, latest: true)
+        ) { _ in
+            // [T-ios-state-publish-offmain-crash] force main-thread @State write
+            Task { @MainActor in
+                refreshSessionList()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .moveInputToSession)) { note in
+            guard let targetId = (note.userInfo as? [String: String])?["targetId"] else { return }
+            // Skip navigation if the target session is already visible
+            if isWideLayout {
+                guard selectedSessionId != targetId && newSessionRealId != targetId else { return }
+                // Wide layout replaces selection — no stack to worry about
+                openSession(targetId)
+            } else {
+                // [T-ios-moveto-transfer-race] No early-return when the target
+                // already reads as current: a swallowed push leaves
+                // `currentStackSessionId` set to a target that never appeared,
+                // and bailing here is exactly what made a retry do nothing.
+                // switchToSession is idempotent, so re-running it for a target
+                // that genuinely is on screen is harmless.
+                switchToSession(targetId)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openSessionFromIntent)) { note in
+            guard let sessionId = (note.userInfo as? [String: String])?["sessionId"] else { return }
+            // [T-notification-tap-vs-launch-session] Warm path owns this
+            // navigation: drop the cold-launch buffer copy and stamp the
+            // handling time so an in-flight launch `.task` (the post can land
+            // during its `await listSessions()`) doesn't clobber the target
+            // session with the Launch Session default afterwards.
+            NotificationNavigationStore.shared.markHandled()
+            // Skip navigation if the target session is already visible
+            if isWideLayout {
+                guard selectedSessionId != sessionId && newSessionRealId != sessionId else { return }
+                openSession(sessionId)
+            } else {
+                // [T-ios-moveto-transfer-race] Same atomic replacement as the
+                // move path — the old animated-pop-then-delayed-push had the
+                // same swallowed-push failure mode here.
+                guard currentStackSessionId != sessionId else { return }
+                switchToSession(sessionId)
+            }
+        }
+        // [T-home-bottom-bar][v3] The old fullScreenCover terminal is gone —
+        // the terminal now pushes from Settings → Agent Runtime; AIChatView
+        // keeps its own terminal entry.
+    }
+
+    private var geoRoot: some View {
+        GeometryReader { geo in
+            let wide = isIPad && geo.size.width >= compactThreshold
+            Group {
+                if wide {
+                    splitLayout
+                } else {
+                    stackLayout
+                }
+            }
+            .overlay(alignment: .top) {
+                if let toast = forceSyncToast {
+                    ForceSyncToastBanner(text: toast)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .padding(.top, 8)
+                }
+            }
+            .animation(.easeInOut(duration: 0.25), value: forceSyncToast)
+            .onChange(of: wide) { newWide in
+                isWideLayout = newWide
+            }
+            .onAppear {
+                isWideLayout = wide
+                wireMenuActions()
+            }
+        }
+    }
+
 
     // MARK: - Split Layout (iPad / wide window)
 
