@@ -5,6 +5,12 @@ struct BrowserSheetView: View {
     @ObservedObject var pool: BrowserTabPool
     var isAgentBusy: Bool = false
     var onTakeover: (() -> Void)? = nil
+    /// True while the user has taken over and is driving manually. The agent
+    /// loop is parked; the sheet swaps the touch-blocking agent overlay for a
+    /// return-to-AI banner so the user can actually operate the page.
+    var isTakeoverActive: Bool = false
+    /// Called when the user returns control to the agent from the banner.
+    var onTakeoverDone: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var addressText: String = ""
     @State private var showHistory = false
@@ -72,6 +78,9 @@ struct BrowserSheetView: View {
                     if isAgentBusy {
                         AgentBrowsingOverlay(onTakeover: onTakeover)
                             .transition(.opacity)
+                    } else if isTakeoverActive {
+                        TakeoverActiveBanner(onDone: { onTakeoverDone?() })
+                            .transition(.opacity)
                     }
 
                     // Fullscreen exit button
@@ -95,7 +104,7 @@ struct BrowserSheetView: View {
                         }
                     }
                 }
-                .animation(.easeInOut(duration: 0.3), value: isAgentBusy)
+                .animation(.easeInOut(duration: 0.3), value: isAgentBusy || isTakeoverActive)
 
                 // Download progress banner — visible in both normal and
                 // fullscreen modes so an in-flight download is never silent.
@@ -380,6 +389,41 @@ private struct AgentBrowsingOverlay: View {
             withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) {
                 breathing = true
             }
+        }
+    }
+}
+
+// MARK: - Takeover Active Banner
+
+/// Bottom banner shown while the user is manually driving the browser after
+/// takeover (agent loop parked). Deliberately NOT full-surface: only the
+/// capsule is hit-testable, so every other touch falls through to the
+/// webview underneath. Closing the sheet (Done / swipe-down) also resumes
+/// the agent — wired via onDismiss at the presentation site.
+private struct TakeoverActiveBanner: View {
+    var onDone: () -> Void
+
+    var body: some View {
+        VStack {
+            Spacer()
+            HStack(spacing: 10) {
+                Image(systemName: "hand.point.up.left")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                Text("你已接管")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white)
+                Button("交还给AI") { onDone() }
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(
+                Capsule()
+                    .fill(Color.black.opacity(0.7))
+            )
+            .padding(.bottom, 12)
         }
     }
 }

@@ -326,6 +326,10 @@ struct ToolLiveSheet: View {
     /// sidestepping SwiftUI's "only one .sheet per view" limitation when
     /// ToolLiveSheet is itself hosted inside a sheet.
     @State private var activeSheet: ActiveSecondarySheet?
+    /// True when the takeover sheet was opened from the LIVE (agent-driving)
+    /// button — the secondary browser sheet then shows the return-to-AI
+    /// banner instead of acting as a plain manual browser.
+    @State private var takeoverMode = false
 
     /// Describes which secondary sheet is currently presented on top of
     /// ToolLiveSheet. Cases are mutually exclusive by construction — the user
@@ -499,7 +503,17 @@ struct ToolLiveSheet: View {
             switch sheet {
             case .takeoverBrowser:
                 if let pool = browserPool {
-                    BrowserSheetView(pool: pool, isAgentBusy: false)
+                    BrowserSheetView(pool: pool,
+                                     isAgentBusy: pool.isAgentBrowsing,
+                                     isTakeoverActive: takeoverMode,
+                                     onTakeover: {
+                                         onBrowserTakeover?()
+                                         takeoverMode = true
+                                     },
+                                     onTakeoverDone: {
+                                         takeoverMode = false
+                                         onTakeoverDone?()
+                                     })
                 }
             case .linkPreview(let url):
                 MinisLinkPreviewView(url: url, browserPool: browserPool)
@@ -541,6 +555,7 @@ struct ToolLiveSheet: View {
                 if isLive, onBrowserTakeover != nil, case .browserTool = block.kind {
                     Button {
                         onBrowserTakeover?()
+                        takeoverMode = true
                         activeSheet = .takeoverBrowser
                     } label: {
                         ZStack {
@@ -557,7 +572,10 @@ struct ToolLiveSheet: View {
                         .clipShape(Circle())
                     }
                 } else if case .browserTool = block.kind, browserPool != nil {
-                    Button { activeSheet = .takeoverBrowser } label: {
+                    Button {
+                        takeoverMode = false
+                        activeSheet = .takeoverBrowser
+                    } label: {
                         toolIcon
                             .font(.system(size: 14))
                             .foregroundStyle(ChatColors.primaryText)

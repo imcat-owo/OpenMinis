@@ -1051,10 +1051,24 @@ struct AIChatView: View {
                 FileBrowserView(rootPath: base, initialPath: base.appendingPathComponent("var/minis"), rootLabel: "/")
             }
         }
-        .sheet(isPresented: $showBrowserSheet) {
-            BrowserSheetView(pool: vm.browserTabPool, isAgentBusy: vm.browserTabPool.isAgentBrowsing, onTakeover: {
-                vm.browserTakeoverActive = true
-            })
+        .sheet(isPresented: $showBrowserSheet, onDismiss: {
+            // Safety net: a takeover that ends by closing the sheet (Done
+            // button or swipe-down) must resume the parked agent loop —
+            // without this the takeover continuation parks forever and the
+            // session stalls (continuation has no timeout by design).
+            if vm.browserTakeoverActive {
+                vm.resumeFromBrowserTakeover()
+            }
+        }) {
+            BrowserSheetView(pool: vm.browserTabPool,
+                             isAgentBusy: vm.browserTabPool.isAgentBrowsing,
+                             isTakeoverActive: vm.browserTakeoverActive,
+                             onTakeover: {
+                                vm.browserTakeoverActive = true
+                             },
+                             onTakeoverDone: {
+                                vm.resumeFromBrowserTakeover()
+                             })
         }
         .sheet(isPresented: $showModelPicker) {
             NavigationStack {
