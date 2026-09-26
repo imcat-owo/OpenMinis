@@ -7347,9 +7347,7 @@ private struct SettingsSheet: View {
                         Label {
                             Text("Shell Terminal")
                         } icon: {
-                            Image(systemName: "terminal")
-                                .font(.system(size: 17, weight: .medium))
-                                .frame(width: 26, height: 26)
+                            QuietAppIcon(id: QuietIconSlot.terminal.id, systemName: QuietIconSlot.terminal.systemName)
                         }
                     }
                     NavigationLink {
@@ -7358,9 +7356,7 @@ private struct SettingsSheet: View {
                         Label {
                             Text("Rootfs Management")
                         } icon: {
-                            Image(systemName: "externaldrive")
-                                .font(.system(size: 17, weight: .medium))
-                                .frame(width: 26, height: 26)
+                            QuietAppIcon(id: QuietIconSlot.rootfs.id, systemName: QuietIconSlot.rootfs.systemName)
                         }
                     }
                     NavigationLink {
@@ -7369,9 +7365,7 @@ private struct SettingsSheet: View {
                         Label {
                             Text("Browser")
                         } icon: {
-                            Image(systemName: "globe")
-                                .font(.system(size: 17, weight: .medium))
-                                .frame(width: 26, height: 26)
+                            QuietAppIcon(id: QuietIconSlot.browser.id, systemName: QuietIconSlot.browser.systemName)
                         }
                     }
                     NavigationLink {

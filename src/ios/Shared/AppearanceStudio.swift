@@ -615,7 +615,7 @@ struct QuietAppIcon: View {
 }
 
 enum QuietIconSlot: String, CaseIterable, Identifiable {
-    case decorate, appearance, skills, soul, memory, mcp, env
+    case decorate, appearance, skills, soul, memory, mcp, env, terminal, rootfs, browser
     case storage, shared, mounts, icloud, backup, permissions, lock
     case logs, about, privacy, feedback
     /// [T-user-manual 09-11] Settings → About section's 使用手册 row.
@@ -643,6 +643,9 @@ enum QuietIconSlot: String, CaseIterable, Identifiable {
         case .privacy: return "隐私政策"
         case .feedback: return "反馈"
         case .manual: return "手册"
+        case .terminal: return "终端"
+        case .rootfs: return "Rootfs 管理"
+        case .browser: return "浏览器"
         }
     }
     var systemName: String {
@@ -666,6 +669,9 @@ enum QuietIconSlot: String, CaseIterable, Identifiable {
         case .privacy: return "hand.raised"
         case .feedback: return "bubble.left.and.bubble.right"
         case .manual: return "book.closed"
+        case .terminal: return "terminal"
+        case .rootfs: return "externaldrive"
+        case .browser: return "globe"
         }
     }
 }
