@@ -505,11 +505,11 @@ struct ToolLiveSheet: View {
                 if let pool = browserPool {
                     BrowserSheetView(pool: pool,
                                      isAgentBusy: pool.isAgentBrowsing,
-                                     isTakeoverActive: takeoverMode,
                                      onTakeover: {
                                          onBrowserTakeover?()
                                          takeoverMode = true
                                      },
+                                     isTakeoverActive: takeoverMode,
                                      onTakeoverDone: {
                                          takeoverMode = false
                                          onTakeoverDone?()

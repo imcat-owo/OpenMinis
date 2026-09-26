@@ -533,6 +533,19 @@ struct AIChatView: View {
     /// (file was deleted, the session was pruned, or iCloud hasn't synced yet).
     @State private var missingMinisFileName: String?
 
+    /// The main browser sheet content, extracted from the body's giant
+    /// modifier chain so the type checker stays under its time budget
+    /// (inline BrowserSheetView + two takeover closures timed out the
+    /// whole chat-root expression).
+    @MainActor
+    private var browserSheet: some View {
+        BrowserSheetView(pool: vm.browserTabPool,
+                         isAgentBusy: vm.browserTabPool.isAgentBrowsing,
+                         onTakeover: { vm.browserTakeoverActive = true },
+                         isTakeoverActive: vm.browserTakeoverActive,
+                         onTakeoverDone: { vm.resumeFromBrowserTakeover() })
+    }
+
     var body: some View {
         ZStack {
             // Messages — floating tool preview overlaid at bottom
@@ -1060,15 +1073,7 @@ struct AIChatView: View {
                 vm.resumeFromBrowserTakeover()
             }
         }) {
-            BrowserSheetView(pool: vm.browserTabPool,
-                             isAgentBusy: vm.browserTabPool.isAgentBrowsing,
-                             isTakeoverActive: vm.browserTakeoverActive,
-                             onTakeover: {
-                                vm.browserTakeoverActive = true
-                             },
-                             onTakeoverDone: {
-                                vm.resumeFromBrowserTakeover()
-                             })
+            browserSheet
         }
         .sheet(isPresented: $showModelPicker) {
             NavigationStack {
