@@ -26,6 +26,12 @@ struct AppearanceStudioView: View {
     @State private var showThemePack = false
     @State private var showThemeLibrary = false
 
+    /// #5: AI 侧名字跟灵魂名走（不用写死名字）
+    private var aiName: String {
+        let n = SoulStore.cachedMetadata.name
+        return n.isEmpty ? "AI" : n
+    }
+
     var body: some View {
         List {
             Section {
@@ -115,7 +121,7 @@ struct AppearanceStudioView: View {
             }
 
             CollapsibleSection(title: "AI 主题包",
-                               footer: "一整套：色、气泡形状、thinking 卡片图、会话列表、分类图标、壁纸。小梦也可以用 minis-theme 直接贴上来。",
+                               footer: "一整套：色、气泡形状、thinking 卡片图、会话列表、分类图标、壁纸。\(aiName)也可以用 minis-theme 直接贴上来。",
                                isExpanded: $showThemePack) {
                 let pack = studio.currentThemePack()
                 VStack(alignment: .leading, spacing: 6) {
@@ -132,7 +138,7 @@ struct AppearanceStudioView: View {
                         Text(item.title).tag(item)
                     }
                 }
-                Picker("小梦气泡", selection: assistantStyleBinding) {
+                Picker("\(aiName)气泡", selection: assistantStyleBinding) {
                     ForEach(AppearanceBubbleStyle.allCases) { item in
                         Text(item.title).tag(item)
                     }
@@ -368,7 +374,7 @@ struct AppearanceStudioView: View {
             }
 
             CollapsibleSection(title: "情头",
-                               footer: "两张图都会裁成方的，存在这台手机上。小梦的头像同时就是 Soul 图标，身份不会各处长不一样。",
+                               footer: "两张图都会裁成方的，存在这台手机上。\(aiName)的头像同时就是 Soul 图标，身份不会各处长不一样。",
                                isExpanded: $showAvatars) {
                 pairedAvatarPreview
 
@@ -382,10 +388,10 @@ struct AppearanceStudioView: View {
                 }
 
                 PhotosPicker(selection: $assistantAvatarItem, matching: .images) {
-                    Label("选小梦的头像", systemImage: "sparkles.rectangle.stack")
+                    Label("选\(aiName)的头像", systemImage: "sparkles.rectangle.stack")
                 }
                 if !SoulStore.cachedMetadata.icon.isEmpty {
-                    Button("去掉小梦的头像", role: .destructive) {
+                    Button("去掉\(aiName)的头像", role: .destructive) {
                         do { try studio.removeAssistantAvatar() }
                         catch { errorText = error.localizedDescription }
                     }
@@ -520,14 +526,14 @@ struct AppearanceStudioView: View {
             Spacer()
             VStack(spacing: 6) {
                 PersonAvatarView(kind: .assistant, size: 54)
-                Text(SoulStore.cachedMetadata.name.isEmpty ? "小梦" : SoulStore.cachedMetadata.name)
+                Text(aiName)
                     .font(.caption)
             }
             Image(systemName: "link")
                 .foregroundStyle(studio.color(.accent))
             VStack(spacing: 6) {
                 PersonAvatarView(kind: .user, size: 54)
-                Text("醒醒").font(.caption)
+                Text("你").font(.caption)
             }
             Spacer()
         }
