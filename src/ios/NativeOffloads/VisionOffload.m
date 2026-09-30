@@ -3,12 +3,14 @@
 //  MinisApp
 //
 //  Native offload handler for `apple-vision`.
-//  Subcommands: ocr, barcode, classify, detect, faces, analyze, similarity, overlap
+//  Subcommands: ocr, barcode, classify, detect, faces, analyze, similarity, overlap,
+//               crop, diff, measure
 //
 
 #import <Foundation/Foundation.h>
 #import <Vision/Vision.h>
 #import <UIKit/UIKit.h>
+#import <ImageIO/ImageIO.h>
 #import "NativeOffloadUtils.h"
 #include "kernel/native_offload.h"
 #include <unistd.h>
@@ -30,6 +32,26 @@ static NSString *const HELP_TEXT =
      "  analyze    Combined analysis (ocr + classify + barcode)\n"
      "  similarity Compare two or more images for similarity\n"
      "  overlap    Detect overlapping regions between consecutive image pairs\n"
+     "  crop       Crop a region and save it as PNG\n"
+     "  diff       Pixel-level difference between two images\n"
+     "  measure    Measure distance between two points (UI alignment)\n"
+     "\n"
+     "CROP / DIFF / MEASURE:\n"
+     "  crop <image> --bbox x,y,w,h [--output out.png] [--scale F]\n"
+     "    Crop the region (pixels, top-left origin) and save as lossless PNG.\n"
+     "    --bbox is REQUIRED and is clamped to image bounds. --scale upscales the\n"
+     "    crop (e.g. --scale 2) for closer inspection, capped at 4096px.\n"
+     "    Default output is <name>.crop.png next to the input.\n"
+     "  diff --baseline a.png --current b.png [--threshold F] [--output diff.png]\n"
+     "    (or: diff a.png b.png). Returns mean pixel distance (0-1), fraction of\n"
+     "    changed pixels, and the union bounding box of changed areas.\n"
+     "    --threshold is per-pixel change sensitivity 0.0-1.0 (default 0.05).\n"
+     "    If sizes differ, current is scaled to baseline and \"resized\" is set.\n"
+     "    --output writes a heatmap PNG (red = changed).\n"
+     "  measure <image> --from x,y --to x,y [--scale F]\n"
+     "    Returns dx/dy/Euclidean distance in pixels between two points\n"
+     "    (top-left origin), plus angle. --scale is the device pixel ratio\n"
+     "    (default 1) used to also report the distance in CSS points.\n"
      "\n"
      "OPTIONS:\n"
      "  --help, -h          Show this help message\n"
@@ -41,6 +63,13 @@ static NSString *const HELP_TEXT =
      "  --threshold <F>     Pixel match threshold 0.0-1.0 (default: 0.9 for both similarity and overlap)\n"
      "  --skip-top <px>     Rows to skip from top (status bar/nav bar) for overlap detection\n"
      "  --skip-bottom <px>  Rows to skip from bottom (tab bar/toolbar) for overlap detection\n"
+     "  --bbox <x,y,w,h>    Crop region in pixels, top-left origin (crop)\n"
+     "  --output <path>     Output PNG path (crop/diff)\n"
+     "  --scale <F>         Upscale factor for crop (default 1); device pixel ratio for measure (default 1)\n"
+     "  --baseline <path>   Reference image for diff (or first positional arg)\n"
+     "  --current <path>    New image for diff (or second positional arg)\n"
+     "  --from <x,y>        Start point in pixels for measure\n"
+     "  --to <x,y>          End point in pixels for measure\n"
      "\n"
      "NOTES:\n"
      "  <image-path> is automatically translated from iSH guest path to host path.\n"
@@ -55,7 +84,12 @@ static NSString *const HELP_TEXT =
      "  apple-vision similarity img1.png img2.png img3.png\n"
      "  apple-vision similarity img1.png img2.png --threshold 0.8\n"
      "  apple-vision overlap top.png bottom.png\n"
-     "  apple-vision overlap s1.png s2.png s3.png\n";
+     "  apple-vision overlap s1.png s2.png s3.png\n"
+     "  apple-vision crop page.png --bbox 0,0,100,200 --output button.png\n"
+     "  apple-vision crop page.png --bbox 390,844,200,120 --scale 2\n"
+     "  apple-vision diff --baseline target.png --current render.png --threshold 0.05\n"
+     "  apple-vision diff old.png new.png --output heatmap.png\n"
+     "  apple-vision measure page.png --from 100,200 --to 120,200 --scale 3\n";
 
 // ── Image loading ──
 
@@ -658,6 +692,310 @@ static NSDictionary *do_analyze(CGImageRef image, int argc, char **argv) {
     };
 }
 
+// ── Crop / Diff / Measure ──
+
+// Rasterize a CGImage into a caller-owned RGBA buffer (top row first).
+// Returns NULL on allocation failure.
+static unsigned char *rasterize_rgba(CGImageRef image, NSInteger w, NSInteger h) {
+    size_t rowBytes = (size_t)w * 4;
+    unsigned char *px = (unsigned char *)calloc((size_t)h * rowBytes, 1);
+    if (!px) return NULL;
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGContextRef ctx = CGBitmapContextCreate(px, w, h, 8, rowBytes, cs,
+                                             kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    CGColorSpaceRelease(cs);
+    if (!ctx) { free(px); return NULL; }
+    CGContextDrawImage(ctx, CGRectMake(0, 0, w, h), image);
+    CGContextRelease(ctx);
+    return px;
+}
+
+// Returns a +1 CGImageRef scaled to (w,h), or NULL on failure. Caller releases.
+static CGImageRef scaled_cgimage(CGImageRef image, NSInteger w, NSInteger h) {
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGContextRef ctx = CGBitmapContextCreate(NULL, w, h, 8, (size_t)w * 4, cs,
+                                             kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    CGColorSpaceRelease(cs);
+    if (!ctx) return NULL;
+    CGContextSetInterpolationQuality(ctx, kCGInterpolationHigh);
+    CGContextDrawImage(ctx, CGRectMake(0, 0, w, h), image);
+    CGImageRef out = CGBitmapContextCreateImage(ctx);
+    CGContextRelease(ctx);
+    return out;
+}
+
+static BOOL write_png_file(CGImageRef image, NSString *path) {
+    NSURL *url = [NSURL fileURLWithPath:path];
+    CGImageDestinationRef dest = CGImageDestinationCreateWithURL(
+        (__bridge CFURLRef)url, (__bridge CFStringRef)@"public.png", 1, NULL);
+    if (!dest) return NO;
+    CGImageDestinationAddImage(dest, image, NULL);
+    BOOL ok = CGImageDestinationFinalize(dest);
+    CFRelease(dest);
+    return ok;
+}
+
+// Parse "x,y,w,h" (integers). Returns NO on any format problem.
+static BOOL parse_bbox_str(NSString *s, NSInteger *x, NSInteger *y, NSInteger *w, NSInteger *h) {
+    if (!s) return NO;
+    NSScanner *sc = [NSScanner scannerWithString:s];
+    NSInteger vals[4];
+    for (int i = 0; i < 4; i++) {
+        if (![sc scanInteger:&vals[i]]) return NO;
+        if (i < 3) {
+            if (![sc scanString:@"," intoString:NULL]) return NO;
+        }
+    }
+    if (!sc.isAtEnd) return NO;
+    *x = vals[0]; *y = vals[1]; *w = vals[2]; *h = vals[3];
+    return YES;
+}
+
+// Parse "x,y" (doubles). Returns NO on any format problem.
+static BOOL parse_point_str(NSString *s, double *x, double *y) {
+    if (!s) return NO;
+    NSScanner *sc = [NSScanner scannerWithString:s];
+    double vals[2];
+    for (int i = 0; i < 2; i++) {
+        if (![sc scanDouble:&vals[i]]) return NO;
+        if (i == 0 && ![sc scanString:@"," intoString:NULL]) return NO;
+    }
+    if (!sc.isAtEnd) return NO;
+    *x = vals[0]; *y = vals[1];
+    return YES;
+}
+
+static NSDictionary *do_crop(NSString *path, NSString *bboxStr,
+                              NSString *outputPath, double scale) {
+    NSInteger imgW = 0, imgH = 0;
+    CGImageRef img = load_image(path, &imgW, &imgH);
+    if (!img) {
+        return @{@"error": [NSString stringWithFormat:@"Cannot load image: %@", path]};
+    }
+    NSInteger bx, by, bw, bh;
+    if (!parse_bbox_str(bboxStr, &bx, &by, &bw, &bh) || bw <= 0 || bh <= 0) {
+        return @{@"error": @"Invalid --bbox. Use --bbox x,y,w,h in pixels (top-left origin), e.g. --bbox 0,0,100,200."};
+    }
+    // Clamp to image bounds (top-left origin space)
+    NSInteger cx = MAX((NSInteger)0, bx);
+    NSInteger cy = MAX((NSInteger)0, by);
+    NSInteger cw = MIN(bw - (cx - bx), imgW - cx);
+    NSInteger ch = MIN(bh - (cy - by), imgH - cy);
+    if (cw <= 0 || ch <= 0) {
+        return @{@"error": @"Crop region is outside the image bounds."};
+    }
+    // CoreGraphics rects use a bottom-left origin: flip y.
+    CGRect cgRect = CGRectMake((CGFloat)cx, (CGFloat)(imgH - cy - ch),
+                               (CGFloat)cw, (CGFloat)ch);
+    CGImageRef cropped = CGImageCreateWithImageInRect(img, cgRect);
+    if (!cropped) return @{@"error": @"Failed to crop image."};
+    CGImageRef finalImg = cropped;
+    BOOL didScale = NO;
+    if (scale > 0 && fabs(scale - 1.0) > 1e-9) {
+        double s = MIN(MAX(scale, 0.1), 8.0);
+        NSInteger sw = MAX((NSInteger)1, (NSInteger)llround(cw * s));
+        NSInteger sh = MAX((NSInteger)1, (NSInteger)llround(ch * s));
+        if (sw > 4096 || sh > 4096) {
+            double k = MIN(4096.0 / (double)sw, 4096.0 / (double)sh);
+            sw = MAX((NSInteger)1, (NSInteger)llround(sw * k));
+            sh = MAX((NSInteger)1, (NSInteger)llround(sh * k));
+        }
+        CGImageRef sc = scaled_cgimage(cropped, sw, sh);
+        CGImageRelease(cropped);
+        if (!sc) return @{@"error": @"Failed to scale cropped image."};
+        finalImg = sc;
+        didScale = YES;
+    }
+    NSInteger outW = (NSInteger)CGImageGetWidth(finalImg);
+    NSInteger outH = (NSInteger)CGImageGetHeight(finalImg);
+    NSString *out = outputPath;
+    if (!out) {
+        NSString *stem = [[path lastPathComponent] stringByDeletingPathExtension];
+        NSString *dir = [path stringByDeletingLastPathComponent];
+        out = [[dir stringByAppendingPathComponent:[stem stringByAppendingString:@".crop"]]
+               stringByAppendingPathExtension:@"png"];
+    }
+    BOOL ok = write_png_file(finalImg, out);
+    CGImageRelease(finalImg);
+    if (!ok) {
+        return @{@"error": [NSString stringWithFormat:@"Failed to write PNG: %@", out]};
+    }
+    NSMutableDictionary *d = [@{
+        @"output": out,
+        @"width": @(outW),
+        @"height": @(outH),
+        @"bbox_applied": @{@"x": @(cx), @"y": @(cy), @"width": @(cw), @"height": @(ch)},
+        @"source": @{@"path": path, @"width": @(imgW), @"height": @(imgH)},
+    } mutableCopy];
+    if (didScale) d[@"scale"] = @(scale);
+    return d;
+}
+
+#define DIFF_GRID 8
+#define DIFF_MAX_PIXELS 16000000LL
+
+static NSDictionary *do_diff(NSString *baselinePath, NSString *currentPath,
+                              float threshold, NSString *outputPath) {
+    NSInteger wA = 0, hA = 0, wB = 0, hB = 0;
+    CGImageRef imgA = load_image(baselinePath, &wA, &hA);
+    CGImageRef imgB = load_image(currentPath, &wB, &hB);
+    if (!imgA) {
+        return @{@"error": [NSString stringWithFormat:@"Cannot load baseline image: %@", baselinePath]};
+    }
+    if (!imgB) {
+        return @{@"error": [NSString stringWithFormat:@"Cannot load current image: %@", currentPath]};
+    }
+    // Working size: baseline size, capped for speed/memory.
+    NSInteger workW = wA, workH = hA;
+    BOOL downscaled = NO;
+    if ((long long)workW * workH > DIFF_MAX_PIXELS) {
+        double k = sqrt((double)DIFF_MAX_PIXELS / ((double)workW * workH));
+        workW = MAX((NSInteger)1, (NSInteger)llround(workW * k));
+        workH = MAX((NSInteger)1, (NSInteger)llround(workH * k));
+        downscaled = YES;
+    }
+    BOOL resized = (wB != wA || hB != hA);
+    CGImageRef aWork = imgA, bWork = imgB;
+    BOOL releaseA = NO, releaseB = NO;
+    if (wA != workW || hA != workH) { aWork = scaled_cgimage(imgA, workW, workH); releaseA = YES; }
+    if (wB != workW || hB != workH) { bWork = scaled_cgimage(imgB, workW, workH); releaseB = YES; }
+    if (!aWork || !bWork) {
+        if (releaseA) CGImageRelease(aWork);
+        if (releaseB) CGImageRelease(bWork);
+        return @{@"error": @"Failed to prepare images for comparison."};
+    }
+    unsigned char *pxA = rasterize_rgba(aWork, workW, workH);
+    unsigned char *pxB = rasterize_rgba(bWork, workW, workH);
+    if (releaseA) CGImageRelease(aWork);
+    if (releaseB) CGImageRelease(bWork);
+    if (!pxA || !pxB) {
+        free(pxA); free(pxB);
+        return @{@"error": @"Out of memory while comparing images."};
+    }
+    double thr = MAX(0.0, MIN(1.0, (double)threshold)) * 255.0;
+    long long total = (long long)workW * workH;
+    long long changed = 0;
+    double sumDist = 0.0;
+    BOOL cellHit[DIFF_GRID * DIFF_GRID] = { NO };
+    for (NSInteger y = 0; y < workH; y++) {
+        NSInteger cellY = (y * DIFF_GRID) / workH;
+        for (NSInteger x = 0; x < workW; x++) {
+            size_t i = ((size_t)y * (size_t)workW + (size_t)x) * 4;
+            double dr = fabs((double)pxA[i] - (double)pxB[i]);
+            double dg = fabs((double)pxA[i + 1] - (double)pxB[i + 1]);
+            double db = fabs((double)pxA[i + 2] - (double)pxB[i + 2]);
+            double d = (dr + dg + db) / 3.0;
+            sumDist += d;
+            if (d > thr) {
+                changed++;
+                NSInteger cellX = (x * DIFF_GRID) / workW;
+                cellHit[cellY * DIFF_GRID + cellX] = YES;
+            }
+        }
+    }
+    // Union bbox of changed grid cells (pixels, top-left origin)
+    id changedBbox = [NSNull null];
+    NSInteger minCX = DIFF_GRID, minCY = DIFF_GRID, maxCX = -1, maxCY = -1;
+    for (NSInteger cy = 0; cy < DIFF_GRID; cy++) {
+        for (NSInteger cx = 0; cx < DIFF_GRID; cx++) {
+            if (cellHit[cy * DIFF_GRID + cx]) {
+                if (cx < minCX) minCX = cx;
+                if (cy < minCY) minCY = cy;
+                if (cx > maxCX) maxCX = cx;
+                if (cy > maxCY) maxCY = cy;
+            }
+        }
+    }
+    if (maxCX >= 0) {
+        NSInteger bx = (minCX * workW) / DIFF_GRID;
+        NSInteger by = (minCY * workH) / DIFF_GRID;
+        NSInteger bw = ((maxCX + 1) * workW) / DIFF_GRID - bx;
+        NSInteger bh = ((maxCY + 1) * workH) / DIFF_GRID - by;
+        changedBbox = @{@"x": @(bx), @"y": @(by), @"width": @(bw), @"height": @(bh)};
+    }
+    NSMutableDictionary *d = [@{
+        @"mean_diff": @(sumDist / ((double)total * 255.0)),
+        @"changed_fraction": @((double)changed / (double)total),
+        @"changed_pixels": @(changed),
+        @"changed_bbox": changedBbox,
+        @"threshold": @(MAX(0.0, MIN(1.0, (double)threshold))),
+        @"size": @{@"width": @(workW), @"height": @(workH)},
+        @"resized": @(resized),
+        @"downscaled": @(downscaled),
+    } mutableCopy];
+    // Optional heatmap: dimmed baseline, red overlay where changed
+    if (outputPath) {
+        unsigned char *heat = (unsigned char *)malloc((size_t)total * 4);
+        if (heat) {
+            for (long long p = 0; p < total; p++) {
+                size_t i = (size_t)p * 4;
+                double dr = fabs((double)pxA[i] - (double)pxB[i]);
+                double dg = fabs((double)pxA[i + 1] - (double)pxB[i + 1]);
+                double db = fabs((double)pxA[i + 2] - (double)pxB[i + 2]);
+                double dd = (dr + dg + db) / 3.0;
+                if (dd > thr) {
+                    heat[i] = 255; heat[i + 1] = 0; heat[i + 2] = 0; heat[i + 3] = 255;
+                } else {
+                    heat[i] = pxA[i] / 2; heat[i + 1] = pxA[i + 1] / 2;
+                    heat[i + 2] = pxA[i + 2] / 2; heat[i + 3] = 255;
+                }
+            }
+            CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+            CGContextRef hctx = CGBitmapContextCreate(heat, workW, workH, 8, (size_t)workW * 4,
+                                                      cs, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+            CGColorSpaceRelease(cs);
+            BOOL wrote = NO;
+            if (hctx) {
+                CGImageRef himg = CGBitmapContextCreateImage(hctx);
+                CGContextRelease(hctx);
+                if (himg) {
+                    wrote = write_png_file(himg, outputPath);
+                    CGImageRelease(himg);
+                }
+            }
+            free(heat);
+            d[@"output"] = outputPath;
+            d[@"output_written"] = @(wrote);
+        } else {
+            d[@"output"] = outputPath;
+            d[@"output_written"] = @(NO);
+        }
+    }
+    free(pxA);
+    free(pxB);
+    return d;
+}
+
+static NSDictionary *do_measure(NSString *path, NSString *fromStr,
+                                 NSString *toStr, double scale) {
+    NSInteger imgW = 0, imgH = 0;
+    CGImageRef img = load_image(path, &imgW, &imgH);
+    if (!img) {
+        return @{@"error": [NSString stringWithFormat:@"Cannot load image: %@", path]};
+    }
+    double x1, y1, x2, y2;
+    if (!parse_point_str(fromStr, &x1, &y1)) {
+        return @{@"error": @"Invalid --from. Use --from x,y in pixels (top-left origin)."};
+    }
+    if (!parse_point_str(toStr, &x2, &y2)) {
+        return @{@"error": @"Invalid --to. Use --to x,y in pixels (top-left origin)."};
+    }
+    double dx = x2 - x1;
+    double dy = y2 - y1;
+    double dist = hypot(dx, dy);
+    double s = scale > 0 ? scale : 1.0;
+    double angle = atan2(dy, dx) * 180.0 / M_PI;
+    return @{
+        @"dx_px": @(dx),
+        @"dy_px": @(dy),
+        @"distance_px": @(dist),
+        @"angle_deg": @(angle),
+        @"scale": @(s),
+        @"distance_css": @(dist / s),
+        @"image": @{@"path": path, @"width": @(imgW), @"height": @(imgH)},
+    };
+}
+
 static int vision_handler(int argc, char **argv,
                            int stdin_fd, int stdout_fd, int stderr_fd) {
     if (noff_has_flag(argc, argv, "--help") || noff_has_flag(argc, argv, "-h")) {
@@ -728,6 +1066,82 @@ static int vision_handler(int argc, char **argv,
         return NOFF_EXIT_SUCCESS;
     }
 
+    // crop: single image + --bbox (pixels, top-left origin)
+    if ([subcmd isEqualToString:@"crop"]) {
+        NSString *input = posArgs.firstObject;
+        if (!input) input = noff_find_arg(argc, argv, "--input");
+        NSString *bboxStr = noff_find_arg(argc, argv, "--bbox");
+        if (!input || !bboxStr) {
+            NSDictionary *err = noff_json_error(TOOL_NAME, subcmd,
+                                                 NOFF_ERR_INVALID_ARGS,
+                                                 @"crop needs an image path and --bbox x,y,w,h (pixels, top-left origin).");
+            noff_emit_json(stdout_fd, err, compact, quiet);
+            return NOFF_EXIT_INVALID_ARGS;
+        }
+        NSString *output = noff_find_arg(argc, argv, "--output");
+        NSString *scaleStr = noff_find_arg(argc, argv, "--scale");
+        double scale = scaleStr ? [scaleStr doubleValue] : 1.0;
+        NSDictionary *data = do_crop(input, bboxStr, output, scale);
+        if (data[@"error"]) {
+            NSDictionary *err = noff_json_error(TOOL_NAME, subcmd, NOFF_ERR_INTERNAL_ERROR, data[@"error"]);
+            noff_emit_json(stdout_fd, err, compact, quiet);
+            return NOFF_EXIT_ERROR;
+        }
+        noff_emit_json(stdout_fd, noff_json_envelope(TOOL_NAME, subcmd, data), compact, quiet);
+        return NOFF_EXIT_SUCCESS;
+    }
+
+    // diff: two images via --baseline/--current or positional args
+    if ([subcmd isEqualToString:@"diff"]) {
+        NSString *baseline = noff_find_arg(argc, argv, "--baseline");
+        NSString *current = noff_find_arg(argc, argv, "--current");
+        if (!baseline && posArgs.count > 0) baseline = posArgs[0];
+        if (!current && posArgs.count > 1) current = posArgs[1];
+        if (!baseline || !current) {
+            NSDictionary *err = noff_json_error(TOOL_NAME, subcmd,
+                                                 NOFF_ERR_INVALID_ARGS,
+                                                 @"diff needs two images: --baseline a.png --current b.png (or two positional paths).");
+            noff_emit_json(stdout_fd, err, compact, quiet);
+            return NOFF_EXIT_INVALID_ARGS;
+        }
+        NSString *threshStr = noff_find_arg(argc, argv, "--threshold");
+        float threshold = threshStr ? [threshStr floatValue] : 0.05f;
+        NSString *output = noff_find_arg(argc, argv, "--output");
+        NSDictionary *data = do_diff(baseline, current, threshold, output);
+        if (data[@"error"]) {
+            NSDictionary *err = noff_json_error(TOOL_NAME, subcmd, NOFF_ERR_INTERNAL_ERROR, data[@"error"]);
+            noff_emit_json(stdout_fd, err, compact, quiet);
+            return NOFF_EXIT_ERROR;
+        }
+        noff_emit_json(stdout_fd, noff_json_envelope(TOOL_NAME, subcmd, data), compact, quiet);
+        return NOFF_EXIT_SUCCESS;
+    }
+
+    // measure: distance between two points
+    if ([subcmd isEqualToString:@"measure"]) {
+        NSString *input = posArgs.firstObject;
+        if (!input) input = noff_find_arg(argc, argv, "--input");
+        NSString *fromStr = noff_find_arg(argc, argv, "--from");
+        NSString *toStr = noff_find_arg(argc, argv, "--to");
+        if (!input || !fromStr || !toStr) {
+            NSDictionary *err = noff_json_error(TOOL_NAME, subcmd,
+                                                 NOFF_ERR_INVALID_ARGS,
+                                                 @"measure needs an image path, --from x,y and --to x,y (pixels, top-left origin).");
+            noff_emit_json(stdout_fd, err, compact, quiet);
+            return NOFF_EXIT_INVALID_ARGS;
+        }
+        NSString *scaleStr = noff_find_arg(argc, argv, "--scale");
+        double scale = scaleStr ? [scaleStr doubleValue] : 1.0;
+        NSDictionary *data = do_measure(input, fromStr, toStr, scale);
+        if (data[@"error"]) {
+            NSDictionary *err = noff_json_error(TOOL_NAME, subcmd, NOFF_ERR_INTERNAL_ERROR, data[@"error"]);
+            noff_emit_json(stdout_fd, err, compact, quiet);
+            return NOFF_EXIT_ERROR;
+        }
+        noff_emit_json(stdout_fd, noff_json_envelope(TOOL_NAME, subcmd, data), compact, quiet);
+        return NOFF_EXIT_SUCCESS;
+    }
+
     // Single-image commands
     NSString *imagePath = posArgs.firstObject;
 
@@ -773,7 +1187,7 @@ static int vision_handler(int argc, char **argv,
         noff_emit_help(stderr_fd, HELP_TEXT);
         NSDictionary *err = noff_json_error(TOOL_NAME, subcmd,
                                              NOFF_ERR_INVALID_ARGS,
-                                             [NSString stringWithFormat:@"Unknown command '%@'. Valid commands: ocr, classify, detect, faces, barcode, analyze, similarity, overlap. Use --help for details.", subcmd]);
+                                             [NSString stringWithFormat:@"Unknown command '%@'. Valid commands: ocr, classify, detect, faces, barcode, analyze, similarity, overlap, crop, diff, measure. Use --help for details.", subcmd]);
         noff_emit_json(stdout_fd, err, compact, quiet);
         return NOFF_EXIT_INVALID_ARGS;
     }
