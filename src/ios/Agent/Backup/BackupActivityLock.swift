@@ -22,12 +22,20 @@ enum BackupBackgroundAssertion {
 
     /// Run `body` while holding a background-task assertion.
     static func run<T>(_ name: String, _ body: () async throws -> T) async rethrows -> T {
-        var id = UIApplication.shared.beginBackgroundTask(withName: name) {
-            // Expiry: nothing to roll back here. The export's own staging is
-            // persistent and resumable, so being cut short costs time, not
-            // data. Logged because "why did my backup stop" is otherwise
-            // invisible.
+        var id: UIBackgroundTaskIdentifier = .invalid
+        id = UIApplication.shared.beginBackgroundTask(withName: name) {
+            // Expiry: the handler MUST end the task. If it only logs and
+            // returns, iOS terminates the process outright instead of
+            // suspending it — the frozen body never resumes, and a backup
+            // caught mid-transfer loses the whole run. Ending here leaves
+            // the process suspended; the export's own staging is persistent
+            // and resumable, so being cut short costs time, not data.
+            // Logged because "why did my backup stop" is otherwise invisible.
             logger.warning("[Backup] background assertion for \(name) expired")
+            if id != .invalid {
+                UIApplication.shared.endBackgroundTask(id)
+                id = .invalid
+            }
         }
         if id == .invalid {
             // A refused grant is not fatal — the operation still runs, it just
