@@ -31,6 +31,18 @@ final class SessionForkManager {
             await store.updateSessionTitle(newSession.id, title: forkTitle, category: category)
         }
 
+        // Inherit pin + folder. listRemoteSessions carried both fields,
+        // but createSession starts unpinned/unfiled and nothing copied
+        // them over — a fork of a pinned, filed session silently lost
+        // its place. (A folderId that doesn't exist locally yet just
+        // renders as unfiled until the folder syncs in.)
+        if let pinnedAt = remoteSession.pinnedAt {
+            await store.setSessionPinnedAt(pinnedAt, forSession: newSession.id)
+        }
+        if let folderId = remoteSession.folderId {
+            await store.setFolder(folderId, forSessions: [newSession.id])
+        }
+
         // Load and deep-copy messages
         let remoteMessages = await store.loadRemoteMessages(sessionId: remoteSessionId, deviceId: remoteDeviceId)
         for msg in remoteMessages {
@@ -74,6 +86,15 @@ final class SessionForkManager {
 
         if let category = session.category {
             await store.updateSessionTitle(newSession.id, title: dupTitle, category: category)
+        }
+
+        // Inherit pin + folder, like forkSession — a duplicate of a
+        // pinned, filed session should stay pinned and filed.
+        if let pinnedAt = session.pinnedAt {
+            await store.setSessionPinnedAt(pinnedAt, forSession: newSession.id)
+        }
+        if let folderId = session.folderId {
+            await store.setFolder(folderId, forSessions: [newSession.id])
         }
 
         let messages = await store.loadMessages(sessionId: sessionId)

@@ -2057,6 +2057,26 @@ actor ChatStore {
         return newPinned
     }
 
+    /// Set an exact pin timestamp (nil clears the pin). Fork/duplicate use
+    /// this so the copy inherits the source session's pin — toggleSessionPin
+    /// can't express that (it flips the state and stamps "now").
+    func setSessionPinnedAt(_ pinnedAt: Date?, forSession id: String) {
+        invalidateSessionListCache()
+        let sql = "UPDATE sessions SET pinned_at = ? WHERE id = ?"
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            if let pinnedAt {
+                sqlite3_bind_double(stmt, 1, pinnedAt.timeIntervalSince1970)
+            } else {
+                sqlite3_bind_null(stmt, 1)
+            }
+            sqlite3_bind_text(stmt, 2, (id as NSString).utf8String, -1, nil)
+            sqlite3_step(stmt)
+        }
+        sqlite3_finalize(stmt)
+        markDirty(recordType: "Session", recordId: id)
+    }
+
     // MARK: - Folders
 
     /// All folders, most recently updated first.
