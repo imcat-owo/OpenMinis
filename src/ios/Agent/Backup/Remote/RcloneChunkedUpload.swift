@@ -193,7 +193,7 @@ enum RcloneTransfer {
     private static func sweepAbandonedPartials(fs: String,
                                                remote: RcloneRemoteStore.Remote,
                                                keeping current: String) {
-        let dir = remote.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let dir = remote.directoryPath
         guard let out = try? RcloneBridge.rpc("operations/list", ["fs": fs, "remote": dir]),
               let list = out["list"] as? [[String: Any]] else { return }
 
@@ -257,8 +257,7 @@ enum RcloneTransfer {
     static func listPackages(remote: RcloneRemoteStore.Remote) throws -> [RemotePackage] {
         let fs = RcloneRemoteStore.fsSpec(for: remote)
         let root = try RcloneBridge.rpc("operations/list",
-                                        ["fs": fs, "remote": remote.path.trimmingCharacters(
-                                            in: CharacterSet(charactersIn: "/"))])
+                                        ["fs": fs, "remote": remote.directoryPath])
         var found: [RemotePackage] = []
         for e in (root["list"] as? [[String: Any]]) ?? [] {
             let name = e["Name"] as? String ?? ""

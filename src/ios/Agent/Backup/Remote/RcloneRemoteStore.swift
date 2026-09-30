@@ -97,6 +97,22 @@ enum RcloneRemoteStore {
             return base.isEmpty ? name : "\(base)/\(name)"
         }
 
+        /// This remote's backup directory itself, as an `operations/list`
+        /// argument — the directory `join` builds on, in the same path
+        /// dialect. Listing must NOT trim the leading slash the way the
+        /// non-SFTP branch of `join` trims it for CHILDREN: on SFTP the
+        /// slash is what makes the path absolute, so a trimmed list looked
+        /// in the login user's home while uploads landed in `/srv/…` —
+        /// packages listed as missing, and the partial sweep rummaged (and
+        /// deleted) in a same-named relative directory instead.
+        var directoryPath: String {
+            if RcloneBackendCatalog.usesAbsolutePaths(backend) {
+                if path == "/" { return "/" }
+                return path.hasSuffix("/") ? String(path.dropLast()) : path
+            }
+            return path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        }
+
         // Hand-written so a record saved BEFORE `enabled` existed still
         // decodes. Swift's synthesized Decodable ignores the default value and
         // throws keyNotFound for a missing key — the same trap review S1 hit
