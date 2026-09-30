@@ -6304,7 +6304,7 @@ extension ChatStore {
                     } else {
                         sqlite3_bind_null(stmt, 6)
                     }
-                    var nextIndex = 7
+                    var nextIndex: Int32 = 7
                     if remoteHasFolderField {
                         bindOptionalText(stmt, index: nextIndex, value: remoteFolderId)
                         nextIndex += 1
