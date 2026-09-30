@@ -284,7 +284,7 @@ final class AntigravityProvider: LLMProvider {
             let role = msg.role == .user ? "user" : "model"
             contents.append([
                 "role": role,
-                "parts": [["text": msg.content]]
+                "parts": [GeminiWireFormat.textPart(msg.content)]
             ])
         }
         body["contents"] = contents

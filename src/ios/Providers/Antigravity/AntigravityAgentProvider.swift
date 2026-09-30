@@ -140,7 +140,7 @@ final class AntigravityAgentProvider: AgentProvider {
             for part in msg.parts {
                 switch part {
                 case .text(let text):
-                    parts.append(["text": text])
+                    parts.append(GeminiWireFormat.textPart(text))
 
                 case .toolUse(let id, let name, let input):
                     if unsignedToolCallIds.contains(id) {
@@ -171,7 +171,7 @@ final class AntigravityAgentProvider: AgentProvider {
                         }
                     } else {
                         var frPart = GeminiConversation.functionResponsePart(
-                            name: resolvedName, response: ["result": content]
+                            name: resolvedName, response: GeminiWireFormat.functionResponseResult(content)
                         )
                         // Claude models require an `id` field on functionResponse parts.
                         if isClaude, var fr = frPart["functionResponse"] as? [String: Any] {
