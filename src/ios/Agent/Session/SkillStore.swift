@@ -771,8 +771,10 @@ thinking 填/描/强调不必手写。贴包后跟 `colorsLight.accent` / 聊天
             try? fm.removeItem(at: oldRootfs)
         }
 
-        // Preserve local enabled state if skill already exists
-        let existingEnabled = skills.first(where: { $0.id == skillId })?.isEnabled ?? isEnabled
+        // Enabled state is itself syncable (setEnabled marks it dirty), so
+        // apply the remote value — keeping the local one here would silently
+        // drop a disable/enable made on another device.
+        let existingEnabled = isEnabled
 
         let skill = Skill(
             id: skillId,
