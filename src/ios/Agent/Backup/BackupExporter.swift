@@ -644,30 +644,50 @@ actor BackupExporter {
                 .filter { $0 == "\(base).jsonl" || ($0.hasPrefix("\(base)-") && $0.hasSuffix(".jsonl")) }
                 .sorted()
         }
-        func lines<T: Codable>(_ base: String, as type: T.Type) -> [T] {
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            var out: [T] = []
+        // Stream the staged shards line by line: counting messages must
+        // never materialize a whole shard — let alone every message —
+        // in memory, or a large backup's resume dies at the finish line.
+        func forEachLine(_ base: String, _ body: (Data) -> Void) {
             for name in shardNames(base) {
-                guard let data = try? Data(contentsOf: dataDir.appendingPathComponent(name)) else { continue }
-                for line in data.split(separator: 0x0A) where !line.isEmpty {
-                    if let env = try? decoder.decode(BackupRecordEnvelope<T>.self, from: Data(line)) {
-                        out.append(env.d)
+                guard let handle = try? FileHandle(forReadingFrom: dataDir.appendingPathComponent(name))
+                else { continue }
+                defer { try? handle.close() }
+                var buffer = Data()
+                while let chunk = try? handle.read(upToCount: 1 << 20), !chunk.isEmpty {
+                    buffer.append(chunk)
+                    while let nl = buffer.firstIndex(of: 0x0A) {
+                        let line = buffer.subdata(in: buffer.startIndex..<nl)
+                        buffer.removeSubrange(buffer.startIndex...nl)
+                        if !line.isEmpty { body(line) }
                     }
                 }
+                if !buffer.isEmpty { body(buffer) }
             }
-            return out
         }
-        let records = lines("sessions", as: SessionRecord.self)
-        guard !records.isEmpty else { return [] }
-        var counts: [String: Int] = [:]
-        for msg in lines("messages", as: RawMessage.self) {
-            counts[msg.sessionId, default: 0] += 1
+        func decode<T: Codable>(_ type: T.Type, from line: Data,
+                                using decoder: JSONDecoder) -> T? {
+            (try? decoder.decode(BackupRecordEnvelope<T>.self, from: line))?.d
         }
-        return records.map {
-            .init(id: $0.session.id, title: $0.session.title,
-                  messageCount: counts[$0.session.id] ?? 0)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        var summaries: [BackupRescueIndex.SessionSummary] = []
+        var indexById: [String: Int] = [:]
+        forEachLine("sessions") { line in
+            guard let rec = decode(SessionRecord.self, from: line, using: decoder) else { return }
+            indexById[rec.session.id] = summaries.count
+            summaries.append(.init(id: rec.session.id, title: rec.session.title,
+                                   messageCount: 0))
         }
+        guard !summaries.isEmpty else { return [] }
+        // Only the sessionId is needed from each message — decode just
+        // that instead of every full RawMessage.
+        struct MessageSessionRef: Codable { let sessionId: String }
+        forEachLine("messages") { line in
+            guard let ref = decode(MessageSessionRef.self, from: line, using: decoder),
+                  let idx = indexById[ref.sessionId] else { return }
+            summaries[idx].messageCount += 1
+        }
+        return summaries
     }
 
     /// Session row + the two extras the sync layer keeps outside `ChatSession`,
