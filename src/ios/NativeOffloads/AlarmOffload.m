@@ -113,6 +113,13 @@ static NSDate *parseAlarmTime(NSString *str) {
         NSInteger hour = [[str substringWithRange:[match rangeAtIndex:1]] integerValue];
         NSInteger minute = [[str substringWithRange:[match rangeAtIndex:2]] integerValue];
 
+        // Validate ranges: NSCalendar's dateFromComponents LENIENTLY carries
+        // overflows (99:99 becomes ~4 days later), so without this check a
+        // typo'd time is silently scheduled days away and reported as success.
+        if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+            return nil;
+        }
+
         NSCalendar *cal = [NSCalendar currentCalendar];
         NSDateComponents *comps = [cal components:(NSCalendarUnitYear | NSCalendarUnitMonth |
                                                     NSCalendarUnitDay)
