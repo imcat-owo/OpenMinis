@@ -216,6 +216,11 @@ final class BrowserTabPool: ObservableObject {
         /// on its tab while another agent's fresh `navigate` fans out.
         /// [T-browser-implicit-tab-inuse-until-load-ios]
         var inUse: Bool = false
+        /// True for tabs created by `openWithConfiguration` (window.open /
+        /// OAuth popups). A popup belongs to the page that opened it and to
+        /// the flow it is mediating (e.g. a login redirect dance) — implicit
+        /// tab dispatch must never reuse it for an unrelated navigate.
+        var isPopup: Bool = false
         /// Outstanding Task that will flip `inUse` back to false at the end of
         /// the current grace window. Each new completion cancels the previous
         /// task and arms a fresh 15-second timer.
@@ -605,7 +610,7 @@ final class BrowserTabPool: ObservableObject {
                                         configuration: configuration,
                                         viewportWidth: vp.width, viewportHeight: vp.height)
         wireManager(manager)
-        let tab = Tab(id: nextId, manager: manager, inUse: false)
+        let tab = Tab(id: nextId, manager: manager, inUse: false, isPopup: true)
         tabs.append(tab)
         selectedTabId = nextId
         logger.info("Created popup tab \(nextId) via window.open, total: \(self.tabs.count)")
@@ -892,7 +897,9 @@ final class BrowserTabPool: ObservableObject {
             // NEVER dispatch onto a tab that's still inUse (action in flight OR
             // within the 15s post-action grace). Otherwise back-to-back
             // navigates land on tab 0 and stomp each other's URLs. Try:
-            //   1. Pick any existing tab whose `inUse=false` (prefers reuse).
+            //   1. Pick an existing tab whose `inUse=false` (prefers reuse),
+            //      excluding popup tabs and preferring non-selected ones
+            //      [R3-103].
             //   2. Otherwise, if capacity remains, fan out to a fresh tab.
             //   3. Otherwise, fall back to ensureDefaultTab() — at full
             //      capacity with everything busy, the agent will hit the
@@ -907,7 +914,17 @@ final class BrowserTabPool: ObservableObject {
                     ? selectedTabId
                     : ensureDefaultTab()
             } else if !explicitTabId {
-                if let freeTab = tabs.first(where: { !$0.inUse }) {
+                // [R3-103] Popup tabs (window.open / OAuth) are never reused:
+                // they belong to the flow that opened them, and navigating
+                // one away breaks that flow mid-flight. Among the rest,
+                // prefer a tab the user isn't currently viewing
+                // (selectedTabId) so an implicit navigate doesn't hijack the
+                // page on screen when any alternative exists; the selected
+                // tab itself remains the fallback (it is usually the agent's
+                // own last tab) before fanning out to a fresh one.
+                let freeTab = tabs.first(where: { !$0.inUse && !$0.isPopup && $0.id != selectedTabId })
+                    ?? tabs.first(where: { !$0.inUse && !$0.isPopup })
+                if let freeTab {
                     targetId = freeTab.id
                     // [T-browser-tab-reuse-silent-switch] We're about to REUSE an
                     // idle tab that already holds a page (not a blank fresh tab)
