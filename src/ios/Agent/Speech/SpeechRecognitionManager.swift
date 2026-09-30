@@ -235,6 +235,8 @@ final class SpeechRecognitionManager: ObservableObject {
 
         guard recordingFormat.channelCount > 0 else {
             logger.error("Recording format has 0 channels — cannot install tap")
+            recognitionRequest = nil
+            try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
             throw NSError(domain: "SpeechRecognition", code: -1, userInfo: [NSLocalizedDescriptionKey: "Recording format has 0 channels"])
         }
 
@@ -269,10 +271,14 @@ final class SpeechRecognitionManager: ObservableObject {
         guard installOk, startError == nil else {
             // Roll back anything that partially succeeded so the next attempt
             // starts clean and no orphaned tap remains on the input node.
+            // The audio session is part of that rollback: it was activated
+            // above, and leaving it .record keeps other apps' audio
+            // ducked/interrupted until some unrelated success path runs.
             audioEngine.stop()
             inputNode.removeTap(onBus: 0)
             recognitionRequest = nil
             state = .idle
+            try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
             let reason = installOk
                 ? (startError?.localizedDescription ?? "audio engine failed to start")
                 : "installTap raised an exception (audio session unavailable?)"
