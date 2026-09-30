@@ -468,7 +468,16 @@ enum ThinkingRuleResolver {
             guard let tiers = declaredTiers, !tiers.isEmpty else { return false }
             return tiers.isDisjoint(with: ["none", "off", "minimal", "disabled"])
         }()
-        let offEffort = (strictEffortEnum || offTierNotDeclared) ? nil : ctx.offEffort
+        // [R3-063] A rule's own off value (the editor's "send a value when
+        // thinking is off") rides on the wire format and outranks the
+        // endpoint-derived ctx.offEffort. Built-in rules pass ctx.offEffort
+        // itself as the format's value, so this changes nothing for them;
+        // the G1/G2 suppression applies to whichever value wins.
+        let formatOffValue: String? = {
+            if case .reasoningEffort(let v) = format { return v }
+            return nil
+        }()
+        let offEffort = (strictEffortEnum || offTierNotDeclared) ? nil : (formatOffValue ?? ctx.offEffort)
 
         // [T-thinking-vision-diag] Record G1/G2 attribution. Both only matter when an off
         // tier was actually on the table, so an enabled level (or a nil ctx.offEffort)
@@ -491,9 +500,18 @@ enum ThinkingRuleResolver {
         case .omitEverything:
             return (nil, nil)
 
-        case .reasoningEffortNested:
-            // OpenRouter: omit entirely when off.
-            guard ctx.level.isEnabled else { return (nil, nil) }
+        case .reasoningEffortNested(let nestedOffValue):
+            // OpenRouter: omit entirely when off — unless the winning rule
+            // carries its own off value, which is sent under the same G1/G2
+            // suppression as the flat format. Deliberately NO ctx.offEffort
+            // fallback: built-in nested rules pass nil precisely because
+            // omitting is load-bearing for forced-reasoning models.
+            guard ctx.level.isEnabled else {
+                let off = (strictEffortEnum || offTierNotDeclared) ? nil : nestedOffValue
+                guard let off else { return (nil, nil) }
+                body["reasoning"] = ["effort": off]
+                return (off, off)
+            }
             let effort = OpenAIAgentProvider.wireEffort(for: ctx.level)
             body["reasoning"] = ["effort": effort]
             return (effort, effort)
