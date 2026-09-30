@@ -141,6 +141,12 @@ struct GroupsCollection: ConfigCollection {
             },
             writer: { [self] v in
                 guard case .string(let s) = v else { throw ConfigError.typeMismatch(expected: "string") }
+                // Same rule as `add` (which refuses a missing/empty name): the
+                // .string schema only bounds length, so an empty rename would
+                // otherwise be persisted as-is.
+                guard !s.isEmpty else {
+                    throw ConfigError.invalidValue("Group name cannot be empty")
+                }
                 try mutate(id) { $0.name = s }
             }
         )
