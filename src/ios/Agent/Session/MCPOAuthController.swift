@@ -159,10 +159,8 @@ final class MCPOAuthController: NSObject, ObservableObject {
     /// not a storage location. Returns true when a seed was imported.
     @discardableResult
     static func importPendingSecretIfAny(server: String) -> Bool {
-        let url = AIChatViewModel.minisMcpServersPersistentDir
-            .appendingPathComponent("oauth", isDirectory: true)
-            .appendingPathComponent("\(server).secret")
-        guard let data = try? Data(contentsOf: url),
+        guard let url = oauthFileURL(fileName: "\(server).secret"),
+              let data = try? Data(contentsOf: url),
               let secret = String(data: data, encoding: .utf8)?
                   .trimmingCharacters(in: .whitespacesAndNewlines),
               !secret.isEmpty else { return false }
@@ -204,7 +202,9 @@ final class MCPOAuthController: NSObject, ObservableObject {
     /// kept (it's configuration, not a session).
     static func signOut(server: String) {
         keychainDelete(account: "\(server)#tokens")
-        try? FileManager.default.removeItem(at: bridgeFileURL(server: server))
+        if let bridge = bridgeFileURL(server: server) {
+            try? FileManager.default.removeItem(at: bridge)
+        }
     }
 
     /// Full cleanup on server delete: secret + tokens + bridge file.
@@ -213,10 +213,9 @@ final class MCPOAuthController: NSObject, ObservableObject {
         signOut(server: server)
         // Also drop any CLI-seeded secret file still waiting to be imported,
         // or a recreated server with the same name would inherit it.
-        let seedURL = AIChatViewModel.minisMcpServersPersistentDir
-            .appendingPathComponent("oauth", isDirectory: true)
-            .appendingPathComponent("\(server).secret")
-        try? FileManager.default.removeItem(at: seedURL)
+        if let seedURL = oauthFileURL(fileName: "\(server).secret") {
+            try? FileManager.default.removeItem(at: seedURL)
+        }
     }
 
     // MARK: - RFC 8707 resource indicator [T-mcp-oauth-resource]
@@ -242,12 +241,32 @@ final class MCPOAuthController: NSObject, ObservableObject {
 
     // MARK: - Guest bridge file
 
+    /// Server names are untrusted (typed in the form, imported JSON keys,
+    /// synced records). They are safe as Keychain account suffixes, but as
+    /// file names `../` would escape <mcp-servers>/oauth/ — the token bridge
+    /// could be written outside the oauth directory, and purge/signOut could
+    /// delete outside it. Central choke point: every oauth-dir file URL is
+    /// built here, and anything resolving outside the directory is refused
+    /// (nil) instead of escaping.
+    private static func oauthFileURL(fileName: String) -> URL? {
+        let dir = AIChatViewModel.minisMcpServersPersistentDir
+            .appendingPathComponent("oauth", isDirectory: true)
+        let url = dir.appendingPathComponent(fileName)
+        let inside = url.standardizedFileURL.path.hasPrefix(
+            dir.standardizedFileURL.path + "/")
+        guard inside else {
+            AppLogger(category: "MCPOAuth").error(
+                "[PathSafety] refusing oauth file outside oauth dir: '\(fileName)'")
+            return nil
+        }
+        return url
+    }
+
     /// Host URL of the guest-visible token bridge for `server`
     /// (bind-mounted at /var/minis/mcp-servers/oauth/<name>.json).
-    nonisolated static func bridgeFileURL(server: String) -> URL {
-        AIChatViewModel.minisMcpServersPersistentDir
-            .appendingPathComponent("oauth", isDirectory: true)
-            .appendingPathComponent("\(server).json")
+    /// Nil when the name would escape the oauth directory.
+    nonisolated static func bridgeFileURL(server: String) -> URL? {
+        oauthFileURL(fileName: "\(server).json")
     }
 
     /// Write the bridge file the guest transport reads. Includes refresh
@@ -270,7 +289,7 @@ final class MCPOAuthController: NSObject, ObservableObject {
             obj["resource"] = resource
         }
         do {
-            let url = bridgeFileURL(server: server)
+            guard let url = bridgeFileURL(server: server) else { return }
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
                                                     withIntermediateDirectories: true)
             let data = try JSONSerialization.data(withJSONObject: obj)
