@@ -199,10 +199,15 @@ private enum OpenAIModelsCache {
               Date().timeIntervalSince(entry.date) < ttl else {
             return nil
         }
+        // A cached empty list is never a valid hit — it means one bad
+        // response once locked the list empty for the whole TTL.
+        guard !entry.models.isEmpty else { return nil }
         return entry.models
     }
 
     static func save(_ models: [LLMModel], credential: String, address: String) {
+        // Don't let one empty/error response lock the list empty for 7 days.
+        guard !models.isEmpty else { return }
         let entry = Entry(models: models, date: Date())
         guard let data = try? JSONEncoder().encode(entry) else { return }
         try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
