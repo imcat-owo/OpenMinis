@@ -200,6 +200,12 @@ final class MountedFoldersManager {
         }
     }
 
+    /// True when the on-disk store existed but could not be read/decoded.
+    /// While set, `save()` must not overwrite the store file: `entries` is
+    /// empty because we could not read it, not because the user has no
+    /// mounts. Cleared when the unreadable file is quarantined (see load()).
+    private var storeLoadFailed = false
+
     private func load() {
         let url = Self.storeURL
         guard FileManager.default.fileExists(atPath: url.path) else { return }
@@ -207,11 +213,32 @@ final class MountedFoldersManager {
             let data = try Data(contentsOf: url)
             entries = try JSONDecoder().decode([MountedFolderEntry].self, from: data)
         } catch {
+            storeLoadFailed = true
             mountLog.warning("load failed: \(error.localizedDescription)")
+            // [R3-030] Quarantine the unreadable store so the next save()
+            // starts from a clean path instead of atomically overwriting
+            // the only copy of the user's mount records. The original stays
+            // on disk for recovery; if the move itself fails,
+            // storeLoadFailed stays set and save() refuses to clobber it.
+            let quarantine = url.appendingPathExtension("corrupt")
+            do {
+                try? FileManager.default.removeItem(at: quarantine)
+                try FileManager.default.moveItem(at: url, to: quarantine)
+                storeLoadFailed = false
+                mountLog.warning("load failed: quarantined unreadable store to \(quarantine.lastPathComponent)")
+            } catch {
+                mountLog.error("load failed: could not quarantine store: \(error.localizedDescription)")
+            }
         }
     }
 
     private func save() {
+        // [R3-030] Never overwrite a store we failed to load and could not
+        // quarantine — the in-memory list is not the truth in that state.
+        if storeLoadFailed {
+            mountLog.error("save skipped: store failed to load and could not be quarantined; refusing to overwrite it")
+            return
+        }
         do {
             let data = try JSONEncoder().encode(entries)
             try data.write(to: Self.storeURL, options: .atomic)
