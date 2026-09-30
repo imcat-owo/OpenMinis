@@ -1520,21 +1520,47 @@ final class ProviderConfigStore: ObservableObject {
     }
 
     func removeEntry(_ entryId: String) {
-        // V3 entry records are keyed by uuid (see emitV3MarkDirty upserts);
-        // resolve it before removal so the delete targets the same record.
-        let removedUuid = config.modelEntries.first { $0.id == entryId || $0.uuid == entryId }?.uuid ?? entryId
-        config.modelEntries.removeAll { $0.id == entryId }
+        // [R3-106] Resolve through entry(for:) — the same four-way lookup
+        // (composite key / uuid / legacy-uuid map / legacy ":" key) callers
+        // use to FIND an entry — and drive every removal step off the
+        // resolved entry. Previously only the cloud tombstone used a
+        // partially-resolved uuid while the local delete, group-member
+        // cleanup and agent-loop cleanup all compared the RAW input: a
+        // caller passing an old uuid (e.g. DebugRPC, which resolves via
+        // entry(for:) then forwards the raw id) deleted nothing locally,
+        // yet still saved and tombstoned the cloud record — local and
+        // cloud permanently disagreed.
+        // The membership check keeps System virtual entries (synthetic,
+        // never stored, fresh random uuid per lookup) on the old raw-id
+        // path — they must not drive the uuid tombstone below.
+        let resolved = entry(for: entryId).flatMap { candidate in
+            config.modelEntries.contains(where: { $0.uuid == candidate.uuid }) ? candidate : nil
+        }
+        let removedUuid = resolved?.uuid ?? entryId
+        let canonicalId = resolved?.id ?? entryId
+        var idForms: Set<String> = [entryId, canonicalId, removedUuid]
+        if let colonKey = resolved?.legacyColonCompositeKey { idForms.insert(colonKey) }
+        config.modelEntries.removeAll { idForms.contains($0.id) || $0.uuid == removedUuid }
         // Also remove from groups — stamp a member-removal tombstone on each
         // group so the removal survives the inbound union-merge on peers.
+        // Tombstone every form actually present so the member stays removed
+        // under whichever form the group had stored.
         let now = Date()
-        for i in config.modelGroups.indices where config.modelGroups[i].memberEntryIds.contains(entryId) {
-            config.modelGroups[i].memberEntryIds.removeAll { $0 == entryId }
-            config.modelGroups[i].removedMembers[entryId] = now
-            config.modelGroups[i].addedMembers[entryId] = nil
+        for i in config.modelGroups.indices where config.modelGroups[i].memberEntryIds.contains(where: { idForms.contains($0) }) {
+            let presentForms = config.modelGroups[i].memberEntryIds.filter { idForms.contains($0) }
+            config.modelGroups[i].memberEntryIds.removeAll { idForms.contains($0) }
+            for form in presentForms {
+                config.modelGroups[i].removedMembers[form] = now
+                config.modelGroups[i].addedMembers[form] = nil
+            }
         }
         // Remove from agent loop list
-        config.agentLoopModelEntryIds.removeAll { $0 == entryId }
-        Self.recordTombstone(in: &config.deletedModelEntries, ids: [entryId])
+        config.agentLoopModelEntryIds.removeAll { idForms.contains($0) }
+        // The V2 merge applies entry tombstones against the composite key
+        // (CloudSyncEngine), so record the canonical id; the raw input is
+        // recorded too when it differs, for peers still on pre-composite
+        // builds whose entry ids ARE uuids.
+        Self.recordTombstone(in: &config.deletedModelEntries, ids: canonicalId == entryId ? [entryId] : [entryId, canonicalId])
         save()
         // [T-icloud-provider-sync-consistency] emitV3MarkDirty no longer
         // infers deletes from the snapshot diff, so an explicit removal must
