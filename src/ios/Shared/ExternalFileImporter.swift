@@ -59,10 +59,20 @@ enum ExternalFileImporter {
             return false
         }
 
-        let share = PendingShare(
-            items: [PendingShare.Item(kind: .attachment, value: stagedName)],
-            timestamp: Date()
-        )
+        // Merge with any unconsumed previous share instead of overwriting
+        // it wholesale — same [T-share-buffer-merge] discipline the Share
+        // Extension's save() already follows. Without this, importing a
+        // file while an earlier share still waits to be consumed silently
+        // discards that share (and orphans its staged files). The 300s
+        // window matches the extension path and the consumer's staleness
+        // cutoff.
+        var items = [PendingShare.Item(kind: .attachment, value: stagedName)]
+        if let existing = SharedContainerStore.loadPendingShare(),
+           Date().timeIntervalSince(existing.timestamp) < 300 {
+            importLog.info("[Share] ingest: merging \(existing.items.count) existing unconsumed item(s) with the imported file")
+            items = existing.items + items
+        }
+        let share = PendingShare(items: items, timestamp: Date())
         SharedContainerStore.savePendingShare(share)
         importLog.info("[Share] ingest: staged \(url.lastPathComponent) as \(stagedName) and raising pending share")
         Task { @MainActor in coordinator.raisePendingShare() }
