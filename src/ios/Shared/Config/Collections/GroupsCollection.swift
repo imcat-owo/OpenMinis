@@ -59,6 +59,14 @@ struct GroupsCollection: ConfigCollection {
                 if case .string(let s) = v, !s.isEmpty { members.append(s) }
             }
         }
+        // Same existence rule as the `entries` field writer: every member
+        // must be a real model entry, or the whole add is rejected. Without
+        // this, add minted groups with dangling members that the field
+        // writer would refuse to write back.
+        let validEntryIds = Set(ProviderConfigStore.shared.config.modelEntries.map(\.id))
+        for member in members where !validEntryIds.contains(member) {
+            throw ConfigError.invalidValue("Unknown model entry uuid: \(member)")
+        }
         var strategy: RoutingStrategy = .fallback
         if case .string(let s)? = dict["strategy"], let parsed = RoutingStrategy(rawValue: s) {
             strategy = parsed
