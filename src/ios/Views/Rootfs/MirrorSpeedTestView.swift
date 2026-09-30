@@ -381,11 +381,20 @@ final class MirrorSpeedTestViewModel: ObservableObject {
         let dataPath = RootfsManager.shared.dataPath
         let configURL = dataPath.appendingPathComponent(category.configPath)
         let bakURL = dataPath.appendingPathComponent(category.configPath + ".bak")
+        // Marker recording "this config file did not exist before applyMirror
+        // created it" — restoreOfficial must DELETE such a file to restore
+        // the official state; there is no original to restore from. Living
+        // next to the config, the marker dies with the rootfs it describes.
+        let createdMarkerURL = dataPath.appendingPathComponent(category.configPath + ".minis-created")
 
         let fm = FileManager.default
+        let createdByUs = fm.fileExists(atPath: createdMarkerURL.path)
+        let hadConfig = fm.fileExists(atPath: configURL.path)
 
-        // Backup original if .bak doesn't exist yet
-        if !fm.fileExists(atPath: bakURL.path), fm.fileExists(atPath: configURL.path) {
+        // Backup original if .bak doesn't exist yet. A config we created
+        // ourselves is NOT an original — never back it up as one, or a
+        // later restore would "restore" the mirror config itself.
+        if !createdByUs, !fm.fileExists(atPath: bakURL.path), hadConfig {
             do {
                 try fm.copyItem(at: configURL, to: bakURL)
                 logger.info("Backed up \(category.configPath) → .bak")
@@ -415,6 +424,12 @@ final class MirrorSpeedTestViewModel: ObservableObject {
         do {
             try fm.createDirectory(at: configURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try content.write(to: configURL, atomically: true, encoding: .utf8)
+            if !hadConfig && !createdByUs {
+                // We just created a file where none existed — record that
+                // so restoreOfficial removes it instead of reporting a
+                // restore that leaves the mirror in effect forever.
+                try? Data().write(to: createdMarkerURL)
+            }
             logger.info("Applied mirror \(mirror.name) to \(category.configPath)")
         } catch {
             logger.error("Failed to write \(category.configPath): \(error)")
@@ -426,8 +441,28 @@ final class MirrorSpeedTestViewModel: ObservableObject {
         let dataPath = RootfsManager.shared.dataPath
         let configURL = dataPath.appendingPathComponent(category.configPath)
         let bakURL = dataPath.appendingPathComponent(category.configPath + ".bak")
+        let createdMarkerURL = dataPath.appendingPathComponent(category.configPath + ".minis-created")
 
         let fm = FileManager.default
+
+        // The config was created by applyMirror where no file existed
+        // before (e.g. npm's root/.npmrc): the official state is the
+        // file's ABSENCE, so deleting it IS the restore. Without this,
+        // restore returned early here and the mirror stayed in effect
+        // forever while the UI showed the official defaults.
+        if fm.fileExists(atPath: createdMarkerURL.path) {
+            do {
+                if fm.fileExists(atPath: configURL.path) {
+                    try fm.removeItem(at: configURL)
+                }
+                try fm.removeItem(at: createdMarkerURL)
+                logger.info("Removed mirror-created \(category.configPath) to restore official state")
+            } catch {
+                logger.error("Failed to remove mirror-created \(category.configPath): \(error)")
+            }
+            return
+        }
+
         guard fm.fileExists(atPath: bakURL.path) else {
             logger.info("No .bak for \(category.configPath), skipping restore")
             return
