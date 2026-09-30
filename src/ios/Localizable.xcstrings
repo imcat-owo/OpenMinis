@@ -104345,7 +104345,115 @@
                 }
             }
         }
+    },
+
+  "Caches": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Caches"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "缓存"
+        }
+      }
     }
+  },
+
+  "Voice cache": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Voice cache"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "语音缓存"
+        }
+      }
+    }
+  },
+
+  "Network cache": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Network cache"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "网络缓存"
+        }
+      }
+    }
+  },
+
+  "Clear all caches": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Clear all caches"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "清理全部缓存"
+        }
+      }
+    }
+  },
+
+  "Clear all caches?": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Clear all caches?"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "清理全部缓存？"
+        }
+      }
+    }
+  },
+
+  "Cached voice audio and network responses will be removed. They are downloaded again when needed.": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Cached voice audio and network responses will be removed. They are downloaded again when needed."
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "已缓存的语音和网络响应会被删掉，之后用时会重新下载。"
+        }
+      }
+    }
+  }
   },
   "version" : "1.0"
 }

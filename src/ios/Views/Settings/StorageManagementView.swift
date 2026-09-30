@@ -14,6 +14,10 @@ class StorageManagementViewModel: ObservableObject {
     @Published var chatDatabaseSize: Int64 = 0
     @Published var sessions: [SessionStorage] = []
     @Published var isLoading = true
+    /// [MSC-4] Cache-category sizes: TTS disk cache + URL response cache.
+    @Published var ttsCacheSize: Int64 = 0
+    @Published var networkCacheSize: Int64 = 0
+    var totalCacheSize: Int64 { ttsCacheSize + networkCacheSize }
 
     private let fm = FileManager.default
     private let formatter: ByteCountFormatter = {
@@ -47,6 +51,10 @@ class StorageManagementViewModel: ObservableObject {
             let dbURL = libraryURL.appendingPathComponent("MinisChat/minis.db")
             let dbSize = self.fileSize(at: dbURL)
 
+            // [MSC-4] Caches
+            let ttsSize = Int64(TTSDiskCache.totalBytes())
+            let netSize = Int64(URLCache.shared.currentDiskUsage)
+
             // Per-session minis files: Library/MinisChat/minis/<sessionId>/
             let minisBaseURL = libraryURL.appendingPathComponent("MinisChat/minis", isDirectory: true)
             // Get all chat sessions
@@ -79,8 +87,20 @@ class StorageManagementViewModel: ObservableObject {
                 self.shellContainerSize = shellSize
                 self.chatDatabaseSize = dbSize
                 self.sessions = sorted
+                self.ttsCacheSize = ttsSize
+                self.networkCacheSize = netSize
                 self.isLoading = false
             }
+        }
+    }
+
+    /// [MSC-4] One-tap cache clear: every regenerable cache in one place.
+    func clearCaches() {
+        Task.detached(priority: .userInitiated) { [weak self] in
+            TTSDiskCache.clearAll()
+            URLCache.shared.removeAllCachedResponses()
+            ThumbnailCache.shared.removeAll()
+            self?.load()
         }
     }
 
@@ -111,6 +131,7 @@ class StorageManagementViewModel: ObservableObject {
 
 struct StorageManagementView: View {
     @StateObject private var vm = StorageManagementViewModel()
+    @State private var showClearCachesConfirmation = false
 
     var body: some View {
         List {
@@ -118,6 +139,20 @@ struct StorageManagementView: View {
                 storageRow(icon: "terminal", color: .gray, label: "Shell Container", value: vm.format(vm.shellContainerSize))
                 storageRow(icon: "cylinder", color: .blue, label: "Chat Database", value: vm.format(vm.chatDatabaseSize))
                 storageRow(icon: "doc", color: .indigo, label: "Session Files", value: vm.format(vm.totalSessionSize))
+            }
+
+            // [MSC-4] Unified cache category + one-tap clear.
+            Section(AppLocalized("Caches")) {
+                storageRow(icon: "waveform", color: .orange, label: AppLocalized("Voice cache"),
+                           value: vm.format(vm.ttsCacheSize))
+                storageRow(icon: "network", color: .teal, label: AppLocalized("Network cache"),
+                           value: vm.format(vm.networkCacheSize))
+                Button(role: .destructive) {
+                    showClearCachesConfirmation = true
+                } label: {
+                    Text(AppLocalized("Clear all caches"))
+                }
+                .disabled(vm.totalCacheSize == 0)
             }
 
             Section("Sessions") {
@@ -150,6 +185,14 @@ struct StorageManagementView: View {
         .navigationTitle("Storage")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { vm.load() }
+        .confirmationDialog(AppLocalized("Clear all caches?"),
+                            isPresented: $showClearCachesConfirmation,
+                            titleVisibility: .visible) {
+            Button(AppLocalized("Clear"), role: .destructive) { vm.clearCaches() }
+            Button(AppLocalized("Cancel"), role: .cancel) {}
+        } message: {
+            Text(AppLocalized("Cached voice audio and network responses will be removed. They are downloaded again when needed."))
+        }
         .settingsPage()
     }
 
