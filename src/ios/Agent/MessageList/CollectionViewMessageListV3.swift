@@ -3770,7 +3770,15 @@ extension CollectionViewMessageListV3 {
             case .wholeMessage(let id):
                 let n = msg(id)?.content.count ?? 0
                 let a = msg(id)?.attachments.count ?? 0
-                return "w:\(id.uuidString):\(n):\(a)"
+                // Queued state belongs in the key: a queued user bubble is
+                // measured 28pt narrower (withdraw button) and therefore
+                // TALLER, and that height lands in the shared memo under
+                // this key. Without q, the key survives the queue drain
+                // unchanged, so the sent bubble stays pinned at the queued
+                // height with a phantom blank line — and the snapshot
+                // compare sees "no change" and never re-measures.
+                let q = msg(id)?.isQueued == true ? 1 : 0
+                return "w:\(id.uuidString):\(n):\(a):\(q)"
             case .assistantHeader(let id):
                 return "h:\(id.uuidString)"
             case .assistantFooter(let id):
