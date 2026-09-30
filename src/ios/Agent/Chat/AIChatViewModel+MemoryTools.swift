@@ -21,7 +21,13 @@ extension AIChatViewModel {
         let fmt = DateFormatter()
         fmt.dateFormat = "yyyy-MM-dd"
         let fm = FileManager.default
-        let today = Date()
+        // Anchor at the start of today and step by CALENDAR days. Stepping
+        // by -86400s from the current time lands on the wrong date around
+        // DST transitions (a 23/25-hour day shifts the result into the day
+        // before yesterday in the early hours), skipping a daily log and
+        // skewing the "Yesterday's" label and the gap-day count below.
+        let cal = Calendar.current
+        let todayStart = cal.startOfDay(for: Date())
 
         var fragments: [String] = []
         var dayOffset = 0
@@ -29,7 +35,7 @@ extension AIChatViewModel {
         let maxLookback = 30 // don't search more than 30 days back
 
         while fragments.count < 3 && dayOffset < maxLookback {
-            let date = today.addingTimeInterval(-Double(dayOffset) * 86400)
+            let date = cal.date(byAdding: .day, value: -dayOffset, to: todayStart) ?? todayStart
             let dateStr = fmt.string(from: date)
             let fileURL = minisMemoryPersistentDir.appendingPathComponent("\(dateStr).md")
 
