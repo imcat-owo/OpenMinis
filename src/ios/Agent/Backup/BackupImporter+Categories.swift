@@ -166,6 +166,8 @@ extension BackupImporter {
 
         // Sessions before messages — restoreMessage requires the parent row.
         var restoredSessionIds: [String] = []
+        var runningSessionIds: Set<String> = []
+        var packageSessionIds: Set<String> = []
         struct SessionRecord: Codable {
             let session: ChatSession
             let memoryEnabled: Bool
@@ -173,9 +175,16 @@ extension BackupImporter {
         }
         for rec in readJSONL(dataDir, base: "sessions", as: SessionRecord.self) {
             let sid = rec.session.id
+            packageSessionIds.insert(sid)
             // Refuse rather than silently skip: a running agent loop owns its
             // message list, and writing under it would scramble sort_order.
+            // The id is remembered so the message / marker / file-tree passes
+            // below refuse to write into the same session — guarding only the
+            // session row would still let its contents be overwritten, and
+            // the report would count the session skipped but its messages
+            // imported.
             if await store.isSessionRunning(sid) {
+                runningSessionIds.insert(sid)
                 report.skipped += 1
                 continue
             }
@@ -191,7 +200,27 @@ extension BackupImporter {
             }
         }
 
-        for msg in readJSONL(dataDir, base: "messages", as: RawMessage.self) {
+        let messageRecords = readJSONL(dataDir, base: "messages", as: RawMessage.self)
+        let markerRecords = readJSONL(dataDir, base: "compact_markers", as: CompactMarker.self)
+        // A session can also be running locally without its row being in
+        // this package (its messages/markers still resolve to the local
+        // parent row). Extend the same refusal to those ids before any
+        // content pass writes into them.
+        let contentOnlyIds = Set(messageRecords.map(\.sessionId))
+            .union(markerRecords.map(\.sessionId))
+            .subtracting(packageSessionIds)
+            .subtracting(runningSessionIds)
+        for sid in contentOnlyIds {
+            if await store.isSessionRunning(sid) {
+                runningSessionIds.insert(sid)
+            }
+        }
+
+        for msg in messageRecords {
+            if runningSessionIds.contains(msg.sessionId) {
+                report.skipped += 1
+                continue
+            }
             guard let partsJson = encodeParts(msg.parts) else {
                 report.unreadable += 1
                 continue
@@ -216,7 +245,11 @@ extension BackupImporter {
             }
         }
 
-        for marker in readJSONL(dataDir, base: "compact_markers", as: CompactMarker.self) {
+        for marker in markerRecords {
+            if runningSessionIds.contains(marker.sessionId) {
+                report.skipped += 1
+                continue
+            }
             switch await store.restoreCompactMarker(marker) {
             case .inserted: report.imported += 1
             case .updated: report.updated += 1
@@ -229,8 +262,11 @@ extension BackupImporter {
             root: root, fileIndex: fileIndex, category: .chats,
             destinationFor: { path in
                 // "chats/<sid>/<rel…>" → Library/MinisChat/minis/<sid>/<rel…>
+                // Running sessions are refused here too (nil = do not write),
+                // same as the row/message/marker passes above.
                 let parts = path.split(separator: "/", maxSplits: 2).map(String.init)
-                guard parts.count >= 3, parts[0] == "chats" else { return nil }
+                guard parts.count >= 3, parts[0] == "chats",
+                      !runningSessionIds.contains(parts[1]) else { return nil }
                 return AIChatViewModel.minisPersistentBase
                     .appendingPathComponent(parts[1], isDirectory: true)
                     .appendingPathComponent(parts[2])
