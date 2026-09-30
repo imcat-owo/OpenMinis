@@ -5922,29 +5922,43 @@ extension ChatStore {
         // 4. Clear sync_dirty_records and sync_pushed_records so the
         // replay treats incoming portables as fresh, and so we don't
         // immediately re-push stale rows.
+        // The dirty table and the pushed ledger key rows by record type;
+        // while V2 is active those rows use the V2 type names
+        // (MessageV2:<id> etc.), so clear both spellings or the V2 rows
+        // survive and the replayed records get re-pushed / filtered.
         for id in messageIds {
             clearDirtyRecord(recordName: "Message:\(id)")
+            clearDirtyRecord(recordName: "MessageV2:\(id)")
         }
         for id in markerIds {
             clearDirtyRecord(recordName: "CompactMarker:\(id)")
+            clearDirtyRecord(recordName: "CompactMarkerV2:\(id)")
         }
         clearDirtyRecord(recordName: "Session:\(sessionId)")
+        clearDirtyRecord(recordName: "SessionV2:\(sessionId)")
 
         var pushedClearStmt: OpaquePointer?
         let clearPushedSQL = "DELETE FROM sync_pushed_records WHERE record_name = ?"
         if sqlite3_prepare_v2(db, clearPushedSQL, -1, &pushedClearStmt, nil) == SQLITE_OK {
             for id in messageIds {
-                sqlite3_bind_text(pushedClearStmt, 1, ("Message:\(id)" as NSString).utf8String, -1, nil)
-                sqlite3_step(pushedClearStmt)
-                sqlite3_reset(pushedClearStmt)
+                for name in ["Message:\(id)", "MessageV2:\(id)"] {
+                    sqlite3_bind_text(pushedClearStmt, 1, (name as NSString).utf8String, -1, nil)
+                    sqlite3_step(pushedClearStmt)
+                    sqlite3_reset(pushedClearStmt)
+                }
             }
             for id in markerIds {
-                sqlite3_bind_text(pushedClearStmt, 1, ("CompactMarker:\(id)" as NSString).utf8String, -1, nil)
+                for name in ["CompactMarker:\(id)", "CompactMarkerV2:\(id)"] {
+                    sqlite3_bind_text(pushedClearStmt, 1, (name as NSString).utf8String, -1, nil)
+                    sqlite3_step(pushedClearStmt)
+                    sqlite3_reset(pushedClearStmt)
+                }
+            }
+            for name in ["Session:\(sessionId)", "SessionV2:\(sessionId)"] {
+                sqlite3_bind_text(pushedClearStmt, 1, (name as NSString).utf8String, -1, nil)
                 sqlite3_step(pushedClearStmt)
                 sqlite3_reset(pushedClearStmt)
             }
-            sqlite3_bind_text(pushedClearStmt, 1, ("Session:\(sessionId)" as NSString).utf8String, -1, nil)
-            sqlite3_step(pushedClearStmt)
         }
         sqlite3_finalize(pushedClearStmt)
 
