@@ -104,6 +104,7 @@ struct ScheduledPromptEditor: View {
     @State private var promptText = ""
     @State private var time = Date()
     @State private var repeatRule: ScheduledPromptRepeat = .daily
+    @State private var weekday: Int = 1
     @State private var enabled = true
     @State private var loaded = false
 
@@ -124,6 +125,14 @@ struct ScheduledPromptEditor: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                if repeatRule == .weekly {
+                    // 1 = Sunday … 7 = Saturday, matching DateComponents.
+                    Picker(AppLocalized("Weekday"), selection: $weekday) {
+                        ForEach(1...7, id: \.self) { day in
+                            Text(Calendar.current.weekdaySymbols[day - 1]).tag(day)
+                        }
+                    }
+                }
                 Toggle(AppLocalized("Enabled"), isOn: $enabled)
             } header: {
                 Text(AppLocalized("Schedule"))
@@ -158,6 +167,7 @@ struct ScheduledPromptEditor: View {
                 title = p.title
                 promptText = p.prompt
                 repeatRule = p.repeatRule
+                weekday = p.weekday
                 enabled = p.enabled
                 var comps = DateComponents()
                 comps.hour = p.hour
@@ -175,6 +185,7 @@ struct ScheduledPromptEditor: View {
         p.hour = comps.hour ?? 9
         p.minute = comps.minute ?? 0
         p.repeatRule = repeatRule
+        p.weekday = weekday
         p.enabled = enabled
         Task {
             await store.upsert(p)
