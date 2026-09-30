@@ -1412,6 +1412,16 @@ final class BackgroundKeepAliveManager: NSObject, ObservableObject, CLLocationMa
             logger.info("[BKA][Start] engine running — silent audio keep-alive ACTIVE")
         } catch {
             logger.error("[BKA][Start] engine.start() FAILED: \(error.localizedDescription)")
+            // [R3-094] Pair off the begin(.backgroundKeepAlive) above, the
+            // same way the buffer-creation failure path in this function
+            // already does: the retry below re-begins on its next attempt,
+            // but if the retries are exhausted (or a stop lands while the
+            // engine never started) nothing else ends this intent while
+            // backgrounded — it would stay declared until a foreground
+            // reassert happens to clean it up.
+            MainActor.assumeIsolated {
+                AudioSessionCoordinator.shared.end(.backgroundKeepAlive)
+            }
             // The retry scheduler existed but was never called (AE C-3) —
             // a transient activation rejection permanently killed
             // keep-alive until some unrelated evaluate event happened by.
@@ -1430,6 +1440,14 @@ final class BackgroundKeepAliveManager: NSObject, ObservableObject, CLLocationMa
             logger.error("[BKA][Start] exhausted \(Self.maxActivationRetries) activation attempts — giving up")
             recordBKAEvent("Start FAILED (exhausted retries)")
             silentAudioActivationRetries = 0
+            // [R3-094] No further attempt will re-begin or pair off the
+            // keep-alive intent — end it here so it doesn't leak for the
+            // rest of the background period. (The final failed attempt's
+            // catch already ended its own begin; end() is a no-op when
+            // the intent isn't held, so this is safe regardless.)
+            MainActor.assumeIsolated {
+                AudioSessionCoordinator.shared.end(.backgroundKeepAlive)
+            }
             return
         }
         let attempt = silentAudioActivationRetries
@@ -1502,7 +1520,20 @@ final class BackgroundKeepAliveManager: NSObject, ObservableObject, CLLocationMa
         // makes this a no-op rather than re-entrancy.
         cancelIdleGrace(reason: "stopSilentAudio called")
         silentAudioActivationRetries = 0
-        guard silentAudioActive else { return }
+        guard silentAudioActive else {
+            // [R3-094] The engine isn't running, but a begin(.backgroundKeepAlive)
+            // may still be outstanding from a start attempt whose engine never
+            // came up (start failure / retry sequence). Pair it off here —
+            // previously this early return skipped the end() below entirely,
+            // so a stop could never clear the intent in exactly the state
+            // where a failed start left one behind. The coordinator's end()
+            // is a no-op when the intent isn't held, so this is safe when
+            // nothing was begun.
+            MainActor.assumeIsolated {
+                AudioSessionCoordinator.shared.end(.backgroundKeepAlive)
+            }
+            return
+        }
         let sessions = SessionActivityTracker.shared.activeSessions.count
         logger.info("[BKA][Stop] reason=\(reason) sessions=\(sessions)")
         recordBKAEvent("Stop(reason=\(reason))")
