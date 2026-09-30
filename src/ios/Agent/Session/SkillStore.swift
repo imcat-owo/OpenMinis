@@ -677,6 +677,13 @@ thinking 填/描/强调不必手写。贴包后跟 `colorsLight.accent` / 聊天
         // produce an empty id, making the skill's directory the skills root
         // itself — refuse the import instead.
         guard !id.isEmpty else { throw SkillError.invalidContent }
+        // Same id-safety check the sync/backup imports got in R3-040: the
+        // caller-supplied `forcedId` reaches the directory path unvalidated,
+        // so a `..` / separator-bearing id would write outside the skills
+        // directory. Slugified ids always pass this check.
+        let idIsSafe = id != "." && id != ".."
+            && !id.contains("/") && !id.contains("\\")
+        guard idIsSafe else { throw SkillError.invalidContent }
         let now = Date()
 
         // Preserve enabled state if skill already exists
