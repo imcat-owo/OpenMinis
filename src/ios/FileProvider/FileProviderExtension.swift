@@ -285,6 +285,16 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                     try FileManager.default.removeItem(at: destURL)
                 }
                 try FileManager.default.copyItem(at: sourceURL, to: destURL)
+            } else if !FileManager.default.fileExists(atPath: destURL.path) {
+                // File with no contents supplied — an empty placeholder.
+                // Materialize an empty file so the success reported below
+                // points at something that actually exists; falling through
+                // with nothing on disk left Files holding an item whose
+                // backing file was never created, and every later read or
+                // modify of it failed against a nonexistent path.
+                guard FileManager.default.createFile(atPath: destURL.path, contents: nil) else {
+                    throw NSError(domain: NSCocoaErrorDomain, code: NSFileWriteUnknownError)
+                }
             }
             let item = FileProviderItem(url: destURL, parentIdentifier: itemTemplate.parentItemIdentifier)
             completionHandler(item, [], false, nil)
