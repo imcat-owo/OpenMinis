@@ -22,15 +22,30 @@ enum ProviderMigration {
         }
 
         if !UserDefaults.standard.bool(forKey: oauthMigrationKey) {
-            migrateOAuthTokens(store: store)
-            UserDefaults.standard.set(true, forKey: oauthMigrationKey)
+            // [R3-026] Only mark the OAuth migration done when every legacy
+            // item was verifiably copied. Previously the flag was set
+            // unconditionally while the copy helpers fail silently (Void,
+            // log-only), so a failed Keychain write permanently lost the
+            // login and was never retried.
+            if migrateOAuthTokens(store: store) {
+                UserDefaults.standard.set(true, forKey: oauthMigrationKey)
+            } else {
+                logger.error("OAuth token migration incomplete — legacy credentials kept, will retry on next launch")
+            }
         }
     }
 
     // MARK: - V2: Migrate singleton OAuth tokens → per-instance storage
 
-    private static func migrateOAuthTokens(store: ProviderConfigStore) {
+    /// Returns true when there is nothing left to migrate (every legacy
+    /// token/string was copied AND read back from its new home). A legacy
+    /// value is deleted only after its copy verifies; on any failure the
+    /// legacy value is kept and false is returned so the caller leaves the
+    /// done flag unset and the migration retries on a later launch.
+    @discardableResult
+    private static func migrateOAuthTokens(store: ProviderConfigStore) -> Bool {
         logger.info("Starting OAuth token migration to per-instance storage")
+        var allCopied = true
 
         for instance in store.instances where instance.credentialType == .oauth {
             switch instance.providerType {
@@ -41,8 +56,15 @@ enum ProviderMigration {
                 }
                 if let token = ClaudeOAuthManager.loadLegacyToken() {
                     ProviderKeychainHelper.saveOAuthToken(token, instanceId: instance.id)
-                    ClaudeOAuthManager.deleteLegacyToken()
-                    logger.info("Migrated Claude OAuth token to instance \(instance.id)")
+                    // [R3-026] saveOAuthToken is Void and fails silently —
+                    // delete the legacy token only if the copy reads back.
+                    if ProviderKeychainHelper.loadOAuthToken(instanceId: instance.id, as: ClaudeTokenStorage.self) != nil {
+                        ClaudeOAuthManager.deleteLegacyToken()
+                        logger.info("Migrated Claude OAuth token to instance \(instance.id)")
+                    } else {
+                        allCopied = false
+                        logger.error("Claude OAuth token copy did not verify for instance \(instance.id) — keeping legacy token")
+                    }
                 }
 
             case .gemini:
@@ -51,17 +73,35 @@ enum ProviderMigration {
                 }
                 if let token = GeminiOAuthManager.loadLegacyToken() {
                     ProviderKeychainHelper.saveOAuthToken(token, instanceId: instance.id)
-                    GeminiOAuthManager.deleteLegacyToken()
-                    logger.info("Migrated Gemini OAuth token to instance \(instance.id)")
+                    // [R3-026] Delete the legacy token only if the copy reads back.
+                    if ProviderKeychainHelper.loadOAuthToken(instanceId: instance.id, as: GeminiTokenStorage.self) != nil {
+                        GeminiOAuthManager.deleteLegacyToken()
+                        logger.info("Migrated Gemini OAuth token to instance \(instance.id)")
+                    } else {
+                        allCopied = false
+                        logger.error("Gemini OAuth token copy did not verify for instance \(instance.id) — keeping legacy token")
+                    }
                 }
                 // Migrate email and project ID from UserDefaults
                 if let email = UserDefaults.standard.string(forKey: GeminiOAuthManager.legacyEmailKey) {
                     ProviderKeychainHelper.saveOAuthString(email, instanceId: instance.id, account: "oauth-email")
-                    UserDefaults.standard.removeObject(forKey: GeminiOAuthManager.legacyEmailKey)
+                    // [R3-026] Remove the legacy value only if the copy reads back.
+                    if ProviderKeychainHelper.loadOAuthString(instanceId: instance.id, account: "oauth-email") == email {
+                        UserDefaults.standard.removeObject(forKey: GeminiOAuthManager.legacyEmailKey)
+                    } else {
+                        allCopied = false
+                        logger.error("Gemini OAuth email copy did not verify for instance \(instance.id) — keeping legacy value")
+                    }
                 }
                 if let projectID = UserDefaults.standard.string(forKey: GeminiOAuthManager.legacyProjectIDKey) {
                     ProviderKeychainHelper.saveOAuthString(projectID, instanceId: instance.id, account: "oauth-gcp-project")
-                    UserDefaults.standard.removeObject(forKey: GeminiOAuthManager.legacyProjectIDKey)
+                    // [R3-026] Remove the legacy value only if the copy reads back.
+                    if ProviderKeychainHelper.loadOAuthString(instanceId: instance.id, account: "oauth-gcp-project") == projectID {
+                        UserDefaults.standard.removeObject(forKey: GeminiOAuthManager.legacyProjectIDKey)
+                    } else {
+                        allCopied = false
+                        logger.error("Gemini GCP project ID copy did not verify for instance \(instance.id) — keeping legacy value")
+                    }
                 }
 
             case .openAI:
@@ -70,8 +110,14 @@ enum ProviderMigration {
                 }
                 if let token = CodexOAuthManager.loadLegacyToken() {
                     ProviderKeychainHelper.saveOAuthToken(token, instanceId: instance.id)
-                    CodexOAuthManager.deleteLegacyToken()
-                    logger.info("Migrated Codex OAuth token to instance \(instance.id)")
+                    // [R3-026] Delete the legacy token only if the copy reads back.
+                    if ProviderKeychainHelper.loadOAuthToken(instanceId: instance.id, as: CodexTokenStorage.self) != nil {
+                        CodexOAuthManager.deleteLegacyToken()
+                        logger.info("Migrated Codex OAuth token to instance \(instance.id)")
+                    } else {
+                        allCopied = false
+                        logger.error("Codex OAuth token copy did not verify for instance \(instance.id) — keeping legacy token")
+                    }
                 }
 
             case .antigravity:
@@ -94,6 +140,7 @@ enum ProviderMigration {
         }
 
         logger.info("OAuth token migration complete")
+        return allCopied
     }
 
     // MARK: - V1: Legacy migration
