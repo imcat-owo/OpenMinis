@@ -935,6 +935,12 @@ extension BackupImporter {
                 written += 1
                 bytes += entry.size
             } catch {
+                // Remove the staged temp: nothing else ever sweeps
+                // `.restore-*.tmp`, so a failed copy/swap orphaned it next
+                // to the destination and repeated failures accumulated
+                // dead copies in the user's data directories. (importMemory's
+                // identical staging above already cleans up in its catch.)
+                try? fm.removeItem(at: staged)
                 logger.warning("[Restore] write failed \(entry.path): \(error.localizedDescription)")
             }
         }
