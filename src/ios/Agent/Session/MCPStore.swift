@@ -887,9 +887,16 @@ final class MCPStore: ObservableObject {
     /// Hard-delete a server locally from an inbound op=delete tombstone,
     /// without re-queueing the delete back into the sync layer.
     func applyRemoteServerDeletion(name: String) {
-        guard servers.contains(where: { $0.id == name }) else { return }
-        servers.removeAll { $0.id == name }
-        save()
+        // Only the in-memory removal is conditional. The cleanup below must
+        // run even when the server is absent from the local list — the
+        // leftovers of an earlier lifecycle (fingerprint, per-session
+        // overrides, OAuth credentials) would otherwise survive and be
+        // inherited by a recreated server with the same name. The local
+        // delete(id:) path runs the same cleanup unconditionally.
+        if servers.contains(where: { $0.id == name }) {
+            servers.removeAll { $0.id == name }
+            save()
+        }
         var fp = Self.loadFingerprints()
         fp.removeValue(forKey: name)
         Self.saveFingerprints(fp)
