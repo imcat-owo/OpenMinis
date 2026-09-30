@@ -2931,7 +2931,16 @@ static int cmd_log(int argc, char **argv, int stdout_fd, int stderr_fd, BOOL com
         NSString *unitLabel = qInfo[@"label"];
         double scale = [qInfo[@"scale"] doubleValue];
 
-        double value = [valueStr doubleValue];
+        double value = 0;
+        NSScanner *valueScanner = [NSScanner scannerWithString:valueStr];
+        if (![valueScanner scanDouble:&value] || !valueScanner.isAtEnd || !isfinite(value)) {
+            noff_emit_json(stdout_fd, noff_json_error(TOOL_NAME, @"log",
+                           NOFF_ERR_INVALID_ARGS,
+                           [NSString stringWithFormat:@"Invalid --value '%@' for quantity type '%@': expected a number.",
+                                                       valueStr, typeName]),
+                           compact, quiet);
+            return NOFF_EXIT_INVALID_ARGS;
+        }
         if (scale != 1.0 && scale != 0.0) {
             value = value / scale;
         }
