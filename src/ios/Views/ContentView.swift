@@ -6933,6 +6933,7 @@ private struct AppearanceSettingsView: View {
     /// block-mount time in ThinkingBlockView.
     @AppStorage("chat.autoExpandThinking") private var autoExpandThinking: Bool = true
     @ObservedObject private var fontSettings = FontSettings.shared
+    @ObservedObject private var appearanceStudio = AppearanceStudio.shared
 
     private let iconOptions: [AppIconOption] = [
         AppIconOption(id: 0, title: "Automatic", subtitle: "Follows system", iconName: nil, imageName: "AlternateIcons/AppIcon-Light"),
@@ -7186,7 +7187,7 @@ private struct AppearanceSettingsView: View {
         .navigationTitle("Appearance")
         .navigationBarTitleDisplayMode(.inline)
         .appearancePage(.settings)
-        .listRowBackground(AppearanceStudio.shared.color(.surface, scope: .settings))
+        .listRowBackground(appearanceStudio.color(.surface, scope: .settings))
         .background(InteractivePopGestureDisabler())
     }
 
@@ -7276,6 +7277,7 @@ private struct SettingsSheet: View {
     @AppStorage("appearanceMode") private var appearanceMode: Int = 0
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var deepLink = DeepLinkCoordinator.shared
+    @ObservedObject private var appearanceStudio = AppearanceStudio.shared
     @State private var navPath = NavigationPath()
     @State private var showFeedbackDialog = false
 
@@ -7595,7 +7597,7 @@ private struct SettingsSheet: View {
 
             }
             .appearancePage(.settings)
-            .listRowBackground(AppearanceStudio.shared.color(.surface, scope: .settings))
+            .listRowBackground(appearanceStudio.color(.surface, scope: .settings))
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

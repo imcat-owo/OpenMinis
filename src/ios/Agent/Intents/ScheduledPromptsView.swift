@@ -9,6 +9,7 @@ import SwiftUI
 
 struct ScheduledPromptsView: View {
     @ObservedObject private var store = ScheduledPromptStore.shared
+    @ObservedObject private var appearanceStudio = AppearanceStudio.shared
     @State private var editing: ScheduledPrompt?
     @State private var showAdd = false
 
@@ -64,7 +65,7 @@ struct ScheduledPromptsView: View {
                 ScheduledPromptEditor(prompt: p)
             }
         }
-        .listRowBackground(AppearanceStudio.shared.color(.surface, scope: .settings))
+        .listRowBackground(appearanceStudio.color(.surface, scope: .settings))
     }
 
     private func row(_ p: ScheduledPrompt) -> some View {

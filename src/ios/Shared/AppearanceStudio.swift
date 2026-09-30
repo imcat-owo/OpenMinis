@@ -580,6 +580,15 @@ private struct AppearancePageModifier: ViewModifier {
     }
 }
 
+private struct SettingsListRowBackgroundModifier: ViewModifier {
+    @ObservedObject private var studio = AppearanceStudio.shared
+
+    func body(content: Content) -> some View {
+        content
+            .listRowBackground(studio.color(.surface, scope: .settings))
+    }
+}
+
 extension View {
     func appearancePage(_ scope: AppearanceScope) -> some View {
         modifier(AppearancePageModifier(scope: scope))
@@ -592,7 +601,7 @@ extension View {
     func settingsPage() -> some View {
         self
             .appearancePage(.settings)
-            .listRowBackground(AppearanceStudio.shared.color(.surface, scope: .settings))
+            .modifier(SettingsListRowBackgroundModifier())
     }
 }
 

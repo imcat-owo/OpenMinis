@@ -25,6 +25,7 @@ import SwiftUI
 struct VoiceServicesView: View {
 
     @ObservedObject private var output = VoiceOutputState.shared
+    @ObservedObject private var appearanceStudio = AppearanceStudio.shared
 
     @State private var editing: TTSServiceOptions?
     @State private var showAddSheet = false
@@ -74,7 +75,7 @@ struct VoiceServicesView: View {
                 SystemVoiceEditorView()
             }
         }
-        .listRowBackground(AppearanceStudio.shared.color(.surface, scope: .settings))
+        .listRowBackground(appearanceStudio.color(.surface, scope: .settings))
     }
 
     // MARK: Services
