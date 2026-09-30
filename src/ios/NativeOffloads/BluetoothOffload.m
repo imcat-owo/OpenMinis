@@ -765,11 +765,19 @@ static int cmd_read(int argc, char **argv, int stdout_fd, BOOL compact, BOOL qui
     dispatch_async(dispatch_get_main_queue(), ^{
         [peripheral readValueForCharacteristic:characteristic];
     });
-    dispatch_semaphore_wait(ble.semaphore, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+    long readWait = dispatch_semaphore_wait(ble.semaphore, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
 
     if (ble.errorMessage) {
         noff_emit_json(stdout_fd,
             noff_json_error(TOOL_NAME, @"read", NOFF_ERR_INTERNAL_ERROR, ble.errorMessage),
+            compact, quiet);
+        return NOFF_EXIT_ERROR;
+    }
+    if (readWait != 0) {
+        // Timed out: the callback never fired, so `readValue` being nil is
+        // "no answer", not a legitimately empty value.
+        noff_emit_json(stdout_fd,
+            noff_json_error(TOOL_NAME, @"read", NOFF_ERR_INTERNAL_ERROR, @"Read timed out."),
             compact, quiet);
         return NOFF_EXIT_ERROR;
     }
@@ -848,8 +856,9 @@ static int cmd_write(int argc, char **argv, int stdout_fd, BOOL compact, BOOL qu
         [peripheral writeValue:writeData forCharacteristic:characteristic type:writeType];
     });
 
+    BOOL writeTimedOut = NO;
     if (writeType == CBCharacteristicWriteWithResponse) {
-        dispatch_semaphore_wait(ble.semaphore, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+        writeTimedOut = dispatch_semaphore_wait(ble.semaphore, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC)) != 0;
     } else {
         // No response expected — assume success after short delay
         usleep(100000);
@@ -859,6 +868,14 @@ static int cmd_write(int argc, char **argv, int stdout_fd, BOOL compact, BOOL qu
     if (ble.errorMessage) {
         noff_emit_json(stdout_fd,
             noff_json_error(TOOL_NAME, @"write", NOFF_ERR_INTERNAL_ERROR, ble.errorMessage),
+            compact, quiet);
+        return NOFF_EXIT_ERROR;
+    }
+    if (writeTimedOut || !ble.writeSuccess) {
+        // No didWrite callback within the window (or it reported failure
+        // without a message): the write did not complete — don't fake it.
+        noff_emit_json(stdout_fd,
+            noff_json_error(TOOL_NAME, @"write", NOFF_ERR_INTERNAL_ERROR, @"Write timed out."),
             compact, quiet);
         return NOFF_EXIT_ERROR;
     }
