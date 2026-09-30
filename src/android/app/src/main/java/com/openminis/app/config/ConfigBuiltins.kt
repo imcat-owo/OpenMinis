@@ -931,12 +931,8 @@ internal object ConfigBuiltins {
         // rules are shared by construction rather than by copy.
         return when (val r = icon.encode(bitmap)) {
             is com.openminis.app.agent.SoulIcon.EncodeResult.Success -> r.dataUri
-            is com.openminis.app.agent.SoulIcon.EncodeResult.Failure -> when (r.reason) {
-                com.openminis.app.agent.SoulIcon.Rejection.TOO_LARGE ->
-                    throw ConfigError.InvalidValue("that image is too large to store inline")
-                com.openminis.app.agent.SoulIcon.Rejection.UNREADABLE ->
-                    throw ConfigError.InvalidValue("that image could not be processed")
-            }
+            is com.openminis.app.agent.SoulIcon.EncodeResult.Failure ->
+                throw ConfigError.InvalidValue("that image could not be processed")
         }
     }
 
@@ -987,7 +983,7 @@ internal object ConfigBuiltins {
 
         // [T-android-soul-custom-icon][T-android-soul-icon-config-images]
         //
-        // Accepts an emoji OR an image, matching iOS `fe2f3ae8b`. An address
+        // Accepts an image only (emoji removed, matching iOS). An address
         // (minis:// or a /var/minis path) is only an import source: it is
         // resolved, re-encoded through the SAME SoulIcon.encode the Settings
         // picker uses, and only the RESULT is stored inline — so the source
@@ -1014,8 +1010,9 @@ internal object ConfigBuiltins {
                     "there is no separate avatar field. Shown beside the assistant name in the chat header " +
                     "and on the Soul settings card.\n" +
                     "\n" +
-                    "EMOJI\n" +
-                    "  A single emoji, e.g. \"⚡\". An empty string \"\" restores the default sparkle.\n" +
+                    "EMOJI — not supported. The icon is an image or nothing; an empty string \"\"" +
+                    " restores the default sparkle. A legacy emoji value stored by an older build is" +
+                    " never rendered as the avatar.\n" +
                     "\n" +
                     "IMAGE — any of these forms:\n" +
                     "  • data URI: data:image/png;base64,iVBORw0KGgo...\n" +
@@ -1036,12 +1033,12 @@ internal object ConfigBuiltins {
                     "READING — `get soul.icon` returns \"<image>\" for an image, never the base64.\n" +
                     "\n" +
                     "EXAMPLES (the value is JSON, so the string needs its own quotes)\n" +
-                    "  minis-config set soul.icon '\"⚡\"'\n" +
                     "  minis-config set soul.icon '\"minis://attachments/icon.png\"'\n" +
                     "  minis-config set soul.icon '\"\"'   # back to the default sparkle",
                 // No maxLength: an inline data URI is far longer than any cap
-                // that would make sense stated in characters. The real bound
-                // is SoulIcon.MAX_DATA_URI_CHARS, enforced by the encoder.
+                // that would make sense stated in characters. There is no
+                // size refusal — a large photo is stored, never turned away
+                // (matching iOS).
                 valueSchema = ConfigSchema.Str(),
                 risk = ConfigRisk.SENSITIVE,
                 revertable = false,
@@ -1060,10 +1057,9 @@ internal object ConfigBuiltins {
                         // Empty clears back to the default sparkle.
                         trimmed.isEmpty() -> ""
 
-                        // A single emoji stays verbatim.
-                        com.openminis.app.agent.SoulIcon.graphemeClusters(trimmed).size == 1 &&
-                            com.openminis.app.agent.SoulIcon.isEmojiGlyph(trimmed) -> trimmed
-
+                        // [PIC-9] Emoji are not accepted, matching iOS: the icon
+                        // is an image or nothing. Anything else falls into
+                        // resolveSoulIconImage and is refused there.
                         else -> resolveSoulIconImage(context, trimmed)
                     }
                     saveCurrent(cur.copy(metadata = cur.metadata.copy(icon = next)))

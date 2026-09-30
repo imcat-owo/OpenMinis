@@ -111,7 +111,6 @@ fun SoulSettingsScreen(onBack: () -> Unit) {
     // literal, a data:image/png;base64 URI, or empty for the default sparkle.
     var icon by remember { mutableStateOf(SoulMetadata.DEFAULT.icon) }
     var showIconMenu by remember { mutableStateOf(false) }
-    var showEmojiSheet by remember { mutableStateOf(false) }
     var iconError by remember { mutableStateOf<String?>(null) }
 
     // [T-android-soul-save-in-appbar] What was loaded from disk, kept so
@@ -128,7 +127,6 @@ fun SoulSettingsScreen(onBack: () -> Unit) {
     // centre-crop → 96px → PNG → base64 data URI. Runs off the main thread
     // because a full-resolution camera photo is expensive to decode and scan.
     val iconUnreadableMsg = stringResource(R.string.soul_icon_error_unreadable)
-    val iconTooLargeMsg = stringResource(R.string.soul_icon_error_too_large)
     val imagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
@@ -148,10 +146,7 @@ fun SoulSettingsScreen(onBack: () -> Unit) {
             }
             when (result) {
                 is SoulIcon.EncodeResult.Success -> icon = result.dataUri
-                is SoulIcon.EncodeResult.Failure -> iconError = when (result.reason) {
-                    SoulIcon.Rejection.TOO_LARGE -> iconTooLargeMsg
-                    SoulIcon.Rejection.UNREADABLE -> iconUnreadableMsg
-                }
+                is SoulIcon.EncodeResult.Failure -> iconError = iconUnreadableMsg
             }
         }
     }
@@ -290,7 +285,6 @@ fun SoulSettingsScreen(onBack: () -> Unit) {
                         expanded = showIconMenu,
                         hasIcon = icon.isNotEmpty(),
                         onDismiss = { showIconMenu = false },
-                        onChooseEmoji = { showIconMenu = false; showEmojiSheet = true },
                         onChooseImage = {
                             showIconMenu = false
                             imagePicker.launch(
@@ -488,18 +482,12 @@ fun SoulSettingsScreen(onBack: () -> Unit) {
         )
     }
 
-    if (showEmojiSheet) {
-        SoulEmojiPickerSheet(
-            current = if (SoulIcon.isDataUri(icon)) "" else icon,
-            onDismiss = { showEmojiSheet = false },
-            onPick = { chosen -> icon = chosen; showEmojiSheet = false },
-        )
-    }
 }
 
 /**
  * [T-android-soul-custom-icon] The icon itself, rendered the same way
- * everywhere it appears: a decoded bitmap, an emoji, or the default sparkle.
+ * everywhere it appears: a decoded bitmap, or the default sparkle.
+ * (A legacy emoji value is never rendered — see the [PIC-9] note below.)
  *
  * The bitmap decode is `remember`ed on the icon string. Without that, the
  * chat header would re-decode base64 on every recomposition — and headers
@@ -526,7 +514,9 @@ internal fun SoulIconGlyph(
                 .size(sizeDp)
                 .clip(RoundedCornerShape(sizeDp * SoulIcon.CORNER_RADIUS_FRACTION)),
         )
-        icon.isNotEmpty() -> Text(text = icon, fontSize = emojiSp)
+        // [PIC-9] A legacy emoji value stored by an older build is NOT
+        // rendered anymore — it falls through to the default sparkle below,
+        // matching iOS. The emoji entry point is removed.
         // Unset: byte-for-byte the previous sparkle, so a user who never
         // touches this sees no visual change at all.
         sparkleTint != null -> Icon(
@@ -550,15 +540,10 @@ private fun SoulIconMenu(
     expanded: Boolean,
     hasIcon: Boolean,
     onDismiss: () -> Unit,
-    onChooseEmoji: () -> Unit,
     onChooseImage: () -> Unit,
     onUseDefault: () -> Unit,
 ) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
-        DropdownMenuItem(
-            text = { Text(stringResource(R.string.soul_icon_choose_emoji)) },
-            onClick = onChooseEmoji,
-        )
         DropdownMenuItem(
             text = {
                 Column {
@@ -585,97 +570,6 @@ private fun SoulIconMenu(
     }
 }
 
-/**
- * Two rows of suggestions, tap-to-fill, a live preview at render size, and a
- * free-form field that normalizes per keystroke.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun SoulEmojiPickerSheet(
-    current: String,
-    onDismiss: () -> Unit,
-    onPick: (String) -> Unit,
-) {
-    var draft by remember { mutableStateOf(current) }
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 28.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.soul_icon_emoji_title),
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Spacer(Modifier.height(16.dp))
-
-            // Preview at the size the icon is actually drawn on the card.
-            Box(
-                modifier = Modifier
-                    .align(Alignment.CenterHorizontally)
-                    .size(56.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = draft.ifEmpty { SoulMetadata.DISPLAY_EMOJI },
-                    fontSize = 30.sp,
-                )
-            }
-            Spacer(Modifier.height(20.dp))
-
-            SoulIcon.SUGGESTED_EMOJI.chunked(8).forEach { row ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                ) {
-                    row.forEach { e ->
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    if (e == draft) MaterialTheme.colorScheme.primaryContainer
-                                    else Color.Transparent,
-                                )
-                                .clickable { draft = e },
-                            contentAlignment = Alignment.Center,
-                        ) { Text(text = e, fontSize = 22.sp) }
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-            }
-
-            Spacer(Modifier.height(12.dp))
-            OutlinedTextField(
-                value = draft,
-                // Normalized PER KEYSTROKE rather than validated on submit:
-                // a second emoji replaces the first, and non-emoji input is
-                // dropped silently instead of being accepted then rejected.
-                onValueChange = { draft = SoulIcon.normalizeEmojiInput(it) },
-                label = { Text(stringResource(R.string.soul_icon_emoji_field)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-
-            Spacer(Modifier.height(20.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                MinisOutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.soul_cancel))
-                }
-                MinisButton(
-                    onClick = { onPick(draft) },
-                    enabled = draft.isNotEmpty(),
-                    modifier = Modifier.weight(1f),
-                ) { Text(stringResource(R.string.soul_icon_set)) }
-            }
-        }
-    }
-}
 
 /// Render the within-budget counter — picks the CJK character unit vs "words" depending on
 /// the same CJK ratio rule that decides which cap applies. Standalone

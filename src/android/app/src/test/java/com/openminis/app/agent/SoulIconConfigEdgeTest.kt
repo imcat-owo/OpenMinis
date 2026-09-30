@@ -10,34 +10,27 @@ import org.junit.Test
  * writer — specifically the ones that could CORRUPT SOUL.md rather than merely
  * be refused.
  *
- * The writer's decision is a three-way branch:
+ * [PIC-9] The writer's decision is a two-way branch (emoji removed,
+ * matching iOS):
  *   empty          -> store ""      (clears to default)
- *   1 emoji glyph  -> store verbatim
  *   anything else  -> treat as an image source; throws if it isn't one
  *
- * The danger is the middle branch accepting something it shouldn't, or the
- * third branch storing junk. Both would write a bad `icon:` line into a file
- * that also holds the user's name / style / personality — so a bad value is
- * not just a wrong icon, it is a damaged config. These tests pin the
- * classification the writer branches on, and the frontmatter round-trip pins
- * that whatever IS stored survives a write/read cycle intact.
- *
- * Multi-emoji is the case the requester called out, and it is the interesting
- * one: `minis-config` does NOT silently keep the last glyph the way the UI
- * text field does. In the UI, normalization-per-keystroke is a typing
- * affordance; through the tool it would mean a model asking for "⚡🤖" gets a
- * different icon than it asked for and no error, so it is refused instead.
+ * The danger is the second branch storing junk. That would write a bad
+ * `icon:` line into a file that also holds the user's name / style /
+ * personality — so a bad value is not just a wrong icon, it is a damaged
+ * config. These tests pin the classification the writer branches on, and the
+ * frontmatter round-trip pins that whatever IS stored survives a write/read
+ * cycle intact. Emoji — single, multiple or composite — are refused outright.
  */
 class SoulIconConfigEdgeTest {
 
     /** What the config writer's `when` will decide for a given raw value. */
-    private enum class Branch { CLEAR, EMOJI, IMAGE_SOURCE }
+    private enum class Branch { CLEAR, IMAGE_SOURCE }
 
     private fun branch(raw: String): Branch {
         val t = raw.trim()
         return when {
             t.isEmpty() -> Branch.CLEAR
-            SoulIcon.graphemeClusters(t).size == 1 && SoulIcon.isEmojiGlyph(t) -> Branch.EMOJI
             else -> Branch.IMAGE_SOURCE
         }
     }
@@ -58,19 +51,6 @@ class SoulIconConfigEdgeTest {
         }
     }
 
-    /**
-     * The UI's per-keystroke normalization DOES keep the last glyph — that is
-     * the typing affordance. Pinned here so the difference between the two
-     * surfaces is deliberate and visible, not an accident.
-     */
-    @Test
-    fun `the ui normalizer keeps the last emoji while config refuses the same input`() {
-        assertEquals("🤖", SoulIcon.normalizeEmojiInput("⚡🤖"))
-        assertTrue(refusedAsImage("⚡🤖"))
-    }
-
-    // ── Non-emoji text: refused ──────────────────────────────────────────
-
     @Test
     fun `plain text is refused`() {
         for (v in listOf("hello", "abc123", "我的小家", "n/a", "null", "undefined")) {
@@ -87,8 +67,8 @@ class SoulIconConfigEdgeTest {
     }
 
     /**
-     * The keycap-base trap, at the config layer: Unicode gives ASCII digits
-     * the Emoji property, so a lone "1" must not sneak through as an emoji.
+     * Bare digits and keycap bases are plain non-image text: refused like
+     * any other junk, never mistaken for an icon.
      */
     @Test
     fun `bare digits and keycap bases are refused`() {
@@ -108,18 +88,20 @@ class SoulIconConfigEdgeTest {
         assertEquals(Branch.CLEAR, branch("\n"))
     }
 
-    /** Surrounding whitespace must not stop a valid emoji being recognised. */
+    /** [PIC-9] A padded emoji is refused like any other non-image value. */
     @Test
-    fun `a padded emoji still applies`() {
-        assertEquals(Branch.EMOJI, branch("  ⚡  "))
+    fun `a padded emoji is refused`() {
+        assertEquals(Branch.IMAGE_SOURCE, branch("  ⚡  "))
+        assertTrue(refusedAsImage("  ⚡  "))
     }
 
-    // ── Composite emoji still count as one ───────────────────────────────
+    // ── [PIC-9] Emoji are refused outright ─────────────────────────────────
 
     @Test
-    fun `flag keycap zwj and skin tone are accepted as single emoji`() {
-        for (v in listOf("🇯🇵", "1️⃣", "👩‍💻", "👍🏽")) {
-            assertEquals("'$v' must be one emoji", Branch.EMOJI, branch(v))
+    fun `single composite and multi emoji are all refused`() {
+        for (v in listOf("⚡", "🇯🇵", "1️⃣", "👩‍💻", "👍🏽", "⚡🤖")) {
+            assertEquals("'$v' must go to the image branch", Branch.IMAGE_SOURCE, branch(v))
+            assertTrue("'$v' must be refused outright", refusedAsImage(v))
         }
     }
 
