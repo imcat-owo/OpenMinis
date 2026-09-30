@@ -52,7 +52,7 @@ final class ConfigConfirmationGate: ObservableObject {
     /// counts in UTF-8 bytes (utf16.count undercounts multibyte CJK).
     static func effectiveTimeout(for change: PendingConfigChange) -> TimeInterval {
         let totalBytes = change.items.reduce(0) { acc, item in
-            max(item.payloadBytes, item.newDisplay.utf8.count)
+            acc + max(item.payloadBytes, item.newDisplay.utf8.count)
         }
         return totalBytes > largePayloadBytes ? largePayloadTimeoutSeconds : timeoutSeconds
     }
