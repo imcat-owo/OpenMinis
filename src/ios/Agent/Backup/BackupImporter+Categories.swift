@@ -685,7 +685,11 @@ extension BackupImporter {
         // Count the servers in the file, not the file itself — reporting 1
         // for any number of servers under-states the restore total. Same
         // lenient count the exporter uses for its manifest stat.
-        report.imported = BackupExporter.mcpServerCount(at: src) ?? 1
+        // Fallback differs from the exporter's, deliberately: nil means the
+        // file cannot be read as a servers file at all, and MCPStore loads
+        // exactly 0 servers from such a file — reporting 1 here would claim
+        // a restore that never happened.
+        report.imported = BackupExporter.mcpServerCount(at: src) ?? 0
         return report
     }
 
