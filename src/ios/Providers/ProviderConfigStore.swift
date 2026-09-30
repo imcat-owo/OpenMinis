@@ -509,6 +509,14 @@ final class ProviderConfigStore: ObservableObject {
             config.modelEntries.map { ($0.compositeKey, $0.id) },
             uniquingKeysWith: { first, _ in first }
         )
+        // Very old group membership used ":" composite keys. Runtime
+        // `entry(for:)` still resolves those (its fourth fallback), so load
+        // must not drop them as unrecognisable — map them to the entry's
+        // canonical id here, same key space steps 1–2 already use.
+        let legacyColonToCanonical = Dictionary(
+            config.modelEntries.map { ($0.legacyColonCompositeKey, $0.id) },
+            uniquingKeysWith: { first, _ in first }
+        )
         let validEntryIds = Set(config.modelEntries.map(\.id))
         func looksLikeUUID(_ s: String) -> Bool { UUID(uuidString: s) != nil }
         for i in config.modelGroups.indices {
@@ -519,6 +527,9 @@ final class ProviderConfigStore: ObservableObject {
                 if validEntryIds.contains(entryId) { return entryId }
                 // 2. Legacy composite key → map to UUID.
                 if let mapped = compositeToUUID[entryId] { return mapped }
+                // 2.5. Very old ":" composite key → map to canonical id
+                // (mirrors runtime entry(for:) fourth-level resolution).
+                if let mapped = legacyColonToCanonical[entryId] { return mapped }
                 // 3. Looks like a UUID but isn't in the store yet → PRESERVE.
                 //    Do not treat a transient sync gap as a permanent stale id.
                 if looksLikeUUID(entryId) {
