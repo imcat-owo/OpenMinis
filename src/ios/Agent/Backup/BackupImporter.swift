@@ -57,6 +57,10 @@ actor BackupImporter {
         /// Credentials left alone because a local one already exists — an old
         /// backup must not clobber a key the user has since rotated.
         var credentialsKept = 0
+        /// Credentials present in the package that could not be decoded and
+        /// were NOT restored. Kept distinct from `credentialsKept`: reporting
+        /// these as "kept" claims a credential survived that never arrived.
+        var credentialsUndecodable = 0
         var failed: String?
     }
 

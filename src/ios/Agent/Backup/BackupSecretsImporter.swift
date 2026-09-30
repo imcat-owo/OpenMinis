@@ -26,6 +26,13 @@ enum BackupSecretsImporter {
         var envVarsSkippedExisting = 0
         var mcpOAuthRestored = 0
         var mcpOAuthSkippedExisting = 0
+        /// Credential material that was present in the package but could not
+        /// be decoded at all (bad base64 / UTF-8 / token JSON from another
+        /// version). Counted SEPARATELY from the skipped-existing counters:
+        /// folding it into "kept" told the user a credential was preserved
+        /// when in fact it never made it onto this device.
+        var credentialsUndecodable = 0
+        var mcpOAuthUndecodable = 0
 
         var total: Int { providersRestored + envVarsRestored + mcpOAuthRestored }
     }
@@ -49,50 +56,76 @@ enum BackupSecretsImporter {
             var wrote = false
             // Each field is independent: an instance may carry an apiKey, an
             // OAuth blob, or both, and a missing one must not block the others.
-            if let b64 = p.apiKey, let value = decode(b64) {
-                if ProviderKeychainHelper.loadAPIKey(instanceId: p.instanceId) == nil {
-                    ProviderKeychainHelper.saveAPIKey(value, instanceId: p.instanceId)
-                    wrote = true
+            if let b64 = p.apiKey {
+                if let value = decode(b64) {
+                    if ProviderKeychainHelper.loadAPIKey(instanceId: p.instanceId) == nil {
+                        ProviderKeychainHelper.saveAPIKey(value, instanceId: p.instanceId)
+                        wrote = true
+                    } else {
+                        result.providersSkippedExisting += 1
+                    }
                 } else {
-                    result.providersSkippedExisting += 1
+                    result.credentialsUndecodable += 1
                 }
             }
-            if let b64 = p.manualOAuthToken, let value = decode(b64),
-               ProviderKeychainHelper.loadOAuthString(
-                   instanceId: p.instanceId, account: "manual-oauth-token") == nil {
-                ProviderKeychainHelper.saveOAuthString(
-                    value, instanceId: p.instanceId, account: "manual-oauth-token")
-                wrote = true
+            if let b64 = p.manualOAuthToken {
+                if let value = decode(b64) {
+                    if ProviderKeychainHelper.loadOAuthString(
+                        instanceId: p.instanceId, account: "manual-oauth-token") == nil {
+                        ProviderKeychainHelper.saveOAuthString(
+                            value, instanceId: p.instanceId, account: "manual-oauth-token")
+                        wrote = true
+                    }
+                } else {
+                    result.credentialsUndecodable += 1
+                }
             }
-            if let b64 = p.oauthEmail, let value = decode(b64),
-               ProviderKeychainHelper.loadOAuthString(
-                   instanceId: p.instanceId, account: "oauth-email") == nil {
-                ProviderKeychainHelper.saveOAuthString(
-                    value, instanceId: p.instanceId, account: "oauth-email")
-                wrote = true
+            if let b64 = p.oauthEmail {
+                if let value = decode(b64) {
+                    if ProviderKeychainHelper.loadOAuthString(
+                        instanceId: p.instanceId, account: "oauth-email") == nil {
+                        ProviderKeychainHelper.saveOAuthString(
+                            value, instanceId: p.instanceId, account: "oauth-email")
+                        wrote = true
+                    }
+                } else {
+                    result.credentialsUndecodable += 1
+                }
             }
-            if let b64 = p.oauthGcpProject, let value = decode(b64),
-               ProviderKeychainHelper.loadOAuthString(
-                   instanceId: p.instanceId, account: "oauth-gcp-project") == nil {
-                ProviderKeychainHelper.saveOAuthString(
-                    value, instanceId: p.instanceId, account: "oauth-gcp-project")
-                wrote = true
+            if let b64 = p.oauthGcpProject {
+                if let value = decode(b64) {
+                    if ProviderKeychainHelper.loadOAuthString(
+                        instanceId: p.instanceId, account: "oauth-gcp-project") == nil {
+                        ProviderKeychainHelper.saveOAuthString(
+                            value, instanceId: p.instanceId, account: "oauth-gcp-project")
+                        wrote = true
+                    }
+                } else {
+                    result.credentialsUndecodable += 1
+                }
             }
             // The structured OAuth blob is stored under a per-provider-type
             // Codable. It is written back as raw JSON under the same Keychain
             // account, so the importer doesn't have to switch on every provider
             // type (and stays correct when a new one is added).
-            if let b64 = p.oauthToken, let raw = Data(base64Encoded: b64) {
-                if ProviderKeychainHelper.loadRawOAuthToken(instanceId: p.instanceId) == nil {
-                    ProviderKeychainHelper.saveRawOAuthToken(raw, instanceId: p.instanceId)
-                    wrote = true
+            if let b64 = p.oauthToken {
+                if let raw = Data(base64Encoded: b64) {
+                    if ProviderKeychainHelper.loadRawOAuthToken(instanceId: p.instanceId) == nil {
+                        ProviderKeychainHelper.saveRawOAuthToken(raw, instanceId: p.instanceId)
+                        wrote = true
+                    }
+                } else {
+                    result.credentialsUndecodable += 1
                 }
             }
             if wrote { result.providersRestored += 1 }
         }
 
         for e in secrets.envVars {
-            guard let value = decode(e.value) else { continue }
+            guard let value = decode(e.value) else {
+                result.credentialsUndecodable += 1
+                continue
+            }
             if EnvVarStore.loadValueSync(forKey: e.name) == nil {
                 EnvVarStore.saveValueSync(value, forKey: e.name)
                 result.envVarsRestored += 1
@@ -102,22 +135,34 @@ enum BackupSecretsImporter {
         }
 
         for m in secrets.mcpOAuth {
-            if MCPOAuthController.tokens(server: m.serverId) == nil,
-               let raw = Data(base64Encoded: m.token),
-               let tokens = try? JSONDecoder().decode(
-                   MCPOAuthController.StoredTokens.self, from: raw) {
+            if MCPOAuthController.tokens(server: m.serverId) != nil {
+                result.mcpOAuthSkippedExisting += 1
+            } else if let raw = Data(base64Encoded: m.token),
+                      let tokens = try? JSONDecoder().decode(
+                          MCPOAuthController.StoredTokens.self, from: raw) {
                 MCPOAuthController.restoreTokens(tokens, server: m.serverId)
                 result.mcpOAuthRestored += 1
             } else {
-                result.mcpOAuthSkippedExisting += 1
+                // No local token AND the package's copy cannot be decoded —
+                // NOT "kept existing"; the credential simply did not restore.
+                result.mcpOAuthUndecodable += 1
             }
-            if let b64 = m.clientSecret, let secret = decode(b64),
-               MCPOAuthController.clientSecret(server: m.serverId) == nil {
-                MCPOAuthController.setClientSecret(secret, server: m.serverId)
+            if let b64 = m.clientSecret {
+                if let secret = decode(b64) {
+                    if MCPOAuthController.clientSecret(server: m.serverId) == nil {
+                        MCPOAuthController.setClientSecret(secret, server: m.serverId)
+                    }
+                } else {
+                    result.credentialsUndecodable += 1
+                }
             }
         }
 
-        logger.info("[Restore] credentials: providers=\(result.providersRestored) (kept \(result.providersSkippedExisting)) envVars=\(result.envVarsRestored) mcpOAuth=\(result.mcpOAuthRestored)")
+        let undecodable = result.credentialsUndecodable + result.mcpOAuthUndecodable
+        if undecodable > 0 {
+            logger.error("[Restore] \(undecodable) credential(s) in the package could not be decoded and were NOT restored")
+        }
+        logger.info("[Restore] credentials: providers=\(result.providersRestored) (kept \(result.providersSkippedExisting)) envVars=\(result.envVarsRestored) mcpOAuth=\(result.mcpOAuthRestored) undecodable=\(undecodable)")
         return result
     }
 

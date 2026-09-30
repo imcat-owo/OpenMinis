@@ -502,6 +502,8 @@ extension BackupImporter {
             report.credentialsRestored = creds.total
             report.credentialsKept = creds.providersSkippedExisting
                 + creds.envVarsSkippedExisting + creds.mcpOAuthSkippedExisting
+            report.credentialsUndecodable = creds.credentialsUndecodable
+                + creds.mcpOAuthUndecodable
         }
         return report
     }
