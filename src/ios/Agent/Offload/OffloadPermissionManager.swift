@@ -148,6 +148,13 @@ final class OffloadPermissionManager: ObservableObject {
 
     @Published var pendingRequest: PermissionRequest?
 
+    /// Bumped on every permission-level write so settings rows (which read
+    /// levels straight from UserDefaults via `permissionLevel(for:)`) can
+    /// re-render. Levels themselves are not @Published, so without this a
+    /// bulk change like `setAllBypass()` never reached the UI and rows kept
+    /// showing the level seeded when the page was opened.
+    @Published private(set) var levelsRevision = 0
+
     /// Requests waiting behind `pendingRequest`. Concurrent tool calls can
     /// ask at the same time (TaskGroup fan-out); with a single slot the
     /// second ask overwrote the first, whose continuation then had no path
@@ -177,6 +184,7 @@ final class OffloadPermissionManager: ObservableObject {
 
     func setPermissionLevel(_ level: OffloadPermissionLevel, for command: String) {
         defaults.set(level.rawValue, forKey: defaultsKey(for: command))
+        levelsRevision += 1
     }
 
     func setAllBypass() {

@@ -100,11 +100,17 @@ private struct CommandPermissionRow: View {
     let command: OffloadCommandInfo
     @ObservedObject private var manager = OffloadPermissionManager.shared
 
-    @State private var level: OffloadPermissionLevel
-
-    init(command: OffloadCommandInfo) {
-        self.command = command
-        _level = State(initialValue: OffloadPermissionManager.shared.permissionLevel(for: command.name))
+    /// Reads/writes the manager directly. Seeding a local @State in init
+    /// (the old approach) had no re-read path, so bulk changes from
+    /// "Set All Bypass" left every row showing its pre-tap level while the
+    /// effective permission had already changed. The manager bumps
+    /// `levelsRevision` on writes, which re-renders this row via
+    /// @ObservedObject and re-reads the current level here.
+    private var levelBinding: Binding<OffloadPermissionLevel> {
+        Binding(
+            get: { manager.permissionLevel(for: command.name) },
+            set: { manager.setPermissionLevel($0, for: command.name) }
+        )
     }
 
     var body: some View {
@@ -116,15 +122,12 @@ private struct CommandPermissionRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Picker("", selection: $level) {
+            Picker("", selection: levelBinding) {
                 ForEach(OffloadPermissionLevel.allCases, id: \.self) { lvl in
                     Text(lvl.displayName).tag(lvl)
                 }
             }
             .pickerStyle(.menu)
-            .onChange(of: level) { newValue in
-                manager.setPermissionLevel(newValue, for: command.name)
-            }
         }
     }
 }
