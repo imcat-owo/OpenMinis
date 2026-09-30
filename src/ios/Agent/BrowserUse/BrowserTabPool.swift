@@ -247,8 +247,8 @@ final class BrowserTabPool: ObservableObject {
     /// tab id: an operation awaits the previous one for that tab before touching
     /// the manager. Different tab ids keep independent chains and stay parallel.
     /// Each tail is tagged with a monotonic token so the tail-cleanup compares by
-    /// value (Task is a struct — no identity `===`).
-    private var tabSerialChains: [Int: (token: UInt64, task: Task<Void, Never>)] = [:]
+    /// value.
+    private var tabSerialChains: [Int: SerialNode] = [:]
     private var nextSerialToken: UInt64 = 0
 
     /// Max time a browser_use call waits to acquire a tab id's serial slot, i.e.
@@ -256,6 +256,89 @@ final class BrowserTabPool: ObservableObject {
     /// LOCK-WAIT timeout ONLY — it is deliberately separate from the per-action
     /// browser timeout (which is unchanged and applies AFTER the slot is held).
     private static let serialWaitTimeout: TimeInterval = 60
+
+    /// One-shot gate: holds EITHER a resume closure OR a pre-arrived
+    /// `signal()`. The gate Task installs its continuation atomically; if
+    /// the signal fired first, the continuation resumes synchronously the
+    /// moment it's installed. Either ordering is safe — no IUO, no race.
+    /// (Storing the resume closure in an IUO populated inside the gate
+    /// Task body crashed with P0 SIGTRAP when the Task was scheduled late
+    /// and release ran first — T-ios-browsertabpool-serialslot-nil-crash.)
+    private final class GateBox: @unchecked Sendable {
+        private var lock = os_unfair_lock()
+        private var resume: (() -> Void)?
+        private var preFired = false
+
+        /// Called by `release()`. If the gate Task has already installed
+        /// its continuation, fire it; otherwise mark pre-fired so the
+        /// installer fires immediately on arrival.
+        func signal() {
+            os_unfair_lock_lock(&lock)
+            if let r = resume {
+                resume = nil
+                os_unfair_lock_unlock(&lock)
+                r()
+            } else {
+                preFired = true
+                os_unfair_lock_unlock(&lock)
+            }
+        }
+
+        /// Called from the gate Task once `withCheckedContinuation` hands
+        /// it the resume closure. If release already fired, drain it now.
+        func install(_ r: @escaping () -> Void) {
+            os_unfair_lock_lock(&lock)
+            if preFired {
+                os_unfair_lock_unlock(&lock)
+                r()
+            } else {
+                resume = r
+                os_unfair_lock_unlock(&lock)
+            }
+        }
+    }
+
+    /// One link in a tab's serial chain. `done` completes when this link's
+    /// turn is fully over, which is what a successor waits on. Normally
+    /// that is the link's own `signal()` (its operation finished). If the
+    /// link ABANDONS its wait (serial-wait timeout — it never held the
+    /// slot), `done` instead completes when its predecessor's `done`
+    /// completes: giving up must not release successors past an operation
+    /// that is still running. [R3-089]
+    private final class SerialNode: @unchecked Sendable {
+        let token: UInt64
+        let predecessor: SerialNode?
+        private let box = GateBox()
+
+        /// Completes when this link's turn is over (see class doc).
+        let done: Task<Void, Never>
+
+        init(token: UInt64, predecessor: SerialNode?) {
+            self.token = token
+            self.predecessor = predecessor
+            let box = self.box
+            self.done = Task {
+                await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                    box.install { cont.resume() }
+                }
+            }
+        }
+
+        /// The operation behind this link finished — successors may go.
+        func signal() { box.signal() }
+
+        /// This link timed out waiting and never held the slot. Chain its
+        /// completion to the predecessor's instead of firing now, so
+        /// successors keep waiting for the work still running ahead.
+        func abandon() {
+            guard let predecessor else { box.signal(); return }
+            let box = self.box
+            Task {
+                await predecessor.done.value
+                box.signal()
+            }
+        }
+    }
 
     @Published var tabs: [Tab] = []
     @Published var selectedTabId: Int = 0 {
@@ -574,78 +657,32 @@ final class BrowserTabPool: ObservableObject {
     /// open-a-new-tab guidance error). The release is also what lets the NEXT
     /// queued operation for this tab proceed.
     ///
-    /// Implementation: each caller appends a gated `Task` to the tab's chain and
-    /// awaits the PREVIOUS tail (with a timeout). Its own gate is only completed
+    /// Implementation: each caller appends a gated node to the tab's chain and
+    /// awaits the PREVIOUS tail (with a timeout). Its own node is only completed
     /// by `release`, so the next caller blocks on it. The timeout races the
     /// predecessor await against a sleep — it does NOT cancel the predecessor's
-    /// real browser work, only this caller's willingness to keep waiting.
+    /// real browser work, only this caller's willingness to keep waiting. A
+    /// caller that times out ABANDONS its node (see SerialNode): its completion
+    /// stays chained to the predecessor's, so successors can never slip past
+    /// an operation that is still running.
     private func acquireSerialSlot(tabId: Int) async -> (() -> Void)? {
-        let predecessor = tabSerialChains[tabId]?.task
+        let predecessor = tabSerialChains[tabId]
 
-        // Our gate: completed by `release`. The successor awaits this.
-        // We previously stored the resume closure in an IUO populated INSIDE the
-        // gate `Task { ... }` body. Under memory pressure the gate Task can be
-        // scheduled late, so `release()` would run before the IUO was assigned
-        // and crash on `nil!` (P0 SIGTRAP — 7 hits on a single iPhone 14 PM in
-        // 8 minutes, all paired with mach_vm_allocate_kernel failed kernel
-        // triage). [T-ios-browsertabpool-serialslot-nil-crash]
-        //
-        // Fix: store the gate as a one-shot box that can hold EITHER a
-        // resume closure OR a pre-arrived `release()` signal. The gate Task
-        // installs its continuation atomically; if release fired first, the
-        // continuation resumes synchronously the moment it's installed. Either
-        // ordering is safe — no IUO, no race.
+        // Our node: completed by `release`. The successor awaits this.
+        // The gate inside the node is the one-shot GateBox (see its doc for
+        // the nil-IUO crash it replaced).
         let token = nextSerialToken
         nextSerialToken &+= 1
-
-        final class GateBox: @unchecked Sendable {
-            private var lock = os_unfair_lock()
-            private var resume: (() -> Void)?
-            private var preFired = false
-
-            /// Called by `release()`. If the gate Task has already installed
-            /// its continuation, fire it; otherwise mark pre-fired so the
-            /// installer fires immediately on arrival.
-            func signal() {
-                os_unfair_lock_lock(&lock)
-                if let r = resume {
-                    resume = nil
-                    os_unfair_lock_unlock(&lock)
-                    r()
-                } else {
-                    preFired = true
-                    os_unfair_lock_unlock(&lock)
-                }
-            }
-
-            /// Called from the gate Task once `withCheckedContinuation` hands
-            /// it the resume closure. If release already fired, drain it now.
-            func install(_ r: @escaping () -> Void) {
-                os_unfair_lock_lock(&lock)
-                if preFired {
-                    os_unfair_lock_unlock(&lock)
-                    r()
-                } else {
-                    resume = r
-                    os_unfair_lock_unlock(&lock)
-                }
-            }
-        }
-        let gateBox = GateBox()
-        let gate = Task<Void, Never> {
-            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-                gateBox.install { cont.resume() }
-            }
-        }
-        tabSerialChains[tabId] = (token, gate)
+        let node = SerialNode(token: token, predecessor: predecessor)
+        tabSerialChains[tabId] = node
 
         var released = false
         let release: () -> Void = { [weak self] in
             guard !released else { return }
             released = true
-            gateBox.signal()
+            node.signal()
             // Clear the chain entry if we're still the tail (no one queued after
-            // us) — compare by token since Task is a struct.
+            // us) — compare by token.
             Task { @MainActor in
                 guard let self else { return }
                 if self.tabSerialChains[tabId]?.token == token {
@@ -680,7 +717,7 @@ final class BrowserTabPool: ObservableObject {
         }
         let waited = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
             let race = WaitRaceBox(cont)
-            Task { await predecessor.value; race.finish(true) }
+            Task { await predecessor.done.value; race.finish(true) }
             Task {
                 try? await Task.sleep(nanoseconds: UInt64(Self.serialWaitTimeout * 1_000_000_000))
                 race.finish(false)
@@ -690,10 +727,28 @@ final class BrowserTabPool: ObservableObject {
         if waited {
             return release
         } else {
-            // Timed out waiting for the slot. Detach our gate from the chain so
-            // we don't block successors, and signal the caller to bail.
-            logger.warning("[SerialDiag] tab \(tabId): serial-wait timed out after \(Int(Self.serialWaitTimeout))s — releasing own gate, returning open-new-tab guidance")
-            release()
+            // Timed out waiting for the slot. [R3-089] Do NOT call release()
+            // here: signalling our own node would let a queued successor
+            // proceed while the operation we were waiting on is STILL
+            // RUNNING, and clearing the chain tail hid that operation
+            // entirely — the next arrival saw an empty chain and walked
+            // straight in. Both timings put two operations on the same tab
+            // at once. Abandon instead: our node's completion stays chained
+            // to the predecessor's, and if we're still the chain tail,
+            // splice ourselves out so the next arrival chains onto the
+            // predecessor directly rather than onto us or onto nothing.
+            logger.warning("[SerialDiag] tab \(tabId): serial-wait timed out after \(Int(Self.serialWaitTimeout))s — abandoning wait (successors stay chained to the running operation), returning open-new-tab guidance")
+            node.abandon()
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if self.tabSerialChains[tabId]?.token == token {
+                    if let predecessor {
+                        self.tabSerialChains[tabId] = predecessor
+                    } else {
+                        self.tabSerialChains.removeValue(forKey: tabId)
+                    }
+                }
+            }
             return nil
         }
     }
