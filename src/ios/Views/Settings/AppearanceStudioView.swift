@@ -9,6 +9,7 @@ struct AppearanceStudioView: View {
     /// 色盘作用域：全局 = 底色盘；选某一页 = 只给该页单独换色（覆盖全局，可恢复继承）。
     @State private var paletteScope: AppearanceScope = .global
     @State private var wallpaperItem: PhotosPickerItem?
+    @Environment(\.colorScheme) private var colorScheme
     @State private var userAvatarItem: PhotosPickerItem?
     @State private var assistantAvatarItem: PhotosPickerItem?
     @State private var iconPickSlot: QuietIconSlot?
@@ -452,7 +453,10 @@ struct AppearanceStudioView: View {
         .modifier(CompactListSections())
         .onChange(of: wallpaperItem) { item in
             guard let item else { return }
-            Task { await importImage(item, downsampleTo: 2200) { studio.setWallpaper($0, for: wallpaperScope) } }
+            Task {
+                let dark = colorScheme == .dark
+                await importImage(item, downsampleTo: 2200) { studio.setWallpaper($0, for: wallpaperScope, dark: dark) }
+            }
         }
         .onChange(of: userAvatarItem) { item in
             guard let item else { return }

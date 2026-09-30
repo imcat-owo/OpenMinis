@@ -302,8 +302,8 @@ final class AppearanceStudio: ObservableObject {
         return image
     }
 
-    func setWallpaper(_ image: UIImage, for scope: AppearanceScope) {
-        guard let data = Self.backgroundJPEG(image) else { return }
+    func setWallpaper(_ image: UIImage, for scope: AppearanceScope, dark: Bool = false) {
+        guard let data = Self.backgroundJPEG(image, dark: dark) else { return }
         try? data.write(to: wallpaperURL(scope), options: .atomic)
         // [T-wallpaper-clear] Choosing a new image re-enables global
         // fallback for this scope (the clear only sticks until overridden).
@@ -345,7 +345,7 @@ final class AppearanceStudio: ObservableObject {
         wallpaperClearedFallback = Set(raw.compactMap(AppearanceScope.init(rawValue:)))
     }
 
-    private static func backgroundJPEG(_ image: UIImage) -> Data? {
+    private static func backgroundJPEG(_ image: UIImage, dark: Bool = false) -> Data? {
         guard let cg = image.cgImage else { return nil }
         let maxEdge: CGFloat = 2200
         let source = CGSize(width: cg.width, height: cg.height)
@@ -356,7 +356,11 @@ final class AppearanceStudio: ObservableObject {
         format.opaque = true
         format.scale = 1
         let rendered = UIGraphicsImageRenderer(size: size, format: format).image { _ in
-            UIColor(hex: lightDefaults[.canvas] ?? "FFF8F4").setFill()
+            // [PIC-8] Matte follows the color scheme: a transparent PNG set
+            // in dark mode used to be flattened onto the light canvas color,
+            // leaving a pale fringe around dark content.
+            let book = dark ? darkDefaults : lightDefaults
+            UIColor(hex: book[.canvas] ?? (dark ? "141210" : "FFF8F4")).setFill()
             UIBezierPath(rect: CGRect(origin: .zero, size: size)).fill()
             image.draw(in: CGRect(origin: .zero, size: size))
         }
