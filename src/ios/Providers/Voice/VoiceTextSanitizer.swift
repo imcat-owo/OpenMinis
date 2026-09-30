@@ -170,9 +170,20 @@ enum VoiceTextSanitizer {
                     continue
                 }
             } else if ch == "\"" || ch == "'" {
-                // Straight quote pair — find the matching close.
+                // Straight quote pair — find the matching close. A single
+                // quote flanked by letters is a contraction apostrophe
+                // (don't / it's / we're), never a quote delimiter: skip it
+                // both as an opener here and as a candidate close below,
+                // or "don't … 'quoted'" pairs the apostrophe with the real
+                // opening quote and extracts garbage ("t think").
+                if ch == "'", isContractionApostrophe(text, at: i) {
+                    i = text.index(after: i)
+                    continue
+                }
                 let next = text.index(after: i)
-                if next < text.endIndex, let close = text[next...].firstIndex(of: ch), close > next {
+                if next < text.endIndex,
+                   let close = straightQuoteClose(text, from: next, quote: ch),
+                   close > next {
                     let inner = String(text[next..<close])
                     if !inner.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         spans.append(inner)
@@ -184,6 +195,28 @@ enum VoiceTextSanitizer {
             i = text.index(after: i)
         }
         return spans.joined(separator: "\n")
+    }
+
+    /// A `'` with a letter on both sides is a word-internal apostrophe.
+    private static func isContractionApostrophe(_ text: String, at i: String.Index) -> Bool {
+        guard i > text.startIndex, text[text.index(before: i)].isLetter else { return false }
+        let next = text.index(after: i)
+        guard next < text.endIndex else { return false }
+        return text[next].isLetter
+    }
+
+    /// First index of `quote` at/after `from` that can close a straight-quote
+    /// span — contraction apostrophes inside the span don't count.
+    private static func straightQuoteClose(_ text: String, from: String.Index, quote: Character) -> String.Index? {
+        var j = from
+        while j < text.endIndex {
+            if text[j] == quote,
+               quote != "'" || !isContractionApostrophe(text, at: j) {
+                return j
+            }
+            j = text.index(after: j)
+        }
+        return nil
     }
 
     /// [T-kelivo-tts] Remove (……) and （……） spans — asides read as
