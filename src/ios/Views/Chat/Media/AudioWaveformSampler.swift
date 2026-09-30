@@ -70,8 +70,14 @@ enum AudioWaveformSampler {
         }
         let asbd = asbdPtr.pointee
         let sampleRate = asbd.mSampleRate > 0 ? asbd.mSampleRate : 16000
+        // totalSamples counts FRAMES, but the loop below walks interleaved
+        // Int16 VALUES (channels per frame). Bucket math must use the value
+        // count, or a stereo stream exhausts the frame budget at ~half its
+        // duration and piles everything else into the last bucket.
         let totalSamples = Int(durationSeconds * sampleRate)
         guard totalSamples > 0 else { return nil }
+        let channels = max(1, Int(asbd.mChannelsPerFrame))
+        let totalValues = totalSamples * channels
 
         var sampleIndex = 0
         while let buffer = output.copyNextSampleBuffer() {
@@ -94,7 +100,7 @@ enum AudioWaveformSampler {
                     for i in 0..<n {
                         let amp = abs(Float(int16Ptr[i]) / 32768.0)
                         let bucket = min(bucketCount - 1,
-                                         sampleIndex * bucketCount / max(1, totalSamples))
+                                         sampleIndex * bucketCount / max(1, totalValues))
                         buckets[bucket] += amp
                         counts[bucket] += 1
                         sampleIndex += 1
@@ -132,14 +138,17 @@ enum AudioWaveformSampler {
         }
         guard !chunks.isEmpty else { return nil }
         let totalBytes = chunks.reduce(0) { $0 + $1.count }
-        let bytesPerBucket = max(1, totalBytes / bucketCount)
+        // The cursor below counts Int16 VALUES, so the bucket width must be
+        // in values too — totalBytes/bucketCount is a BYTE width, twice the
+        // value width, which filled only the first ~20 buckets.
+        let valuesPerBucket = max(1, totalBytes / MemoryLayout<Int16>.size / bucketCount)
         var cursor = 0
         for chunk in chunks {
             chunk.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
                 let int16Ptr = raw.baseAddress!.assumingMemoryBound(to: Int16.self)
                 let n = raw.count / MemoryLayout<Int16>.size
                 for i in 0..<n {
-                    let bucket = min(bucketCount - 1, cursor / bytesPerBucket)
+                    let bucket = min(bucketCount - 1, cursor / valuesPerBucket)
                     buckets[bucket] += abs(Float(int16Ptr[i]) / 32768.0)
                     counts[bucket] += 1
                     cursor += 1
