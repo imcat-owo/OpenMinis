@@ -244,6 +244,10 @@ final class VoiceInputViewModel: ObservableObject {
     deinit {
         idleTimer?.invalidate()
         backgroundTimer?.invalidate()
+        retryTimer?.invalidate()
+        tipCycleTimer?.invalidate()
+        totalRecordingTimer?.invalidate()
+        pendingFlushTimer?.invalidate()
         NotificationCenter.default.removeObserver(self)
     }
 
