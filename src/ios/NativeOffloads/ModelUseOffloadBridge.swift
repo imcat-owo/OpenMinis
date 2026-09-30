@@ -80,6 +80,7 @@ private let logger = AppLogger(category: "ModelUseOffload")
 
     /// Every configured model entry across all enabled provider instances
     /// (the `--all` pool), de-duplicated by entry id, in instance order.
+    @MainActor
     private static func allConfiguredEntries(store: ProviderConfigStore) -> [ModelEntry] {
         var seen = Set<String>()
         var result: [ModelEntry] = []
