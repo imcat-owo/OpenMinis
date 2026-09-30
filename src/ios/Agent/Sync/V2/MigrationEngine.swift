@@ -804,12 +804,21 @@ final class MigrationEngine {
         }
         let container = CKContainer(identifier: ICloudSharedZoneTransport.containerIdentifier)
         let zoneID = CKRecordZone.ID(zoneName: ICloudSharedZoneTransport.sharedZoneName)
-        let query = CKQuery(recordType: "SessionV2", predicate: NSPredicate(value: true))
         do {
-            let (matches, _) = try await container.privateCloudDatabase.records(
-                matching: query, inZoneWith: zoneID, desiredKeys: ["sessionId"], resultsLimit: 10_000
+            // Page through ALL matches with the query cursor (same counter
+            // V1FetcherShim uses). The old single-shot query passed
+            // resultsLimit: 10_000 and discarded the cursor, so the count
+            // silently capped at 10,000: with >20,000 local sessions the
+            // safeguard below (cloud >= local/2) could NEVER pass, every
+            // attempt threw v1FetchFailed, and after maxConsecutiveFailures
+            // the migration was permanently .failed with the v1 zone
+            // never deleted.
+            return try await V1FetcherShim.countRecords(
+                of: "SessionV2",
+                predicate: NSPredicate(value: true),
+                in: zoneID,
+                db: container.privateCloudDatabase
             )
-            return matches.count
         } catch let error as CKError where error.code == .zoneNotFound || error.code == .unknownItem {
             // Zone/type genuinely absent → a real zero, not a transient
             // failure. Return 0 so the safeguard can evaluate it.
@@ -965,7 +974,7 @@ enum V1FetcherShim {
     }
 
     @available(iOS 17.0, *)
-    private static func countRecords(of recordType: String,
+    static func countRecords(of recordType: String,
                                      predicate: NSPredicate,
                                      in zoneID: CKRecordZone.ID,
                                      db: CKDatabase) async throws -> Int {
