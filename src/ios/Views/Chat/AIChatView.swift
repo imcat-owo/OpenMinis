@@ -505,6 +505,17 @@ struct AIChatView: View {
     private var hasOverlayPresented: Bool {
         showFileBrowser || showBrowserSheet || showTerminal || showCamera
             || showPhotoPicker || showDocumentPicker || showModelPicker
+            || showTokenUsage || showTTSFirstUseNudge || showSessionSkills
+            || showSessionMCPs || showSessionMemory || showMoveToSheet
+            || showThinkingLevelSheet || showDownloadsPanel
+            || titlePillEditSession != nil || locateDownloadTarget != nil
+            || screenshotPreview != nil || previewImageFile != nil
+            || imageGallery != nil || previewVideoFile != nil
+            || previewAudioFile != nil || previewTextFile != nil
+            || previewMarkdownFile != nil || previewHTMLFile != nil
+            || previewDocumentFile != nil || shareFile != nil
+            || safariURL != nil || fullBrowserURL != nil
+            || pendingProviderImport != nil
     }
 
     /// Tracks whether this ChatView is the currently visible screen.
