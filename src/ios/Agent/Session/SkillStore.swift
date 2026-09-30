@@ -737,7 +737,8 @@ thinking 填/描/强调不必手写。贴包后跟 `colorsLight.accent` / 聊天
     @discardableResult
     func importSkillFromSync(
         skillId: String, content: String, source: SkillImportSource,
-        isEnabled: Bool, installedAt: Date, updatedAt: Date
+        isEnabled: Bool, installedAt: Date, updatedAt: Date,
+        version: String? = nil
     ) -> Bool {
         // [T-icloud-cloud-overwrites-local-edits] Local-newer guard. Skill
         // files (SKILL.md + bundled files) are user-editable; below we
@@ -780,7 +781,9 @@ thinking 填/描/强调不必手写。贴包后跟 `colorsLight.accent` / 聊天
             id: skillId,
             name: parsed.name,
             description: parsed.description,
-            version: parsed.version,
+            // Callers whose content carries no frontmatter (backup restore)
+            // pass the recorded version explicitly; frontmatter otherwise.
+            version: version ?? parsed.version,
             importSource: source,
             isEnabled: existingEnabled,
             installedAt: skills.first(where: { $0.id == skillId })?.installedAt ?? installedAt,
@@ -796,7 +799,7 @@ thinking 填/描/强调不必手写。贴包后跟 `colorsLight.accent` / 聊天
 
         // Save to DB
         dbInsertSkill(id: skillId, name: parsed.name, description: parsed.description,
-                      version: parsed.version, importSource: source,
+                      version: version ?? parsed.version, importSource: source,
                       isEnabled: skill.isEnabled, installedAt: skill.installedAt, updatedAt: updatedAt)
 
         // Sync to rootfs

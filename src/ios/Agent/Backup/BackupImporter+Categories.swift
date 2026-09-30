@@ -273,9 +273,10 @@ extension BackupImporter {
             // rescan below stages the changes instead.
             let applied = await MainActor.run {
                 SkillStore.shared.importSkillFromSync(
-                    skillId: rec.id, content: rec.body, source: .file,
+                    skillId: rec.id, content: rec.body,
+                    source: rec.sourceURL.map { .url($0) } ?? .file,
                     isEnabled: rec.isEnabled, installedAt: rec.installedAt,
-                    updatedAt: rec.updatedAt)
+                    updatedAt: rec.updatedAt, version: rec.version)
             }
             if applied { report.imported += 1 } else { report.skipped += 1 }
         }
