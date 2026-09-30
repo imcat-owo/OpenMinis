@@ -984,13 +984,27 @@ static int cmd_update(int argc, char **argv, int stdout_fd, int stderr_fd, BOOL 
     NSString *startStr = noff_find_arg(argc, argv, "--start");
     if (startStr) {
         NSDate *d = noff_parse_date(startStr);
-        if (d) event.startDate = d;
+        if (!d) {
+            NSDictionary *err = noff_json_error(TOOL_NAME, @"update",
+                                                 NOFF_ERR_INVALID_ARGS,
+                                                 [NSString stringWithFormat:@"Invalid date format for --start: '%@'", startStr]);
+            noff_emit_json(stdout_fd, err, compact, quiet);
+            return NOFF_EXIT_INVALID_ARGS;
+        }
+        event.startDate = d;
     }
 
     NSString *endStr = noff_find_arg(argc, argv, "--end");
     if (endStr) {
         NSDate *d = noff_parse_date(endStr);
-        if (d) event.endDate = d;
+        if (!d) {
+            NSDictionary *err = noff_json_error(TOOL_NAME, @"update",
+                                                 NOFF_ERR_INVALID_ARGS,
+                                                 [NSString stringWithFormat:@"Invalid date format for --end: '%@'", endStr]);
+            noff_emit_json(stdout_fd, err, compact, quiet);
+            return NOFF_EXIT_INVALID_ARGS;
+        }
+        event.endDate = d;
     }
 
     NSString *location = noff_find_arg(argc, argv, "--location");
@@ -1324,13 +1338,18 @@ int calendar_cmd_remind(int argc, char **argv, int stdout_fd, int stderr_fd, BOO
     NSString *dueStr = noff_find_arg(argc, argv, "--due");
     if (dueStr) {
         NSDate *due = noff_parse_date(dueStr);
-        if (due) {
-            dueDate = due;
-            reminder.dueDateComponents = [[NSCalendar currentCalendar]
-                components:(NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay |
-                            NSCalendarUnitHour | NSCalendarUnitMinute)
-                fromDate:due];
+        if (!due) {
+            NSDictionary *err = noff_json_error(TOOL_NAME, @"remind",
+                                                 NOFF_ERR_INVALID_ARGS,
+                                                 [NSString stringWithFormat:@"Invalid date format for --due: '%@'", dueStr]);
+            noff_emit_json(stdout_fd, err, compact, quiet);
+            return NOFF_EXIT_INVALID_ARGS;
         }
+        dueDate = due;
+        reminder.dueDateComponents = [[NSCalendar currentCalendar]
+            components:(NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay |
+                        NSCalendarUnitHour | NSCalendarUnitMinute)
+            fromDate:due];
     }
 
     // [T-reminders-recurrence] EKReminder inherits recurrenceRules from
@@ -1487,12 +1506,17 @@ int calendar_cmd_update_reminder(int argc, char **argv, int stdout_fd, BOOL comp
     NSString *dueStr = noff_find_arg(argc, argv, "--due");
     if (dueStr) {
         NSDate *due = noff_parse_date(dueStr);
-        if (due) {
-            reminder.dueDateComponents = [[NSCalendar currentCalendar]
-                components:(NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay |
-                            NSCalendarUnitHour | NSCalendarUnitMinute)
-                fromDate:due];
+        if (!due) {
+            NSDictionary *err = noff_json_error(TOOL_NAME, @"update",
+                                                 NOFF_ERR_INVALID_ARGS,
+                                                 [NSString stringWithFormat:@"Invalid date format for --due: '%@'", dueStr]);
+            noff_emit_json(stdout_fd, err, compact, quiet);
+            return NOFF_EXIT_INVALID_ARGS;
         }
+        reminder.dueDateComponents = [[NSCalendar currentCalendar]
+            components:(NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay |
+                        NSCalendarUnitHour | NSCalendarUnitMinute)
+            fromDate:due];
     }
 
     NSString *notes = noff_find_arg(argc, argv, "--notes");
