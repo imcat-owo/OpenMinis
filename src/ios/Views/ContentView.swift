@@ -7439,6 +7439,18 @@ private struct SettingsSheet: View {
                             QuietAppIcon(id: QuietIconSlot.mcp.id, systemName: QuietIconSlot.mcp.systemName)
                         }
                     }
+                    // [merge step18a] 桥的对外连接：本地 MCP 对外服务 +
+                    // Cloudflare 中继。两个开关默认关，页面内还有中继
+                    // 地址/口令与状态行（BridgeExternalConnectionView）。
+                    NavigationLink {
+                        BridgeExternalConnectionView()
+                    } label: {
+                        Label {
+                            Text("桥·对外连接")
+                        } icon: {
+                            QuietAppIcon(id: QuietIconSlot.bridgeRelay.id, systemName: QuietIconSlot.bridgeRelay.systemName)
+                        }
+                    }
                     NavigationLink {
                         EnvironmentVariablesView()
                     } label: {

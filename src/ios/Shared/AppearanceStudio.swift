@@ -674,6 +674,8 @@ enum QuietIconSlot: String, CaseIterable, Identifiable {
     case decorate, appearance, skills, soul, memory, mcp, env, terminal, rootfs, browser
     case storage, shared, mounts, icloud, backup, permissions, lock
     case logs, about, privacy, feedback
+    /// [merge step18a] Settings → Agent Runtime 的「桥·对外连接」行。
+    case bridgeRelay
     /// [T-user-manual 09-11] Settings → About section's 使用手册 row.
     case manual
 
@@ -702,6 +704,7 @@ enum QuietIconSlot: String, CaseIterable, Identifiable {
         case .terminal: return "终端"
         case .rootfs: return "Rootfs 管理"
         case .browser: return "浏览器"
+        case .bridgeRelay: return "桥·对外连接"
         }
     }
     var systemName: String {
@@ -728,6 +731,7 @@ enum QuietIconSlot: String, CaseIterable, Identifiable {
         case .terminal: return "terminal"
         case .rootfs: return "externaldrive"
         case .browser: return "globe"
+        case .bridgeRelay: return "antenna.radiowaves.left.and.right"
         }
     }
 }

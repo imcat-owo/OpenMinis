@@ -109,6 +109,10 @@
 		BC1000000000000000000003 /* BridgeCore in Frameworks */ = {isa = PBXBuildFile; productRef = BC1000000000000000000002 /* BridgeCore */; };
 		BC1000000000000000000005 /* BridgeKernelAssembly.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC1000000000000000000004 /* BridgeKernelAssembly.swift */; };
 		BC1700000000000000000003 /* BridgeExternalMCPService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC1700000000000000000002 /* BridgeExternalMCPService.swift */; };
+		BC18A0000000000000000102 /* BridgeRelayProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC18A0000000000000000101 /* BridgeRelayProtocol.swift */; };
+		BC18A0000000000000000104 /* BridgeRelayTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC18A0000000000000000103 /* BridgeRelayTokenStore.swift */; };
+		BC18A0000000000000000106 /* BridgeRelayClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC18A0000000000000000105 /* BridgeRelayClient.swift */; };
+		BC18A0000000000000000108 /* BridgeExternalConnectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC18A0000000000000000107 /* BridgeExternalConnectionView.swift */; };
 		E52000006 /* OAuthHTTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = E52000015 /* OAuthHTTPClient.swift */; };
 		E52000007 /* ClaudeOAuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = E52000016 /* ClaudeOAuthManager.swift */; };
 		E52000009 /* AnthropicModelsAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = E52000018 /* AnthropicModelsAPI.swift */; };
@@ -773,6 +777,10 @@
 		E51000012 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		BC1000000000000000000004 /* BridgeKernelAssembly.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeKernelAssembly.swift; sourceTree = "<group>"; };
 		BC1700000000000000000002 /* BridgeExternalMCPService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeExternalMCPService.swift; sourceTree = "<group>"; };
+		BC18A0000000000000000101 /* BridgeRelayProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeRelayProtocol.swift; sourceTree = "<group>"; };
+		BC18A0000000000000000103 /* BridgeRelayTokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeRelayTokenStore.swift; sourceTree = "<group>"; };
+		BC18A0000000000000000105 /* BridgeRelayClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeRelayClient.swift; sourceTree = "<group>"; };
+		BC18A0000000000000000107 /* BridgeExternalConnectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeExternalConnectionView.swift; sourceTree = "<group>"; };
 		E51000013 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		E51000014 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		E52000011 /* LLMTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMTypes.swift; sourceTree = "<group>"; };
@@ -1622,6 +1630,7 @@
 			children = (
 				BC1000000000000000000004 /* BridgeKernelAssembly.swift */,
 				BC1700000000000000000001 /* ExternalMCP */,
+				BC18A0000000000000000100 /* Relay */,
 			);
 			path = Bridge;
 			sourceTree = "<group>";
@@ -1632,6 +1641,16 @@
 				BC1700000000000000000002 /* BridgeExternalMCPService.swift */,
 			);
 			path = ExternalMCP;
+			sourceTree = "<group>";
+		};
+		BC18A0000000000000000100 /* Relay */ = {
+			isa = PBXGroup;
+			children = (
+				BC18A0000000000000000101 /* BridgeRelayProtocol.swift */,
+				BC18A0000000000000000103 /* BridgeRelayTokenStore.swift */,
+				BC18A0000000000000000105 /* BridgeRelayClient.swift */,
+			);
+			path = Relay;
 			sourceTree = "<group>";
 		};
 		E53000030 /* Agent */ = {
@@ -2332,6 +2351,7 @@
 				E5SHV0103 /* SharedFoldersSettingsView.swift */,
 				E5SHV0104 /* MountDetailView.swift */,
 				E5SOUL102 /* SoulSettingsView.swift */,
+				BC18A0000000000000000107 /* BridgeExternalConnectionView.swift */,
 				E5LOCK102 /* FaceIDProtectionSettingsView.swift */,
 				E5LOCK103 /* AppLockOverlay.swift */,
 			);
@@ -2771,6 +2791,10 @@
 				AC0000202 /* ProviderCustomizationGenerated.swift in Sources */,
 				BC1000000000000000000005 /* BridgeKernelAssembly.swift in Sources */,
 				BC1700000000000000000003 /* BridgeExternalMCPService.swift in Sources */,
+				BC18A0000000000000000102 /* BridgeRelayProtocol.swift in Sources */,
+				BC18A0000000000000000104 /* BridgeRelayTokenStore.swift in Sources */,
+				BC18A0000000000000000106 /* BridgeRelayClient.swift in Sources */,
+				BC18A0000000000000000108 /* BridgeExternalConnectionView.swift in Sources */,
 				E54000AC1 /* DebugSkillGenerated.swift in Sources */,
 				E5FP00100 /* AppGroupChangeWatcher.swift in Sources */,
 				F1T00035 /* UserManualView.swift in Sources */,
