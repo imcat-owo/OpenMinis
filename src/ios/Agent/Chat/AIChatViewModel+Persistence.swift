@@ -1033,12 +1033,32 @@ extension AIChatViewModel {
     }
 
     /// Creates a session if needed and returns its ID.
+    ///
+    /// Concurrent callers share ONE in-flight creation (see
+    /// `sessionCreationTask`): the check-then-create sequence below is
+    /// not atomic — it awaits the ChatStore actor mid-flight — so two
+    /// overlapping callers used to each create a distinct session and
+    /// the second assignment silently orphaned the first.
     @discardableResult
     func ensureSessionReturningId() async -> String {
         if let sid = sessionId {
             logger.info("🔑DRAFT [vm=\(self.vmInstanceId)] ensureSession already has sessionId=\(sid)")
             return sid
         }
+        if let inFlight = sessionCreationTask {
+            return await inFlight.value
+        }
+        let task = Task { await self.createSessionForDraft() }
+        sessionCreationTask = task
+        let sid = await task.value
+        sessionCreationTask = nil
+        return sid
+    }
+
+    /// The single creation path behind `ensureSessionReturningId()`.
+    /// Only ever runs inside `sessionCreationTask`, so it executes at
+    /// most once per draft no matter how many callers are waiting.
+    private func createSessionForDraft() async -> String {
         let model = selectedModel
         let session = await ChatStore.shared.createSession(modelId: model.id, source: sessionSource)
         sessionId = session.id

@@ -2145,6 +2145,13 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
         didSet { browserTabPool.sessionId = sessionId }
     }
 
+    /// In-flight draft-session creation, shared by concurrent
+    /// `ensureSessionReturningId()` callers. Without it, two callers that
+    /// both observe `sessionId == nil` before the first creation lands
+    /// (e.g. two settings toggles tapped in quick succession on a draft)
+    /// each create their OWN session, and the writes scatter across both.
+    var sessionCreationTask: Task<String, Never>?
+
     /// The draft ID assigned by the parent view (e.g. "__new__<UUID>").
     /// Included in `.sessionDidCreate` notification so the parent can correlate.
     var draftId: String?
