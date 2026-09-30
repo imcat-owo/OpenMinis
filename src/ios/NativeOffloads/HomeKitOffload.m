@@ -307,8 +307,14 @@ static HMAccessory *find_accessory(HMHomeManager *manager, NSString *name) {
 }
 
 // ── Read all readable characteristics synchronously ──
+//
+// Returns NO when the reads did not all complete within the timeout:
+// the characteristics' `value`s are then whatever was cached before, and
+// callers must NOT present them as freshly read. [R3-096] The wait result
+// used to be discarded, so a timeout silently fell through and `get`
+// output stale cached values as if they were new.
 
-static void read_all_characteristics(HMAccessory *acc) {
+static BOOL read_all_characteristics(HMAccessory *acc) {
     dispatch_semaphore_t sem = dispatch_semaphore_create(0);
     dispatch_group_t group = dispatch_group_create();
     for (HMService *svc in acc.services) {
@@ -324,7 +330,7 @@ static void read_all_characteristics(HMAccessory *acc) {
     dispatch_group_notify(group, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         dispatch_semaphore_signal(sem);
     });
-    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+    return dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC)) == 0;
 }
 
 // ── Subcommands ──
@@ -471,7 +477,15 @@ static int cmd_get(int argc, char **argv, int stdout_fd, int stderr_fd, BOOL com
             return NOFF_EXIT_ERROR;
         }
 
-        read_all_characteristics(acc);
+        // [R3-096] On a read timeout the accessory's values are stale
+        // cache — report the timeout instead of outputting them as fresh.
+        if (!read_all_characteristics(acc)) {
+            NSDictionary *err = noff_json_error(TOOL_NAME, @"get",
+                                                 NOFF_ERR_INTERNAL_ERROR,
+                                                 [NSString stringWithFormat:@"Timed out reading characteristics from '%@'.", acc.name ?: name]);
+            noff_emit_json(stdout_fd, err, compact, quiet);
+            return NOFF_EXIT_ERROR;
+        }
         noff_emit_json(stdout_fd, noff_json_envelope(TOOL_NAME, @"get", accessory_to_full_dict(acc)), compact, quiet);
         return NOFF_EXIT_SUCCESS;
     }
@@ -479,16 +493,27 @@ static int cmd_get(int argc, char **argv, int stdout_fd, int stderr_fd, BOOL com
     // Room filter — return full details for all accessories in matching rooms
     NSString *roomLower = [roomFilter lowercaseString];
     NSMutableArray *accessories = [NSMutableArray array];
+    BOOL readTimedOut = NO;
     for (HMHome *home in manager.homes) {
         for (HMRoom *room in home.rooms) {
             NSString *rn = [room.name lowercaseString] ?: @"";
             if ([rn isEqualToString:roomLower] || [rn containsString:roomLower]) {
                 for (HMAccessory *acc in room.accessories) {
-                    read_all_characteristics(acc);
+                    // [R3-096] Same rule as the single-accessory path: any
+                    // timed-out read fails the query rather than mixing
+                    // stale cached values in with fresh ones.
+                    if (!read_all_characteristics(acc)) { readTimedOut = YES; }
                     [accessories addObject:accessory_to_full_dict(acc)];
                 }
             }
         }
+    }
+    if (readTimedOut) {
+        NSDictionary *err = noff_json_error(TOOL_NAME, @"get",
+                                             NOFF_ERR_INTERNAL_ERROR,
+                                             @"Timed out reading characteristics for one or more accessories in the room.");
+        noff_emit_json(stdout_fd, err, compact, quiet);
+        return NOFF_EXIT_ERROR;
     }
 
     NSDictionary *data = @{
@@ -585,7 +610,16 @@ static int cmd_set(int argc, char **argv, int stdout_fd, int stderr_fd, BOOL com
         dispatch_semaphore_signal(sem);
     }];
 
-    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+    // [R3-096] Check the wait result: on timeout the completion never ran,
+    // writeError is still nil, and falling through would report a write
+    // that may never have happened as successful.
+    if (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC)) != 0) {
+        NSDictionary *err = noff_json_error(TOOL_NAME, @"set",
+                                             NOFF_ERR_INTERNAL_ERROR,
+                                             @"Timed out waiting for the write to complete — the value may not have been applied.");
+        noff_emit_json(stdout_fd, err, compact, quiet);
+        return NOFF_EXIT_ERROR;
+    }
 
     if (writeError) {
         NSDictionary *err = noff_json_error(TOOL_NAME, @"set",
@@ -716,7 +750,16 @@ static int cmd_trigger(int argc, char **argv, int stdout_fd, int stderr_fd, BOOL
         dispatch_semaphore_signal(sem);
     }];
 
-    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
+    // [R3-096] Same as cmd_set: a timed-out wait leaves execError nil —
+    // without this check the scene was reported as triggered even when
+    // the execution never completed.
+    if (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC)) != 0) {
+        NSDictionary *err = noff_json_error(TOOL_NAME, @"trigger",
+                                             NOFF_ERR_INTERNAL_ERROR,
+                                             @"Timed out waiting for the scene to execute — it may not have run.");
+        noff_emit_json(stdout_fd, err, compact, quiet);
+        return NOFF_EXIT_ERROR;
+    }
 
     if (execError) {
         NSDictionary *err = noff_json_error(TOOL_NAME, @"trigger",
