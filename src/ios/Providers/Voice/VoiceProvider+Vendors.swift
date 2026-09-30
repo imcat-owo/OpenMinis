@@ -744,7 +744,11 @@ final class ElevenLabsVoiceProvider: VoiceProvider {
         // back to the historical constant (kelivo-compatible).
         let voiceId = (request.voice?.isEmpty == false) ? request.voice!
                     : ((request.model?.isEmpty == false) ? request.model! : Self.defaultVoiceId)
-        let modelId = (request.model?.isEmpty == false) ? request.model! : Self.modelId
+        // Voice-first for model_id too: when `voice` is absent, `model` IS the
+        // voice_id (legacy path above) — reusing it as model_id would send the
+        // voice id as the model name. Only a request that carries its voice
+        // separately (service layer) has a genuine model id in `model`.
+        let modelId = (request.voice?.isEmpty == false && request.model?.isEmpty == false) ? request.model! : Self.modelId
         var base = effectiveBaseURL()
         while base.hasSuffix("/") { base.removeLast() }
         if !base.lowercased().hasSuffix("/v1") { base += "/v1" }
