@@ -1183,6 +1183,9 @@ enum ChatStoreSyncHydrators {
                 merged[e.timestamp] = e
             }
         }
+        // [R3-036] Count additions where they happen instead of diffing
+        // dictionary/raw counts afterwards (see the early-return below).
+        var newFromRemote = 0
         for e in remoteEntries {
             if let existing = merged[e.timestamp] {
                 if existing.content != e.content {
@@ -1191,6 +1194,7 @@ enum ChatStoreSyncHydrators {
                     let conflictKey = "\(e.timestamp)#\(hashSuffix)"
                     if merged[conflictKey] == nil {
                         merged[conflictKey] = e
+                        newFromRemote += 1
                         logger.warning("[SyncCore] mergeMemoryDaily: same-timestamp conflict at \(e.timestamp), kept both as separate entries")
                     }
                     // else: this exact remote variant already merged in
@@ -1199,18 +1203,23 @@ enum ChatStoreSyncHydrators {
                 // else: identical content, idempotent — no-op
             } else {
                 merged[e.timestamp] = e   // new entry from remote
+                newFromRemote += 1
             }
         }
 
-        let newCount = merged.count - localEntries.count
         // [T-icloud-local-edit-clobber] Union added nothing → don't rewrite.
         // The rewrite would bump the file mtime, the dirty scanner would
         // re-push the (unchanged) day, and every peer's apply would do the
-        // same — a perpetual cross-device echo of identical content. The
-        // union can only grow, so equal counts means no new entries.
-        // `<=` (not `==`) so a count that somehow shrank can never rewrite
-        // the day file with fewer entries than it already has.
-        if newCount <= 0, fm.fileExists(atPath: url.path) {
+        // same — a perpetual cross-device echo of identical content.
+        // This must NOT be computed as `merged.count - localEntries.count`:
+        // localEntries counts raw parsed blocks (exact duplicates
+        // included) while merged is a deduplicated dictionary, so with
+        // duplicate blocks on disk the diff goes negative even when the
+        // remote DID add entries — and an early return on `<= 0` then
+        // swallowed those additions on every sync round while the caller
+        // still reported success (regression from the `== 0` → `<= 0`
+        // change in 1375d5f).
+        if newFromRemote == 0, fm.fileExists(atPath: url.path) {
             return
         }
         let allEntries = Array(merged.values)
@@ -1220,7 +1229,7 @@ enum ChatStoreSyncHydrators {
                                  withIntermediateDirectories: true)
         do {
             try newText.write(to: url, atomically: true, encoding: .utf8)
-            logger.info("[SyncCore] applied MemoryDailyV2 dateKey=\(dateKey) totalEntries=\(allEntries.count) newFromRemote=\(newCount)")
+            logger.info("[SyncCore] applied MemoryDailyV2 dateKey=\(dateKey) totalEntries=\(allEntries.count) newFromRemote=\(newFromRemote)")
             NotificationCenter.default.post(name: .memoryFilesDidChange, object: nil)
         } catch {
             logger.error("[SyncCore] mergeMemoryDaily write failed: \(error)")
