@@ -13,6 +13,7 @@ enum SharedContainerStore {
         ) {
             return group
         }
+        logAppGroupFallbackOnce()
         let base = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         ).first!.appendingPathComponent("OpenMinisClone", isDirectory: true)
@@ -20,12 +21,28 @@ enum SharedContainerStore {
         return base
     }
 
+    /// The per-process fallback above prevents a crash, but the main app
+    /// and the Share Extension then write to DIFFERENT stores and can
+    /// never see each other's pending shares — sharing is dead with no
+    /// other symptom. Log it loudly (once per process; this file is
+    /// compiled into both targets and NSLog is the common denominator)
+    /// so the failure is at least diagnosable.
+    private static var didLogAppGroupFallback = false
+    private static func logAppGroupFallbackOnce() {
+        guard !didLogAppGroupFallback else { return }
+        didLogAppGroupFallback = true
+        NSLog("[Share] ERROR: App Group container '\(appGroupID)' is unavailable (capability missing from this build's signature?) — falling back to per-process storage; the main app and the Share Extension will NOT see each other's pending shares.")
+    }
+
     private static let pendingShareKey = "pendingShare"
 
     static var sharedDefaults: UserDefaults? {
         guard FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: appGroupID
-        ) != nil else { return .standard }
+        ) != nil else {
+            logAppGroupFallbackOnce()
+            return .standard
+        }
         return UserDefaults(suiteName: appGroupID)
     }
 
