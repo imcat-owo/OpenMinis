@@ -13,6 +13,13 @@ final class AgentLiveActivityManager {
     private var currentActivity: Any?
     private var startTime: Date?
 
+    /// [R3-095] Lifecycle generation, bumped on every transition that
+    /// replaces, starts, finishes, or ends the current activity. Async
+    /// continuations (the renew restart below) capture it and re-check
+    /// before writing state back, so a stale in-flight operation can't
+    /// resurrect or overwrite whatever the lifecycle moved on to.
+    private var activityGeneration = 0
+
     /// [T-ios-live-activity-privacy-mode] Read-only view of the current task's
     /// start time, so Privacy Mode notifications can report elapsed duration
     /// ("1 task completed · 2m 15s") without introducing separate time tracking.
@@ -517,6 +524,7 @@ final class AgentLiveActivityManager {
                 pushType: nil
             )
             currentActivity = activity
+            activityGeneration += 1
             startTime = now
             // Record so the first _updateActivity dedup compares correctly and a
             // later audio-only end has a snapshot to reason about.
@@ -848,12 +856,32 @@ final class AgentLiveActivityManager {
         let sinceLastRenew = Int(Date().timeIntervalSince(lastRenewDate))
         logger.info("[LiveActivity][renew] ending old id=\(oldId) after \(sinceLastRenew)s to reset budget")
 
+        // [R3-095] This renew supersedes any earlier in-flight renew; the
+        // generation captured here is re-checked by the restart Task below.
+        activityGeneration += 1
+        let renewGeneration = activityGeneration
         currentActivity = nil
         let finalContent = ActivityContent(state: state, staleDate: nil)
 
         Task {
             await oldActivity.end(finalContent, dismissalPolicy: .immediate)
             logger.info("[LiveActivity][renew] old id=\(oldId) ended")
+
+            // [R3-095] While the end was in flight the lifecycle may have
+            // moved on: the task finished (end/finish bumped the
+            // generation), a new session started its own activity
+            // (currentActivity set again), or a finished card is awaiting
+            // dismissal. Restarting now with the captured stale state
+            // would resurrect a zombie card, orphan the newer activity
+            // (nothing would ever end it), and clear a pendingStartState
+            // that isn't ours. Whoever bumped the generation owns the
+            // state now — leave everything untouched.
+            guard self.activityGeneration == renewGeneration,
+                  self.currentActivity == nil,
+                  !self.awaitingDismissal else {
+                logger.info("[LiveActivity][renew] restart skipped — lifecycle moved on while old id=\(oldId) was ending (generation \(renewGeneration)→\(self.activityGeneration), currentActivity=\(self.currentActivity == nil ? "nil" : "set"), awaitingDismissal=\(self.awaitingDismissal))")
+                return
+            }
 
             let attributes = AgentActivityAttributes(startDate: self.startTime ?? Date())
             let content = ActivityContent(state: state, staleDate: nil)
@@ -864,6 +892,7 @@ final class AgentLiveActivityManager {
                     pushType: nil
                 )
                 self.currentActivity = newActivity
+                self.activityGeneration += 1
                 self.lastRenewDate = Date()
                 self.lastPushedState = state
                 self.lastPushDate = Date()
@@ -898,6 +927,7 @@ final class AgentLiveActivityManager {
         do {
             let activity = try Activity.request(attributes: attributes, content: content, pushType: nil)
             currentActivity = activity
+            activityGeneration += 1
             lastRenewDate = Date()
             lastPushedState = state
             lastPushDate = Date()
@@ -943,6 +973,7 @@ final class AgentLiveActivityManager {
             return
         }
         awaitingDismissal = true
+        activityGeneration += 1
 
         let soul = Self.currentSoulName()
         var resolvedMessages: [String: String] = [:]
@@ -1057,6 +1088,7 @@ final class AgentLiveActivityManager {
         }
 
         currentActivity = nil
+        activityGeneration += 1
         startTime = nil
         carouselIndex = 0
     }
