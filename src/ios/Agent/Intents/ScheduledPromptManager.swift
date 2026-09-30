@@ -182,6 +182,25 @@ final class ScheduledPromptStore: ObservableObject {
     /// across an app update; cheap idempotent call).
     func rescheduleAll() async {
         registerCategory()
+        // A .once prompt whose notification already delivered has fired,
+        // even if it was never tapped — retire it instead of re-arming it
+        // for tomorrow on every cold start. (The tapped path also retires
+        // in handleTap; a delivered notification the user swiped away
+        // leaves no trace this API can see, so this covers what is
+        // detectable.)
+        let deliveredIds: Set<String> = await withCheckedContinuation { cont in
+            UNUserNotificationCenter.current().getDeliveredNotifications { delivered in
+                cont.resume(returning: Set(delivered.map { $0.request.identifier }))
+            }
+        }
+        var retiredAny = false
+        for i in prompts.indices
+        where prompts[i].enabled && prompts[i].repeatRule == .once
+            && deliveredIds.contains(notifId(prompts[i].id)) {
+            prompts[i].enabled = false
+            retiredAny = true
+        }
+        if retiredAny { persist() }
         for p in prompts where p.enabled {
             await reschedule(p)
         }
@@ -224,6 +243,17 @@ final class ScheduledPromptStore: ObservableObject {
             if var p = shared.prompts.first(where: { $0.id == promptId }),
                p.sessionId == nil || p.sessionId?.isEmpty == true {
                 p.sessionId = vm.sessionId
+                await shared.upsert(p)
+            }
+            // A .once prompt has now fired: retire it. Without a stored
+            // terminal state, the upsert above re-arms it for tomorrow and
+            // the next cold start's rescheduleAll does the same — "once"
+            // quietly became "daily". Disabling persists across both
+            // paths: upsert's reschedule removes the pending request and
+            // returns early, and rescheduleAll only arms enabled prompts.
+            if var p = shared.prompts.first(where: { $0.id == promptId }),
+               p.repeatRule == .once, p.enabled {
+                p.enabled = false
                 await shared.upsert(p)
             }
         }
