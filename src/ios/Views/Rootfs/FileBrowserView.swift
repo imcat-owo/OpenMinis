@@ -923,6 +923,9 @@ class FileBrowserViewModel: ObservableObject {
     /// sort menu; persisted by the SwiftUI side via `@AppStorage`.
     var showHidden: Bool = false
     private var rawItems: [FileItem] = []
+    /// Monotonic load generation — same anti-stale pattern as
+    /// DirectoryPickerView.loadToken in this file.
+    private var loadToken: UInt64 = 0
 
     let rootPath: URL
     let rootLabel: String
@@ -949,6 +952,14 @@ class FileBrowserViewModel: ObservableObject {
 
     func loadItems() {
         isLoading = true
+        // [R3-033] Stamp this load and drop its result if a newer load has
+        // started by the time it lands. Enumeration of a slow folder used
+        // to unconditionally overwrite the CURRENT folder's listing, after
+        // which delete/move built paths from the current path + stale
+        // names and hit the wrong files.
+        loadToken &+= 1
+        let token = loadToken
+        let pathToLoad = currentPath
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
@@ -956,7 +967,7 @@ class FileBrowserViewModel: ObservableObject {
             do {
                 // Resolve symlinks so contentsOfDirectory works on bind-mounted dirs
                 // (e.g. /var/minis/attachments -> Library/MinisChat/...)
-                let resolvedPath = self.currentPath.resolvingSymlinksInPath()
+                let resolvedPath = pathToLoad.resolvingSymlinksInPath()
                 // Note: we deliberately do NOT bulk-prefetch iCloud placeholder
                 // files here. A large iCloud folder could contain thousands of
                 // files, and kicking off that many simultaneous downloads just
@@ -982,12 +993,14 @@ class FileBrowserViewModel: ObservableObject {
                 }
 
                 DispatchQueue.main.async {
+                    guard token == self.loadToken else { return }
                     self.rawItems = fileItems
                     self.applySort()
                     self.isLoading = false
                 }
             } catch {
                 DispatchQueue.main.async {
+                    guard token == self.loadToken else { return }
                     self.errorMessage = error.localizedDescription
                     self.showError = true
                     self.isLoading = false
