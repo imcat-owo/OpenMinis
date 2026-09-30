@@ -935,22 +935,41 @@ enum RequestBodyPatcher {
     // MARK: - Structured tool result images
 
     private static let imageLock = NSLock()
-    private static var _toolResultImages: [String: (data: Data, mimeType: String)] = [:]
+    /// Pending images by tool_use_id, with stash time so entries whose
+    /// request never arrives (aborted before the SDK call) can be pruned
+    /// instead of lingering forever.
+    private static var _toolResultImages: [String: (data: Data, mimeType: String, stashedAt: Date)] = [:]
+    private static let toolResultImageTTL: TimeInterval = 180
 
-    /// Set pending tool result images (called from AnthropicAgentProvider before streaming).
+    /// Stash pending tool result images (called from AnthropicAgentProvider
+    /// before streaming). Merges instead of replacing: with two streams in
+    /// flight, the second stream's stash must not wipe the first stream's
+    /// images before its request is patched — each request later takes only
+    /// the ids that appear in its own body (see `takeToolResultImages`).
     static func setToolResultImages(_ images: [String: (data: Data, mimeType: String)]) {
+        let now = Date()
         imageLock.lock()
-        _toolResultImages = images
+        _toolResultImages = _toolResultImages.filter { now.timeIntervalSince($0.value.stashedAt) < toolResultImageTTL }
+        for (id, info) in images {
+            _toolResultImages[id] = (data: info.data, mimeType: info.mimeType, stashedAt: now)
+        }
         imageLock.unlock()
     }
 
-    /// Atomically take and clear the pending images.
-    private static func takeToolResultImages() -> [String: (data: Data, mimeType: String)] {
+    /// Atomically take ONLY the entries whose tool_use_id appears in the
+    /// request being patched, leaving other streams' images stashed. The old
+    /// take-everything version let whichever request patched first steal a
+    /// concurrent request's images and silently discard them.
+    private static func takeToolResultImages(matching ids: Set<String>) -> [String: (data: Data, mimeType: String)] {
         imageLock.lock()
         defer { imageLock.unlock() }
-        let images = _toolResultImages
-        _toolResultImages.removeAll()
-        return images
+        var taken: [String: (data: Data, mimeType: String)] = [:]
+        for id in ids {
+            if let entry = _toolResultImages.removeValue(forKey: id) {
+                taken[id] = (data: entry.data, mimeType: entry.mimeType)
+            }
+        }
+        return taken
     }
 
     /// Rewrites tool_result blocks that have associated images (looked up by tool_use_id)
@@ -960,12 +979,22 @@ enum RequestBodyPatcher {
     /// accepts an array of content blocks for vision. This replaces the string content
     /// using structured image data passed via `setToolResultImages()`.
     static func patchToolResultsWithImages(into request: NSMutableURLRequest) {
-        let images = takeToolResultImages()
-        guard !images.isEmpty else { return }
-
         guard let body = request.httpBody,
               var json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
               var messages = json["messages"] as? [[String: Any]] else { return }
+
+        // Only consume images whose tool_use_id is in THIS request's body —
+        // a concurrent request must not take (and drop) another stream's.
+        var wantedIds = Set<String>()
+        for message in messages {
+            guard let content = message["content"] as? [[String: Any]] else { continue }
+            for block in content where block["type"] as? String == "tool_result" {
+                if let id = block["tool_use_id"] as? String { wantedIds.insert(id) }
+            }
+        }
+        guard !wantedIds.isEmpty else { return }
+        let images = takeToolResultImages(matching: wantedIds)
+        guard !images.isEmpty else { return }
 
         var modified = false
 
