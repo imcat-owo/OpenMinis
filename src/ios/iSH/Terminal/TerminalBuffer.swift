@@ -204,7 +204,15 @@ final class TerminalBuffer {
 
     /// Scroll the scroll region up by n lines (content moves up, new blank lines at bottom)
     func scrollUp(_ n: Int) {
-        for _ in 0..<n {
+        // Clamp to the region height (same treatment insertLines/deleteLines
+        // already had): once the region has scrolled its own height it is
+        // entirely blank, so further iterations change nothing on screen —
+        // but each one is an O(rows) array move on the main thread, and the
+        // CSI parameter saturates at 65535, so an adversarial `ESC[65535S`
+        // meant ~65535× the necessary work plus a stream of blank lines
+        // pushed into scrollback evicting real history at the cap.
+        let count = max(0, min(n, scrollBottom - scrollTop + 1))
+        for _ in 0..<count {
             if scrollbackEnabled {
                 scrollback.append(grid[scrollTop])
                 if scrollback.count > maxScrollback {
@@ -219,7 +227,11 @@ final class TerminalBuffer {
 
     /// Scroll the scroll region down by n lines (content moves down, new blank lines at top)
     func scrollDown(_ n: Int) {
-        for _ in 0..<n {
+        // Same region-height clamp as scrollUp: beyond the height the
+        // region is blank either way and the extra iterations are pure
+        // O(rows) churn per line on the main thread.
+        let count = max(0, min(n, scrollBottom - scrollTop + 1))
+        for _ in 0..<count {
             grid.remove(at: scrollBottom)
             grid.insert(blankLine(), at: scrollTop)
         }
