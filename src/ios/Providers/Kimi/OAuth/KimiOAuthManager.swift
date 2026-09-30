@@ -142,11 +142,23 @@ final class KimiOAuthManager: ObservableObject {
         let deadline = Date().addingTimeInterval(expiresIn)
         while Date() < deadline {
             try await Task.sleep(nanoseconds: UInt64(currentInterval * 1_000_000_000))
-            let (json, httpOK, _, _) = try await postToken(params: [
-                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-                "device_code": deviceCode,
-                "client_id": clientID,
-            ])
+            let json: [String: Any]
+            let httpOK: Bool
+            do {
+                (json, httpOK, _, _) = try await postToken(params: [
+                    "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                    "device_code": deviceCode,
+                    "client_id": clientID,
+                ])
+            } catch is CancellationError {
+                throw error
+            } catch {
+                // Transport-level failure (no HTTP response to classify) —
+                // one network blip shouldn't kill a login that may poll for
+                // up to 15 minutes; keep polling until the deadline.
+                logger.warning("Kimi token poll failed, will retry: \(error.localizedDescription)")
+                continue
+            }
             switch KimiDeviceFlow.classifyPoll(json: json, httpOK: httpOK) {
             case let .success(access, refresh, exp):
                 return (access, refresh, exp)
