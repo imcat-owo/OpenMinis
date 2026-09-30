@@ -956,6 +956,31 @@ final class BrowserTabPool: ObservableObject {
             }
         }
 
+        // [T-browser-use-per-tab-serial-ios] Serialize per tab id. Acquire the
+        // tab's serial slot, waiting at most serialWaitTimeout (60s) for any
+        // in-flight op on this SAME tab. On timeout, tell the model to open a
+        // fresh tab instead of contending. This wait is independent of the
+        // per-action browser timeout below (manager.execute), which is unchanged.
+        let serialWaitStart = CFAbsoluteTimeGetCurrent()
+        guard let releaseSerialSlot = await acquireSerialSlot(tabId: targetId) else {
+            let serialWaitMs = Int((CFAbsoluteTimeGetCurrent() - serialWaitStart) * 1000)
+            logger.info("[PoolTiming] serial_slot_timeout elapsed=\(serialWaitMs)ms tab=\(targetId) action=\(input.action.rawValue)")
+            return .error(AppLocalized("Multiple actions are operating on browser tab \(targetId) at the same time and it could not be acquired in time. Open a new tab (action: new_tab, or pass a different tab_id) and retry this action there so it can run in parallel."))
+        }
+        let serialAcquiredMs = Int((CFAbsoluteTimeGetCurrent() - serialWaitStart) * 1000)
+        if serialAcquiredMs > 100 {
+            logger.info("[PoolTiming] serial_slot_waited elapsed=\(serialAcquiredMs)ms tab=\(targetId)")
+        }
+        defer { releaseSerialSlot() }
+
+        // [R3-090] UA / viewport changes run UNDER the serial slot, not
+        // before it. Both rebuild the WebView(s) (setUserAgentProfile and
+        // applyViewportToAllTabs swap in a fresh WKWebView); doing that
+        // while a navigation was in flight on this tab discarded the old
+        // view, whose delegate callbacks the navigation was still waiting
+        // on — the navigation then hung to its 30s timeout and the new
+        // view, rebuilt before anything had committed, stayed blank.
+        //
         // Sync user-agent changes through the pool so all tabs + future tabs update.
         // Agent-driven switches are temporary — don't persist to UserDefaults.
         if input.action == .setUserAgent {
@@ -983,23 +1008,6 @@ final class BrowserTabPool: ObservableObject {
                 text: "Viewport set to \(w)x\(h) for this session"
             )
         }
-
-        // [T-browser-use-per-tab-serial-ios] Serialize per tab id. Acquire the
-        // tab's serial slot, waiting at most serialWaitTimeout (60s) for any
-        // in-flight op on this SAME tab. On timeout, tell the model to open a
-        // fresh tab instead of contending. This wait is independent of the
-        // per-action browser timeout below (manager.execute), which is unchanged.
-        let serialWaitStart = CFAbsoluteTimeGetCurrent()
-        guard let releaseSerialSlot = await acquireSerialSlot(tabId: targetId) else {
-            let serialWaitMs = Int((CFAbsoluteTimeGetCurrent() - serialWaitStart) * 1000)
-            logger.info("[PoolTiming] serial_slot_timeout elapsed=\(serialWaitMs)ms tab=\(targetId) action=\(input.action.rawValue)")
-            return .error(AppLocalized("Multiple actions are operating on browser tab \(targetId) at the same time and it could not be acquired in time. Open a new tab (action: new_tab, or pass a different tab_id) and retry this action there so it can run in parallel."))
-        }
-        let serialAcquiredMs = Int((CFAbsoluteTimeGetCurrent() - serialWaitStart) * 1000)
-        if serialAcquiredMs > 100 {
-            logger.info("[PoolTiming] serial_slot_waited elapsed=\(serialAcquiredMs)ms tab=\(targetId)")
-        }
-        defer { releaseSerialSlot() }
 
         // Re-resolve the tab by id — `idx` was computed before the serial-slot
         // await, during which the tabs array may have changed (idle reclaim,
