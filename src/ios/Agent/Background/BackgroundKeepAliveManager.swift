@@ -239,6 +239,23 @@ final class BackgroundKeepAliveManager: NSObject, ObservableObject, CLLocationMa
     private var silentAudioActivationRetries = 0
     private static let maxActivationRetries = 3
     private static let activationRetryDelay: TimeInterval = 0.5
+    /// The one pending activation retry, if any. Retries used to be bare
+    /// `asyncAfter` closures: several could be outstanding at once (each
+    /// failure inside the 0.5s window queued another), they shared the
+    /// counter above, and an old closure's "no longer wanted" branch reset
+    /// the counter of a NEWER retry chain — together that let the
+    /// "at most 3 attempts" cap be bypassed to ~6 and let stale retries
+    /// corrupt a fresh chain. Now at most one retry is outstanding, it is
+    /// cancellable, and `activationRetryGeneration` invalidates any closure
+    /// that was already dispatched when its chain was superseded/stopped.
+    private var pendingActivationRetry: DispatchWorkItem?
+    private var activationRetryGeneration = 0
+
+    private func cancelPendingActivationRetry() {
+        pendingActivationRetry?.cancel()
+        pendingActivationRetry = nil
+        activationRetryGeneration += 1
+    }
 
     /// Wall-clock when the current debounced stop was scheduled, for logging the
     /// remaining window. nil when no stop is pending.
@@ -1435,6 +1452,9 @@ final class BackgroundKeepAliveManager: NSObject, ObservableObject, CLLocationMa
     /// keep-alive is still wanted (background + active + not suspended) so we
     /// don't fight a state that has since changed.
     private func scheduleSilentAudioActivationRetry() {
+        // At most one retry outstanding: a second failure inside the delay
+        // window replaces the pending retry instead of queueing alongside it.
+        cancelPendingActivationRetry()
         silentAudioActivationRetries += 1
         guard silentAudioActivationRetries < Self.maxActivationRetries else {
             logger.error("[BKA][Start] exhausted \(Self.maxActivationRetries) activation attempts — giving up")
@@ -1451,8 +1471,13 @@ final class BackgroundKeepAliveManager: NSObject, ObservableObject, CLLocationMa
             return
         }
         let attempt = silentAudioActivationRetries
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.activationRetryDelay) { [weak self] in
+        let generation = activationRetryGeneration
+        let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
+            // Superseded or stopped while queued — a newer chain owns the
+            // counter now; don't touch it.
+            guard self.activationRetryGeneration == generation else { return }
+            self.pendingActivationRetry = nil
             let stillWanted = self.isActive && self.backgroundSpeakEnabled
                 && self.appIsInBackground && self.silentAudioSuspendCount == 0
                 && !self.silentAudioActive
@@ -1464,6 +1489,8 @@ final class BackgroundKeepAliveManager: NSObject, ObservableObject, CLLocationMa
             logger.info("[BKA][Start] activation retry #\(attempt) — re-attempting")
             self.startSilentAudio(reason: "activationRetry#\(attempt)")
         }
+        pendingActivationRetry = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.activationRetryDelay, execute: work)
     }
 
     /// Called by SpeechFinishedDelegate when TTS completes, to restart silent audio if needed.
@@ -1513,6 +1540,7 @@ final class BackgroundKeepAliveManager: NSObject, ObservableObject, CLLocationMa
     func stopSilentAudio(reason: String = "direct") {
         // A direct stop supersedes any debounced one and aborts pending retries.
         cancelPendingSilentAudioStop(reason: "stopSilentAudio called")
+        cancelPendingActivationRetry()
         // [T-ios-bg-idle-grace] Also clear a pending idle grace. Required, not
         // belt-and-braces: stopSilentAudio has direct callers (media suspend,
         // interruption teardown) that never go through evaluateSilentAudio, and
