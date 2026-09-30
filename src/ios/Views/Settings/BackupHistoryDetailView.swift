@@ -249,6 +249,29 @@ struct BackupHistoryDetailView: View {
         }
         let remotes = RcloneRemoteStore.remotes
         for outcome in record.destinations where outcome.succeeded {
+            // Mounted-folder destinations carry no backend kind (see
+            // DeliveryResult): the package was copied straight into the
+            // folder root under its own name, so delete it there. Matching
+            // only rclone remotes by name — as this loop used to — silently
+            // skipped every folder destination while the record (and the
+            // dialog's "each destination" promise) said otherwise. A nil
+            // kind with no matching mount falls through to the remote
+            // branch, which keeps pre-kind records deleting as before.
+            if outcome.kind == nil,
+               let root = await MainActor.run(body: {
+                   MountedFoldersManager.shared.resolvedURL(forName: outcome.name)
+               }) {
+                let fileURL = root.appendingPathComponent(name)
+                do {
+                    try await Task.detached(priority: .utility) {
+                        try MountedFolderCoordinator.remove(at: fileURL)
+                    }.value
+                } catch {
+                    Self.logger.error(
+                        "[Backup] deleting '\(name)' from folder '\(outcome.name)' failed: \(error.localizedDescription)")
+                }
+                continue
+            }
             guard let remote = remotes.first(where: { $0.name == outcome.name }) else { continue }
             do {
                 RcloneRemoteStore.syncToRclone()
