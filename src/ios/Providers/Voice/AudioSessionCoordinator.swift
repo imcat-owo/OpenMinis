@@ -229,6 +229,10 @@ final class AudioSessionCoordinator {
     /// (interruption or secondary-audio-silence hint). Guards the resume so we
     /// never resume playback the USER paused.
     private var pausedByExternalAudio = false
+    /// Whether the user had already paused cloud TTS before the external-audio
+    /// latch. Recorded at latch time so the matching resume can leave a
+    /// user-owned pause alone instead of undoing it.
+    private var userPausedBeforeExternalAudio = false
 
     private func registerInterruptionObserver() {
         NotificationCenter.default.addObserver(
@@ -285,6 +289,10 @@ final class AudioSessionCoordinator {
         // Idempotent: repeated BEGIN signals (interruption + secondary-hint can
         // both fire) must not clear an already-recorded pause intent.
         guard !pausedByExternalAudio else { return }
+        // Record whether the USER already paused before we latch — the matching
+        // resume must not undo a user-owned pause (cloud TTS only; System
+        // AVSpeechSynthesizer is not driven through this player).
+        userPausedBeforeExternalAudio = VoiceOutputPlayer.shared.isPaused
         pausedByExternalAudio = true
         VoiceOutputPlayer.shared.pause()
         logger.info("[AudioSession] \(reason) → TTS paused (external audio)")
@@ -294,6 +302,12 @@ final class AudioSessionCoordinator {
     private func resumeTTSAfterExternalAudio(reason: String) {
         guard pausedByExternalAudio else { return }
         pausedByExternalAudio = false
+        let wasUserPaused = userPausedBeforeExternalAudio
+        userPausedBeforeExternalAudio = false
+        guard !wasUserPaused else {
+            logger.info("[AudioSession] \(reason) → TTS left paused (user had paused before external audio)")
+            return
+        }
         VoiceOutputPlayer.shared.resume()
         logger.info("[AudioSession] \(reason) → TTS resumed")
     }
