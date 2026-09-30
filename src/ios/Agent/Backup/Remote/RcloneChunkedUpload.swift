@@ -420,6 +420,8 @@ enum RcloneTransfer {
         // immediate — it is a user-facing control, and the poll interval is
         // the floor on how long it appears to hang.
         var cancelled = false
+        var ticksSinceCancel = 0
+        var statusFailures = 0   // consecutive job/status reads that threw
         // [T-restore-download-speed] Rolling rate, so the sheet can show how
         // fast the transfer is going and roughly how long is left.
         //
@@ -440,9 +442,42 @@ enum RcloneTransfer {
                 // job to actually report finished, so the file is not deleted
                 // out from under a transfer that is still writing.
                 _ = try? RcloneBridge.rpc("job/stop", ["jobid": jobid])
+            } else if cancelled {
+                ticksSinceCancel += 1
+                // The stop rides the same RPC channel as the status poll, so
+                // a lost first attempt must not strand the cancel: resend it
+                // about once a second, and if the job still never reports
+                // finished, stop waiting — hanging here forever after the
+                // user pressed Cancel is a failure of its own.
+                if ticksSinceCancel % 4 == 0 {
+                    _ = try? RcloneBridge.rpc("job/stop", ["jobid": jobid])
+                }
+                if ticksSinceCancel > 40 {
+                    try? FileManager.default.removeItem(at: destination)
+                    throw TransferError.cancelled
+                }
             }
 
-            let status = (try? RcloneBridge.rpc("job/status", ["jobid": jobid])) ?? [:]
+            // A status read that throws must not spin this loop forever:
+            // swallowing it into an empty dictionary left `finished` false
+            // for eternity, with no timeout and no failure bound. Count
+            // consecutive failures and give up loudly after ~10 s blind.
+            let status: [String: Any]
+            do {
+                status = try RcloneBridge.rpc("job/status", ["jobid": jobid])
+                statusFailures = 0
+            } catch {
+                statusFailures += 1
+                if statusFailures >= 40 {
+                    if cancelled {
+                        try? FileManager.default.removeItem(at: destination)
+                        throw TransferError.cancelled
+                    }
+                    throw TransferError.remoteRejected(AppLocalized(
+                        "Lost contact with the download — its status could not be read."))
+                }
+                continue
+            }
             let finished = (status["finished"] as? NSNumber)?.boolValue ?? false
 
             if !finished {
