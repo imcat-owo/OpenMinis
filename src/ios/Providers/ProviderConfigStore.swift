@@ -570,12 +570,13 @@ final class ProviderConfigStore: ObservableObject {
                 let inferred = base.withInferredModality()
                 if inferred.modalityOverride != nil {
                     config.modelEntries[i] = ModelEntry(
-                        uuid: entry.id,
+                        uuid: entry.uuid,
                         providerInstanceId: entry.providerInstanceId,
                         model: inferred,
                         overrides: entry.overrides,
                         isCustom: entry.isCustom,
-                        isHidden: entry.isHidden
+                        isHidden: entry.isHidden,
+                        userModifiedAt: entry.userModifiedAt
                     )
                 }
             }
