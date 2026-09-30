@@ -1021,7 +1021,7 @@ final class BrowserUseManager: NSObject, ObservableObject {
     private func getText(selector: String?) async throws -> BrowserActionResult {
         let js = BrowserUseJS.getText(selector: selector)
         do {
-            let raw = try await webView.evaluateJavaScript(js)
+            let raw = try await evaluateJavaScriptBounded(js, timeout: Self.readActionTimeout)
             if let str = raw as? String,
                let data = str.data(using: .utf8),
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -1045,6 +1045,8 @@ final class BrowserUseManager: NSObject, ObservableObject {
                 return BrowserActionResult(text: Self.formatJSONResult(json))
             }
             return BrowserActionResult(text: String(describing: raw ?? "null"))
+        } catch is JSEvalTimeout {
+            return .error("JavaScript timed out after \(Int(Self.readActionTimeout))s: the page's JavaScript main thread appears to be blocked.")
         } catch {
             return .error("JavaScript error: \(error.localizedDescription)")
         }
@@ -1055,7 +1057,7 @@ final class BrowserUseManager: NSObject, ObservableObject {
     private func getReadable() async throws -> BrowserActionResult {
         let js = BrowserUseJS.getReadable()
         do {
-            let raw = try await webView.evaluateJavaScript(js)
+            let raw = try await evaluateJavaScriptBounded(js, timeout: Self.readActionTimeout)
             if let str = raw as? String,
                let data = str.data(using: .utf8),
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -1068,6 +1070,8 @@ final class BrowserUseManager: NSObject, ObservableObject {
                 return BrowserActionResult(text: Self.formatJSONResult(json))
             }
             return BrowserActionResult(text: String(describing: raw ?? "null"))
+        } catch is JSEvalTimeout {
+            return .error("JavaScript timed out after \(Int(Self.readActionTimeout))s: the page's JavaScript main thread appears to be blocked.")
         } catch {
             return .error("JavaScript error: \(error.localizedDescription)")
         }
@@ -1080,7 +1084,7 @@ final class BrowserUseManager: NSObject, ObservableObject {
         let px = amount ?? 500
         let js = BrowserUseJS.scroll(direction: dir, amount: px, selector: selector)
         do {
-            let raw = try await webView.callAsyncJavaScript(js, arguments: [:], contentWorld: .page)
+            let raw = try await callAsyncJavaScriptBounded(js, timeout: Self.readActionTimeout)
             if let str = raw as? String,
                let data = str.data(using: .utf8),
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -1090,6 +1094,8 @@ final class BrowserUseManager: NSObject, ObservableObject {
                 return BrowserActionResult(text: Self.formatJSONResult(json))
             }
             return BrowserActionResult(text: String(describing: raw ?? "null"))
+        } catch is JSEvalTimeout {
+            return .error("JavaScript timed out after \(Int(Self.readActionTimeout))s: the page's JavaScript main thread appears to be blocked.")
         } catch {
             return .error("JavaScript error: \(error.localizedDescription)")
         }
@@ -1103,7 +1109,9 @@ final class BrowserUseManager: NSObject, ObservableObject {
         let count = min(scrollCount ?? 10, 20)
         let js = BrowserUseJS.scrollAndCollect(direction: dir, amount: px, scrollCount: count, selector: selector, itemSelector: itemSelector)
         do {
-            let raw = try await webView.callAsyncJavaScript(js, arguments: [:], contentWorld: .page)
+            // Multi-step action (up to 20 scroll steps with settle delays), so
+            // it gets the longer execute_js bound rather than readActionTimeout.
+            let raw = try await callAsyncJavaScriptBounded(js, timeout: Self.executeJSTimeout)
             if let str = raw as? String,
                let data = str.data(using: .utf8),
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -1113,6 +1121,8 @@ final class BrowserUseManager: NSObject, ObservableObject {
                 return BrowserActionResult(text: Self.formatScrollAndCollectResult(json))
             }
             return BrowserActionResult(text: String(describing: raw ?? "null"))
+        } catch is JSEvalTimeout {
+            return .error("JavaScript timed out after \(Int(Self.executeJSTimeout))s: the page's JavaScript main thread appears to be blocked.")
         } catch {
             return .error("JavaScript error: \(error.localizedDescription)")
         }
@@ -1600,7 +1610,7 @@ final class BrowserUseManager: NSObject, ObservableObject {
         let depth = maxDepth ?? 5
         let js = BrowserUseJS.getBackbone(maxDepth: depth)
         do {
-            let result = try await webView.evaluateJavaScript(js)
+            let result = try await evaluateJavaScriptBounded(js, timeout: Self.readActionTimeout)
             guard let str = result as? String,
                   let data = str.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -1610,6 +1620,8 @@ final class BrowserUseManager: NSObject, ObservableObject {
                 return .error(error)
             }
             return BrowserActionResult(text: Self.formatBackboneResult(json))
+        } catch is JSEvalTimeout {
+            return .error("JavaScript timed out after \(Int(Self.readActionTimeout))s: the page's JavaScript main thread appears to be blocked.")
         } catch {
             return .error("JavaScript error: \(error.localizedDescription)")
         }
