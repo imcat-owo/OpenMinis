@@ -951,6 +951,10 @@ thinking 填/描/强调不必手写。贴包后跟 `colorsLight.accent` / 聊天
             }
             if relativePath == "SKILL.md" { continue }
             if relativePath.hasPrefix(".") { continue }
+            // Zip-slip: a crafted entry like `a/../../other-skill/x` must
+            // never write outside this skill's own directory.
+            if relativePath.hasPrefix("/")
+                || relativePath.split(separator: "/").contains("..") { continue }
 
             let destFile = skillDir.appendingPathComponent(relativePath)
             try fm.createDirectory(at: destFile.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -2340,6 +2344,10 @@ extension SkillStore {
                 let rel = entry.name
                 if rel == "SKILL.md" { continue }   // already written by importSkillFromSync
                 if rel.hasPrefix(".") { continue }
+                // Zip-slip: a crafted entry like `a/../../other-skill/x`
+                // must never write outside this skill's own directory.
+                if rel.hasPrefix("/")
+                    || rel.split(separator: "/").contains("..") { continue }
 
                 // Write to Library skill dir
                 let destFile = skillDir.appendingPathComponent(rel)
