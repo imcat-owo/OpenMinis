@@ -783,9 +783,7 @@ enum ChatStoreSyncHydrators {
         // mergeProviderConfig above. The previous blind file write would
         // wipe locally-added env vars whenever a stale snapshot arrived.
         if #available(iOS 17.0, *) {
-            await MainActor.run {
-                CloudSyncEngine.mergeEnvVars(remoteJson: json)
-            }
+            await CloudSyncEngine.mergeEnvVars(remoteJson: json)
             if let secretsJson = stringField(record, "envSecretsJson"), !secretsJson.isEmpty {
                 CloudSyncEngine.importEnvVarSecrets(secretsJson: secretsJson)
             }

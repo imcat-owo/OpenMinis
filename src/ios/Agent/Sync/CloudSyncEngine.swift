@@ -1541,9 +1541,7 @@ final class CloudSyncEngine: ObservableObject {
             )
 
             // Merge: union env vars by ID, prefer newer file for conflicts
-            await MainActor.run {
-                Self.mergeEnvVars(remoteJson: envVarsJson)
-            }
+            await Self.mergeEnvVars(remoteJson: envVarsJson)
 
         default:
             // V2 record types live in v2's shared zone and are handled by
@@ -2432,9 +2430,16 @@ final class CloudSyncEngine: ObservableObject {
     }
 
     /// Merge remote env vars into local by unioning by ID.
-    /// For items with the same ID, the version from the newer file wins.
+    /// For items with the same ID, the version from the newer file wins —
+    /// except ids with a pending local upsert: those keep the local version,
+    /// mirroring the per-item merger's guard (ChatStoreSyncHydrators
+    /// mergeEnvVarItem). EnvVarEntry has no updatedAt, so "newer wins" is
+    /// unenforceable here; without the guard, a stale whole-table snapshot
+    /// (legacy record from an old build) silently reverted a just-edited
+    /// entry, and the pending per-item upload then pushed the reverted
+    /// value back up — the edit was lost on every device.
     @MainActor
-    static func mergeEnvVars(remoteJson: String) {
+    static func mergeEnvVars(remoteJson: String) async {
         guard let remoteData = remoteJson.data(using: .utf8),
               let remoteVars = try? JSONDecoder().decode([EnvVarEntry].self, from: remoteData) else {
             logger.info("[iCloud] mergeEnvVars: failed to decode remote JSON")
@@ -2460,11 +2465,19 @@ final class CloudSyncEngine: ObservableObject {
 
         let localIdSet = Set(localVars.map { $0.id })
 
+        // Ids whose local edit has not been pushed yet — remote must not
+        // win for these (see the doc comment above).
+        let pendingDirty = await ChatStore.shared.loadDirtyRecords()
+        let pendingLocalIds = Set(pendingDirty
+            .filter { $0.recordType == "EnvVarItem" && $0.operation != "delete" }
+            .map { $0.recordId })
+
         // Merge by id — remote wins for same-id (propagates edits), keep local-only
         var varMap = Dictionary(localVars.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         var addedNew = false
         for rv in remoteVars {
             if varMap[rv.id] == nil { addedNew = true }
+            if pendingLocalIds.contains(rv.id), varMap[rv.id] != nil { continue }
             varMap[rv.id] = rv  // remote wins for existing; adds new
         }
 
