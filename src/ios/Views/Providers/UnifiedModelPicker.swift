@@ -109,7 +109,14 @@ extension ModelEntry {
 
     @MainActor
     static func isTTSServiceEntry(_ entryId: String?) -> Bool {
-        entryId?.hasPrefix(ttsServiceIdPrefix) ?? false
+        guard let entryId else { return false }
+        // Accept both the bare model-id form ("tts-service:<sid>") and the
+        // composite entry-id form ("tts-services/tts-service:<sid>") — the
+        // synthetic entries' providerInstanceId is "tts-services", so a
+        // plain hasPrefix(ttsServiceIdPrefix) was always false for the
+        // entry.id every caller actually passes.
+        return entryId.hasPrefix(ttsServiceIdPrefix)
+            || entryId.hasPrefix("tts-services/")
     }
 }
 
@@ -236,7 +243,11 @@ struct ModelPickerConfig {
             currentEntryId: {
                 if let sid = TTSServiceStore.shared.selectedServiceId,
                    let s = TTSServiceStore.shared.service(id: sid), s.enabled {
-                    return ModelEntry.ttsServiceIdPrefix + sid
+                    // Return the composite entry id ("tts-services/" +
+                    // model.id), the same form as every row's `entry.id` —
+                    // the bare model id never equals any row id, so generic
+                    // current-selection comparisons silently missed.
+                    return "tts-services/" + ModelEntry.ttsServiceIdPrefix + sid
                 }
                 if let sel = selection.outputEntryId { return sel }
                 return store.voiceOutputGroupId == nil ? VoiceProviderResolver.systemEntryId : nil
