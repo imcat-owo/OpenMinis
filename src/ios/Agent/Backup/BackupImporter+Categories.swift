@@ -917,6 +917,11 @@ extension BackupImporter {
 
             try? fm.createDirectory(at: dest.deletingLastPathComponent(),
                                     withIntermediateDirectories: true)
+            // Declared before the do block so its catch can clean the staged
+            // temp up on failure (same shape as importMemory above); a
+            // declaration inside do is invisible to the catch clause.
+            let staged = dest.deletingLastPathComponent()
+                .appendingPathComponent(".restore-\(UUID().uuidString).tmp")
             do {
                 // [review I2] Stage next to the destination and swap, rather
                 // than removeItem-then-copyItem. That pair left the user's file
@@ -929,8 +934,6 @@ extension BackupImporter {
                 // categories launch reconcile had nothing to restore and the
                 // deletion was simply final. Merge idempotency does not help a
                 // file that was deleted and never rewritten.
-                let staged = dest.deletingLastPathComponent()
-                    .appendingPathComponent(".restore-\(UUID().uuidString).tmp")
                 try? fm.removeItem(at: staged)
                 try fm.copyItem(at: blob, to: staged)
                 if fm.fileExists(atPath: dest.path) {
