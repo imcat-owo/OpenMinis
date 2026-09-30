@@ -3033,8 +3033,12 @@ final class ProviderConfigStore: ObservableObject {
     func saveThinkingRule(_ rule: ThinkingRule, instanceId: String, sortOrder: Int) async -> Bool {
         guard let db else { return false }
         let ok = await db.upsertThinkingRule(rule, instanceId: instanceId, sortOrder: sortOrder)
-        await reloadThinkingRuleCache()
+        // Reload only on success: the reload replaces the whole cache from
+        // the DB, so running it after a FAILED write wipes the caller's
+        // just-applied change (new/edited rule vanishes; the delete and
+        // reorder paths below resurrect/revert the same way).
         if ok {
+            await reloadThinkingRuleCache()
             await ChatStore.shared.markDirty(recordType: "ProviderThinkingRuleV3",
                                              recordId: rule.id, operation: "upsert")
         }
@@ -3058,7 +3062,11 @@ final class ProviderConfigStore: ObservableObject {
     func deleteThinkingRule(id: String, instanceId: String) async -> Bool {
         guard let db else { return false }
         let ok = await db.deleteThinkingRule(id: id)
-        await reloadThinkingRuleCache()
+        // Reload only on success (see saveThinkingRule): reloading after a
+        // failed delete would resurrect the rule in the cache immediately.
+        // The delete markDirty below stays unconditional — the tombstone
+        // must reach peers even if our local row was already gone.
+        if ok { await reloadThinkingRuleCache() }
         await ChatStore.shared.markDirty(recordType: "ProviderThinkingRuleV3",
                                          recordId: id, operation: "delete")
         return ok
@@ -3071,8 +3079,10 @@ final class ProviderConfigStore: ObservableObject {
     func reorderThinkingRules(instanceId: String, orderedIds: [String]) async -> Bool {
         guard let db else { return false }
         let ok = await db.reorderThinkingRules(instanceId: instanceId, orderedIds: orderedIds)
-        await reloadThinkingRuleCache()
+        // Reload only on success (see saveThinkingRule): reloading after a
+        // failed reorder would silently revert the caller's new order.
         if ok {
+            await reloadThinkingRuleCache()
             for rid in orderedIds {
                 await ChatStore.shared.markDirty(recordType: "ProviderThinkingRuleV3",
                                                  recordId: rid, operation: "upsert")

@@ -1,5 +1,7 @@
 import Foundation
 
+private let collectionLogger = AppLogger(category: "ThinkingRulesCollection")
+
 /// Exposes per-provider thinking rules to `minis-config` under
 /// `thinkingrules.<instanceId>:<ruleId>.…`.
 ///
@@ -120,18 +122,22 @@ struct ThinkingRulesCollection: ConfigCollection {
         var ordered = existing.map(\.id)
         ordered.insert(rule.id, at: min(position, ordered.count))
 
+        let store = try Self.persistingStore()
         // Optimistic cache write so a subsequent `get` in the same CLI session sees the
         // rule even before the DB actor round-trips.
         var newList = existing
         newList.insert(rule, at: min(position, newList.count))
         ThinkingRuleCache.shared.set(newList, for: instanceId)
 
-        let store = ProviderConfigStore.shared
         Task {
-            _ = await store.saveThinkingRule(rule, instanceId: instanceId,
-                                             sortOrder: min(position, ordered.count - 1))
+            if await store.saveThinkingRule(rule, instanceId: instanceId,
+                                            sortOrder: min(position, ordered.count - 1)) == false {
+                collectionLogger.error("add: saveThinkingRule failed for rule \(rule.id) on instance \(instanceId) — change is NOT persisted")
+            }
             if ordered.count > 1 {
-                _ = await store.reorderThinkingRules(instanceId: instanceId, orderedIds: ordered)
+                if await store.reorderThinkingRules(instanceId: instanceId, orderedIds: ordered) == false {
+                    collectionLogger.error("add: reorderThinkingRules failed on instance \(instanceId) — order is NOT persisted")
+                }
             }
         }
         return "\(instanceId):\(rule.id)"
@@ -154,10 +160,14 @@ struct ThinkingRulesCollection: ConfigCollection {
         guard existing.kind == .custom else {
             throw ConfigError.permissionDenied(reason: "Only user-authored rules can be deleted.")
         }
+        let store = try Self.persistingStore()
         let remaining = ThinkingRuleCache.shared.rules(for: instanceId).filter { $0.id != ruleId }
         ThinkingRuleCache.shared.set(remaining, for: instanceId)
-        let store = ProviderConfigStore.shared
-        Task { _ = await store.deleteThinkingRule(id: ruleId, instanceId: instanceId) }
+        Task {
+            if await store.deleteThinkingRule(id: ruleId, instanceId: instanceId) == false {
+                collectionLogger.error("remove: deleteThinkingRule failed for rule \(ruleId) on instance \(instanceId) — deletion is NOT persisted")
+            }
+        }
     }
 
     // MARK: - Ordering
@@ -195,15 +205,34 @@ struct ThinkingRulesCollection: ConfigCollection {
                     throw ConfigError.invalidValue(
                         "Must be a permutation of this provider's \(current.count) custom rule id(s).")
                 }
+                let store = try Self.persistingStore()
                 let byId = Dictionary(uniqueKeysWithValues: current.map { ($0.id, $0) })
                 ThinkingRuleCache.shared.set(ids.compactMap { byId[$0] }, for: instanceId)
-                let store = ProviderConfigStore.shared
-                Task { _ = await store.reorderThinkingRules(instanceId: instanceId, orderedIds: ids) }
+                Task {
+                    if await store.reorderThinkingRules(instanceId: instanceId, orderedIds: ids) == false {
+                        collectionLogger.error("order: reorderThinkingRules failed on instance \(instanceId) — order is NOT persisted")
+                    }
+                }
             }
         )
     }
 
     // MARK: - Helpers
+
+    /// The store writes below run in fire-and-forget Tasks (the
+    /// ConfigCollection protocol is synchronous), so an async persistence
+    /// failure cannot be thrown back to the bridge after the fact. The one
+    /// failure that IS knowable synchronously is "no database": every
+    /// store call then returns false and nothing is ever persisted, so
+    /// fail loudly here instead of reporting a success that evaporates
+    /// on the next relaunch.
+    private static func persistingStore() throws -> ProviderConfigStore {
+        let store = ProviderConfigStore.shared
+        guard store.db != nil else {
+            throw ConfigError.io("Provider database unavailable — thinking rule change cannot be saved.")
+        }
+        return store
+    }
 
     private func split(_ id: String) -> (String, String)? {
         // Rule ids may themselves contain ':' (built-in ids do), so split ONCE on the
@@ -228,12 +257,16 @@ struct ThinkingRulesCollection: ConfigCollection {
             throw ConfigError.permissionDenied(reason: "Built-in rules are read-only.")
         }
         let updated = apply(old)
+        let store = try Self.persistingStore()
         var list = ThinkingRuleCache.shared.rules(for: instanceId)
         let idx = list.firstIndex { $0.id == ruleId } ?? 0
         list[idx] = updated
         ThinkingRuleCache.shared.set(list, for: instanceId)
-        let store = ProviderConfigStore.shared
-        Task { _ = await store.saveThinkingRule(updated, instanceId: instanceId, sortOrder: idx) }
+        Task {
+            if await store.saveThinkingRule(updated, instanceId: instanceId, sortOrder: idx) == false {
+                collectionLogger.error("mutate: saveThinkingRule failed for rule \(ruleId) on instance \(instanceId) — change is NOT persisted")
+            }
+        }
     }
 
     /// The `kind` values `ThinkingWireFormat.fromPersistedJSON` accepts. Spelled out
