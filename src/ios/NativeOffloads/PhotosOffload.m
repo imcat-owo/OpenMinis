@@ -676,7 +676,17 @@ static int cmd_export(int argc, char **argv, int stdout_fd, int stderr_fd, BOOL 
             resErr = error;
             dispatch_semaphore_signal(sem);
         }];
-        dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC));
+        // The wait result must not be discarded: on timeout resErr is still
+        // nil (the callback simply hasn't run), and the code below would
+        // report success for a missing or half-written file.
+        long waitResult = dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC));
+        if (waitResult != 0) {
+            NSDictionary *err = noff_json_error(TOOL_NAME, @"export",
+                                                 NOFF_ERR_INTERNAL_ERROR,
+                                                 @"Timed out waiting for the original resource to export");
+            noff_emit_json(stdout_fd, err, compact, quiet);
+            return NOFF_EXIT_ERROR;
+        }
 
         if (resErr) {
             NSDictionary *err = noff_json_error(TOOL_NAME, @"export",
@@ -688,6 +698,13 @@ static int cmd_export(int argc, char **argv, int stdout_fd, int stderr_fd, BOOL 
 
         // Get exported file size
         NSDictionary *attrs = [fm attributesOfItemAtPath:hostPath error:nil];
+        if (!attrs) {
+            NSDictionary *err = noff_json_error(TOOL_NAME, @"export",
+                                                 NOFF_ERR_INTERNAL_ERROR,
+                                                 @"Export reported success but the file is missing");
+            noff_emit_json(stdout_fd, err, compact, quiet);
+            return NOFF_EXIT_ERROR;
+        }
         unsigned long long fileSize = [attrs fileSize];
 
         NSMutableDictionary *data = [NSMutableDictionary dictionary];
