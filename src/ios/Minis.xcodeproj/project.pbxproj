@@ -108,6 +108,7 @@
 		E52000005 /* SwiftAnthropic in Frameworks */ = {isa = PBXBuildFile; productRef = E52000021 /* SwiftAnthropic */; };
 		BC1000000000000000000003 /* BridgeCore in Frameworks */ = {isa = PBXBuildFile; productRef = BC1000000000000000000002 /* BridgeCore */; };
 		BC1000000000000000000005 /* BridgeKernelAssembly.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC1000000000000000000004 /* BridgeKernelAssembly.swift */; };
+		BC1700000000000000000003 /* BridgeExternalMCPService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC1700000000000000000002 /* BridgeExternalMCPService.swift */; };
 		E52000006 /* OAuthHTTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = E52000015 /* OAuthHTTPClient.swift */; };
 		E52000007 /* ClaudeOAuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = E52000016 /* ClaudeOAuthManager.swift */; };
 		E52000009 /* AnthropicModelsAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = E52000018 /* AnthropicModelsAPI.swift */; };
@@ -771,6 +772,7 @@
 		E51000011 /* MinisApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MinisApp.swift; sourceTree = "<group>"; };
 		E51000012 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		BC1000000000000000000004 /* BridgeKernelAssembly.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeKernelAssembly.swift; sourceTree = "<group>"; };
+		BC1700000000000000000002 /* BridgeExternalMCPService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeExternalMCPService.swift; sourceTree = "<group>"; };
 		E51000013 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		E51000014 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		E52000011 /* LLMTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMTypes.swift; sourceTree = "<group>"; };
@@ -1619,8 +1621,17 @@
 			isa = PBXGroup;
 			children = (
 				BC1000000000000000000004 /* BridgeKernelAssembly.swift */,
+				BC1700000000000000000001 /* ExternalMCP */,
 			);
 			path = Bridge;
+			sourceTree = "<group>";
+		};
+		BC1700000000000000000001 /* ExternalMCP */ = {
+			isa = PBXGroup;
+			children = (
+				BC1700000000000000000002 /* BridgeExternalMCPService.swift */,
+			);
+			path = ExternalMCP;
 			sourceTree = "<group>";
 		};
 		E53000030 /* Agent */ = {
@@ -2759,6 +2770,7 @@
 			files = (
 				AC0000202 /* ProviderCustomizationGenerated.swift in Sources */,
 				BC1000000000000000000005 /* BridgeKernelAssembly.swift in Sources */,
+				BC1700000000000000000003 /* BridgeExternalMCPService.swift in Sources */,
 				E54000AC1 /* DebugSkillGenerated.swift in Sources */,
 				E5FP00100 /* AppGroupChangeWatcher.swift in Sources */,
 				F1T00035 /* UserManualView.swift in Sources */,
