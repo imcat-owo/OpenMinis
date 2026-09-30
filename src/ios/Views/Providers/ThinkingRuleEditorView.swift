@@ -30,6 +30,12 @@ struct ThinkingRuleEditorView: View {
         case qwenDual
         case qwenRootOnly
         case customPath
+        /// Placeholder for a seeded rule whose wire format this editor
+        /// cannot represent (the Anthropic/Gemini families above): shown
+        /// only when such a rule is being edited/duplicated, and saving
+        /// with it selected keeps the original format untouched instead
+        /// of silently rewriting the rule as reasoning_effort.
+        case original
 
         var id: String { rawValue }
 
@@ -44,6 +50,7 @@ struct ThinkingRuleEditorView: View {
             case .qwenDual:             return AppLocalized("enable_thinking + budget")
             case .qwenRootOnly:         return AppLocalized("enable_thinking only")
             case .customPath:           return AppLocalized("Custom field path")
+            case .original:             return AppLocalized("Original format (keep as-is)")
             }
         }
 
@@ -69,6 +76,8 @@ struct ThinkingRuleEditorView: View {
                 return AppLocalized("Qwen on a third-party gateway: a bare root-level enable_thinking, with no extra_body wrapper and no thinking_budget. Relays commonly reject both of those with a 400, so this is the safe choice for self-hosted vLLM/SGLang and OpenAI-compatible relays serving qwen models.")
             case .customPath:
                 return AppLocalized("Advanced: write a value at a dotted field path. Not validated by 我的小家.")
+            case .original:
+                return AppLocalized("This rule's format belongs to the Anthropic/Gemini families, whose shapes depend on the model generation, so it isn't editable here. Saving keeps the original format exactly as-is; pick another format only if you mean to replace it.")
             }
         }
     }
@@ -83,6 +92,20 @@ struct ThinkingRuleEditorView: View {
     @State private var extraBodyPath: String = "extra_body.thinking.enabled"
     @State private var customPath: String = ""
     @State private var customHighValue: String = ""
+    /// The seeded rule's wire format when it is one this editor cannot
+    /// represent; non-nil only while editing/duplicating such a rule.
+    @State private var preservedFormat: ThinkingWireFormat? = nil
+    /// The seeded customPath rule's full per-level values. The form only
+    /// edits the High value, so the other levels are carried through
+    /// untouched instead of being dropped on save.
+    @State private var seededCustomValues: [ThinkingLevel: String] = [:]
+
+    /// `.original` joins the picker only while a rule with an
+    /// unrepresentable format is loaded; it is never offered for a new rule.
+    private var pickerChoices: [FormatChoice] {
+        let authorable = FormatChoice.allCases.filter { $0 != .original }
+        return preservedFormat == nil ? authorable : authorable + [.original]
+    }
 
     var body: some View {
         NavigationStack {
@@ -112,7 +135,7 @@ struct ThinkingRuleEditorView: View {
 
                 Section {
                     Picker("Format", selection: $choice) {
-                        ForEach(FormatChoice.allCases) { c in
+                        ForEach(pickerChoices) { c in
                             Text(c.title).tag(c)
                         }
                     }
@@ -179,7 +202,7 @@ struct ThinkingRuleEditorView: View {
                 .textInputAutocapitalization(.never)
             TextField("Value at High", text: $customHighValue)
                 .autocorrectionDisabled()
-        case .omitEverything, .deepSeekSibling, .qwenDual, .qwenRootOnly:
+        case .omitEverything, .deepSeekSibling, .qwenDual, .qwenRootOnly, .original:
             EmptyView()
         }
     }
@@ -202,9 +225,15 @@ struct ThinkingRuleEditorView: View {
         case .qwenDual:              return .qwenDual
         case .qwenRootOnly:          return .qwenRootOnly
         case .customPath:
+            var values = seededCustomValues
+            values[.high] = customHighValue
             return .customPath(path: customPath,
-                               values: [.high: customHighValue],
+                               values: values,
                                offValue: sendOffValue ? offValue : nil)
+        case .original:
+            // Only reachable while a rule with an unrepresentable format
+            // is loaded, which is exactly when preservedFormat is set.
+            return preservedFormat ?? .reasoningEffort(offValue: nil)
         }
     }
 
@@ -253,9 +282,16 @@ struct ThinkingRuleEditorView: View {
         case .qwenRootOnly: choice = .qwenRootOnly
         case .customPath(let p, let vals, let off):
             choice = .customPath; customPath = p
+            seededCustomValues = vals
             customHighValue = vals[.high] ?? ""
             sendOffValue = off != nil; offValue = off ?? "none"
-        default: choice = .reasoningEffort
+        default:
+            // anthropicThinking / geminiBudget / geminiThinkingLevel: the
+            // editor has no fields for these, so keep the original format
+            // and say so in the picker, rather than defaulting the choice
+            // to reasoningEffort and silently rewriting the rule on save.
+            preservedFormat = e.wireFormat
+            choice = .original
         }
     }
 
