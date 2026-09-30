@@ -313,7 +313,11 @@ struct BackupDestinationDetailView: View {
             // states its current value, right beside the control, and the
             // section keeps one row per action.
             Button {
-                Task { await test(r) }
+                // Test what the page currently shows, not the snapshot the
+                // page was opened with: after an edit, `r`'s configName is
+                // stale (update bumps revision), so testing `r` reports on
+                // the OLD connection.
+                Task { await test(current) }
             } label: {
                 HStack {
                     Label {
@@ -406,7 +410,11 @@ struct BackupDestinationDetailView: View {
             }
         }
 
-        .task { await loadPackages(r) }
+        // Keyed on the current remote's identity (configName embeds name +
+        // revision; path is the listed folder) so an edit — connection,
+        // rename, or folder — re-lists against the new configuration
+        // instead of leaving the opening snapshot's packages on screen.
+        .task(id: current.configName + "|" + current.path) { await loadPackages(current) }
     }
 
     private func rename(_ r: RcloneRemoteStore.Remote) {
