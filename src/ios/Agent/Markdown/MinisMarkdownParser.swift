@@ -556,13 +556,38 @@ enum MarkdownMathExtractor {
         return bareCount % 2 == 1
     }
 
+    /// The math spans whose placeholders occur in this inline content —
+    /// resolved by placeholder identity (placeholders are unique per span),
+    /// never by comparing latex text against other spans in the document.
+    private static func spansReferenced(in inlines: [InlineNode], placeholderMap: [String: MathSpan]) -> [MathSpan] {
+        var found: [MathSpan] = []
+        for node in inlines {
+            if case .text(let t) = node {
+                for (placeholder, span) in placeholderMap where t.contains(placeholder) {
+                    found.append(span)
+                }
+            }
+            found.append(contentsOf: spansReferenced(in: node.children, placeholderMap: placeholderMap))
+        }
+        return found
+    }
+
     private static func restoreBlock(_ block: BlockNode, placeholderMap: [String: MathSpan]) -> BlockNode {
         switch block {
         case .paragraph(let content):
             let restored = restoreInlines(content, placeholderMap: placeholderMap)
+            // Promotion to .mathBlock must key off the span THIS paragraph
+            // actually contained, identified by its placeholder. The old
+            // code searched the whole document map by latex text, so an
+            // inline formula standing alone in its paragraph was promoted
+            // to a block whenever the same latex also appeared as a block
+            // formula anywhere else in the document.
+            let ownSpans = spansReferenced(in: content, placeholderMap: placeholderMap)
+            let soleOwnBlockSpan: MathSpan? =
+                (ownSpans.count == 1 && ownSpans[0].isBlock) ? ownSpans[0] : nil
             // If paragraph contains only a single block-math placeholder, promote to mathBlock
-            if restored.count == 1, case .inlineMath(let latex) = restored[0] {
-                if let span = placeholderMap.values.first(where: { $0.latex == latex && $0.isBlock }) {
+            if restored.count == 1, case .inlineMath = restored[0] {
+                if let span = soleOwnBlockSpan {
                     return .mathBlock(content: span.latex)
                 }
             }
@@ -574,8 +599,8 @@ enum MarkdownMathExtractor {
                 default: return true
                 }
             }
-            if nonWhitespace.count == 1, case .inlineMath(let latex) = nonWhitespace[0] {
-                if let span = placeholderMap.values.first(where: { $0.latex == latex && $0.isBlock }) {
+            if nonWhitespace.count == 1, case .inlineMath = nonWhitespace[0] {
+                if let span = soleOwnBlockSpan {
                     return .mathBlock(content: span.latex)
                 }
             }
