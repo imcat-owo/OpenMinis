@@ -89,8 +89,16 @@ enum ModelGroupRouter {
     ) -> [(model: String, instance: String, reason: String)] {
         var result: [(model: String, instance: String, reason: String)] = []
         for entryId in group.memberEntryIds {
-            guard let entry = store.entry(for: entryId) else { continue }
-            guard let inst = store.instance(for: entry.providerInstanceId) else { continue }
+            guard let entry = store.entry(for: entryId) else {
+                logger.warning("🔀ROUTE unavailable: entry \(entryId) not found in store")
+                result.append((model: entryId, instance: "", reason: AppLocalized("Model no longer exists")))
+                continue
+            }
+            guard let inst = store.instance(for: entry.providerInstanceId) else {
+                logger.warning("🔀ROUTE unavailable: instance \(entry.providerInstanceId) not found for entry \(entryId)")
+                result.append((model: entry.model.displayName, instance: entry.providerInstanceId, reason: AppLocalized("Provider no longer exists")))
+                continue
+            }
             let label = inst.label
             if entry.isHidden {
                 result.append((model: entry.model.displayName, instance: label, reason: AppLocalized("Hidden")))
