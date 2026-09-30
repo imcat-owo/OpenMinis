@@ -650,7 +650,15 @@ final class GeminiVoiceProvider: VoiceProvider {
     private static func geminiVoice(_ requested: String?) -> String {
         guard let v = requested, !v.isEmpty else { return "Kore" }
         // If the caller already passed a Gemini voice name, use it verbatim.
-        let known: Set<String> = ["Kore", "Puck", "Charon", "Fenrir", "Aoede", "Zephyr", "Leda", "Orus"]
+        // Full official prebuilt-voice list (30) — the previous 8-entry set
+        // silently remapped the other 22 legitimate voices to Kore.
+        let known: Set<String> = [
+            "Kore", "Puck", "Charon", "Fenrir", "Aoede", "Zephyr", "Leda", "Orus",
+            "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba",
+            "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achird",
+            "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat",
+            "Alnilam", "Achernar", "Gacrux", "Pulcherrima", "Schedar",
+        ]
         if known.contains(v) { return v }
         return "Kore"
     }
