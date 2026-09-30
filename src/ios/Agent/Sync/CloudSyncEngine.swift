@@ -2325,12 +2325,41 @@ final class CloudSyncEngine: ObservableObject {
                 local.defaultSubGroupId = replacement
             }
             local.agentLoopGroupIds = local.agentLoopGroupIds.map { groupIdRewrites[$0] ?? $0 }
+            // The voice / vision selectors and per-session group bindings
+            // point at the same groups and were NOT fixed up: leaving them
+            // aimed at the removed id silently disabled voice input/output
+            // and vision (their resolvers return nil for an unknown group)
+            // and stranded each binding's group fallback. The VALUES stay
+            // local — only the id is translated to the surviving group.
+            if let v = local.voiceInputGroupId, let replacement = groupIdRewrites[v] {
+                local.voiceInputGroupId = replacement
+            }
+            if let v = local.voiceOutputGroupId, let replacement = groupIdRewrites[v] {
+                local.voiceOutputGroupId = replacement
+            }
+            if let v = local.visionGroupId, let replacement = groupIdRewrites[v] {
+                local.visionGroupId = replacement
+            }
+            for (sid, var binding) in local.sessionBindings {
+                func rewrite(_ source: SessionModelSource) -> SessionModelSource {
+                    if case .group(let gid, let resolved) = source,
+                       let replacement = groupIdRewrites[gid] {
+                        return .group(groupId: replacement, resolvedEntryId: resolved)
+                    }
+                    return source
+                }
+                binding.primarySource = rewrite(binding.primarySource)
+                binding.subModelSource = binding.subModelSource.map(rewrite)
+                local.sessionBindings[sid] = binding
+            }
         }
 
-        // 4. Don't touch: defaultPrimaryGroupId, defaultSubGroupId, agentLoopModelEntryIds,
-        //    agentLoopModelGroupIds, sessionBindings, sessionInferenceConfigs.
-        //    These stay per-device independent (reading from store.config above
-        //    ensures we're preserving the latest in-memory values, not stale disk).
+        // 4. Don't touch: agentLoopModelEntryIds, sessionInferenceConfigs, and
+        //    the sessionBindings' contents. These stay per-device independent
+        //    (reading from store.config above ensures we're preserving the
+        //    latest in-memory values, not stale disk) — the fix-up above only
+        //    translates group ids inside bindings/selectors to the surviving
+        //    group when a name collision removed the id they pointed at.
 
         // L1 — "localHasUnique" is now computed over *user intent*, not UUID sets.
         // Under the new model, modelEntries on the wire carry the full list but
