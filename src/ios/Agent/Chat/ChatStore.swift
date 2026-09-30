@@ -6218,7 +6218,7 @@ extension ChatStore {
     ///   local folder assignment must be preserved, whereas a new-build peer
     ///   sending an explicit nil means "ungrouped on that device" and, when
     ///   remote is newer, that wins (folder_id rides the session's LWW).
-    func mergeRemoteSession(_ session: ChatSession, fromDeviceId: String, memoryEnabled: Bool = true, modelBinding: String? = nil, remotePinnedAtRaw: Date? = nil, remoteFolderId: String? = nil, remoteHasFolderField: Bool = false) {
+    func mergeRemoteSession(_ session: ChatSession, fromDeviceId: String, memoryEnabled: Bool = true, modelBinding: String? = nil, remotePinnedAtRaw: Date? = nil, remoteFolderId: String? = nil, remoteHasFolderField: Bool = false, remoteSource: String? = nil, remoteHasSourceField: Bool = false) {
         invalidateSessionListCache()
         // Check if local session exists and its updated_at + pinned_at
         var localUpdatedAt: Double?
@@ -6278,9 +6278,20 @@ extension ChatStore {
                 // folder_id is written ONLY when the peer's record carried
                 // the field — an old build's record omitting it must not wipe
                 // a local folder assignment (same tolerance pinnedAt got).
-                let sql = remoteHasFolderField
-                    ? "UPDATE sessions SET title = ?, category = ?, updated_at = ?, memory_enabled = ?, model_binding = ?, pinned_at = ?, folder_id = ? WHERE id = ?"
-                    : "UPDATE sessions SET title = ?, category = ?, updated_at = ?, memory_enabled = ?, model_binding = ?, pinned_at = ? WHERE id = ?"
+                // `source` follows the identical rule: an old build never
+                // sends it, and its echo must not clear the local origin
+                // marker (e.g. "shortcut").
+                let sql: String
+                switch (remoteHasFolderField, remoteHasSourceField) {
+                case (true, true):
+                    sql = "UPDATE sessions SET title = ?, category = ?, updated_at = ?, memory_enabled = ?, model_binding = ?, pinned_at = ?, folder_id = ?, source = ? WHERE id = ?"
+                case (true, false):
+                    sql = "UPDATE sessions SET title = ?, category = ?, updated_at = ?, memory_enabled = ?, model_binding = ?, pinned_at = ?, folder_id = ? WHERE id = ?"
+                case (false, true):
+                    sql = "UPDATE sessions SET title = ?, category = ?, updated_at = ?, memory_enabled = ?, model_binding = ?, pinned_at = ?, source = ? WHERE id = ?"
+                case (false, false):
+                    sql = "UPDATE sessions SET title = ?, category = ?, updated_at = ?, memory_enabled = ?, model_binding = ?, pinned_at = ? WHERE id = ?"
+                }
                 var stmt: OpaquePointer?
                 if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
                     bindOptionalText(stmt, index: 1, value: session.title)
@@ -6293,12 +6304,16 @@ extension ChatStore {
                     } else {
                         sqlite3_bind_null(stmt, 6)
                     }
+                    var nextIndex = 7
                     if remoteHasFolderField {
-                        bindOptionalText(stmt, index: 7, value: remoteFolderId)
-                        sqlite3_bind_text(stmt, 8, (session.id as NSString).utf8String, -1, nil)
-                    } else {
-                        sqlite3_bind_text(stmt, 7, (session.id as NSString).utf8String, -1, nil)
+                        bindOptionalText(stmt, index: nextIndex, value: remoteFolderId)
+                        nextIndex += 1
                     }
+                    if remoteHasSourceField {
+                        bindOptionalText(stmt, index: nextIndex, value: remoteSource)
+                        nextIndex += 1
+                    }
+                    sqlite3_bind_text(stmt, nextIndex, (session.id as NSString).utf8String, -1, nil)
                     sqlite3_step(stmt)
                 }
                 sqlite3_finalize(stmt)
@@ -6344,6 +6359,26 @@ extension ChatStore {
                     iCloudLogger.info("[iCloud] mergeRemoteSession folder sub-merge: id=\(session.id.prefix(8)) -> folder \(remoteFid.prefix(8))")
                     NotificationCenter.default.post(name: .sessionDidUpdate, object: session.id)
                 }
+                // Same conservative adoption for `source`: it is stamped at
+                // creation and never changes, so it also arrives without an
+                // updated_at bump worth ranking — and sessions merged before
+                // `source` sync existed sit locally with source NULL forever
+                // unless this branch adopts it. Only fill a local NULL; a
+                // local value is never overwritten from the skip branch.
+                if remoteHasSourceField, let remoteSrc = remoteSource {
+                    let sSql = "UPDATE sessions SET source = ? WHERE id = ? AND source IS NULL"
+                    var sStmt: OpaquePointer?
+                    if sqlite3_prepare_v2(db, sSql, -1, &sStmt, nil) == SQLITE_OK {
+                        sqlite3_bind_text(sStmt, 1, (remoteSrc as NSString).utf8String, -1, nil)
+                        sqlite3_bind_text(sStmt, 2, (session.id as NSString).utf8String, -1, nil)
+                        sqlite3_step(sStmt)
+                    }
+                    sqlite3_finalize(sStmt)
+                    if sqlite3_changes(db) > 0 {
+                        iCloudLogger.info("[iCloud] mergeRemoteSession source sub-merge: id=\(session.id.prefix(8)) -> \(remoteSrc)")
+                        NotificationCenter.default.post(name: .sessionDidUpdate, object: session.id)
+                    }
+                }
                 // Even if we skip the main update, still merge pin state if remote has pin info
                 // and the resolved pin differs from local
                 if remotePinnedAtRaw != nil, resolvedPinnedAt != localPinnedAt {
@@ -6374,7 +6409,7 @@ extension ChatStore {
             }
             // Local doesn't have this session — insert
             iCloudLogger.info("[iCloud] mergeRemoteSession INSERT: id=\(session.id) title=\(session.title ?? "nil") from=\(fromDeviceId)")
-            let sql = "INSERT INTO sessions (id, title, category, model_id, created_at, updated_at, remote_origin_device_id, memory_enabled, model_binding, pinned_at, folder_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            let sql = "INSERT INTO sessions (id, title, category, model_id, created_at, updated_at, remote_origin_device_id, memory_enabled, model_binding, pinned_at, folder_id, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             var stmt: OpaquePointer?
             if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
                 sqlite3_bind_text(stmt, 1, (session.id as NSString).utf8String, -1, nil)
@@ -6395,6 +6430,7 @@ extension ChatStore {
                 // the list renders it as ungrouped until FolderV2 arrives
                 // (fetchRecentV2 ordering gives no cross-type guarantees).
                 bindOptionalText(stmt, index: 11, value: remoteHasFolderField ? remoteFolderId : nil)
+                bindOptionalText(stmt, index: 12, value: remoteHasSourceField ? remoteSource : nil)
                 sqlite3_step(stmt)
             }
             sqlite3_finalize(stmt)

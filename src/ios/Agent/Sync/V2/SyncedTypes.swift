@@ -22,6 +22,7 @@ struct SyncedSession: Syncable {
     var modelBinding: String?
     var pinnedAt: Date?
     var folderId: String?
+    var source: String?
 
     static let syncMetadata: SyncTypeMetadata<SyncedSession> = {
         typealias F = FieldDescriptor<SyncedSession>
@@ -43,6 +44,10 @@ struct SyncedSession: Syncable {
                 // bump): old devices ignore the unknown CKRecord field on read
                 // and omit it on write, both of which decode as nil here.
                 F.optionalString("folderId", \SyncedSession.folderId),
+                // Same optional-field treatment. Without it the local
+                // `source` (e.g. "shortcut") never left the origin device,
+                // so the shortcuts bolt badge never rendered on any peer.
+                F.optionalString("source",   \SyncedSession.source),
             ],
             conflictPolicy: .lastWriteWinsByField(\SyncedSession.updatedAt),
             version: 1
@@ -60,7 +65,8 @@ struct SyncedSession: Syncable {
             memoryEnabled: memoryEnabled ? 1 : 0,
             modelBinding: modelBinding,
             pinnedAt: s.pinnedAt,
-            folderId: s.folderId
+            folderId: s.folderId,
+            source: s.source
         )
     }
 }

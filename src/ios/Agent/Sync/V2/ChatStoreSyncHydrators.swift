@@ -188,6 +188,10 @@ enum ChatStoreSyncHydrators {
         // doesn't know the field exists — only the former may clear local.
         let folderFieldPresent = record.fields["folderId"] != nil
         let folderId = optionalStringField(record, "folderId")
+        // Same presence distinction for `source`: an old-build peer's record
+        // omits the key entirely and must not clear the local origin marker.
+        let sourceFieldPresent = record.fields["source"] != nil
+        let source = optionalStringField(record, "source")
 
         var session = ChatSession(
             id: id, title: title, category: category, modelId: modelId,
@@ -202,7 +206,9 @@ enum ChatStoreSyncHydrators {
             modelBinding: modelBinding,
             remotePinnedAtRaw: pinnedAt,
             remoteFolderId: folderId,
-            remoteHasFolderField: folderFieldPresent
+            remoteHasFolderField: folderFieldPresent,
+            remoteSource: source,
+            remoteHasSourceField: sourceFieldPresent
         )
     }
 
