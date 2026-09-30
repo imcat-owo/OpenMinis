@@ -18,8 +18,11 @@ private let logger = AppLogger(category: "CookieBackup")
 ///      metadata (domain / path / expires / secure / HttpOnly), rendered as a
 ///      per-domain Netscape cookies.txt file (`<registrable-domain>.txt`), and
 ///   2. re-inject any backed-up cookie that is no longer present in the live
-///      store (the ITP-wipe recovery path). Live cookies always win over the
-///      backup; expired entries are pruned.
+///      store (the ITP-wipe recovery path) — except cookies tombstoned as
+///      website-deleted (see the tombstone logic in `syncIfNeeded`: a cookie
+///      that vanishes while its domain keeps other live cookies was deleted
+///      by the site itself, e.g. logout, and must stay deleted). Live cookies
+///      always win over the backup; expired entries are pruned.
 ///
 /// Storage is a **local file per domain**, deliberately not the Keychain: this
 /// is a purely local anti-ITP cache, and we do NOT want the login state synced
@@ -57,6 +60,13 @@ final class CookieBackupStore {
 
     private var lastSyncAt: Date?
     private var syncing = false
+    /// Cookie keys present in the live store at the previous sync of this
+    /// run. Compared against the current live set to spot cookies that
+    /// vanished while the app was watching (see the tombstone logic in
+    /// `syncIfNeeded`). Nil until the first sync completes — the first
+    /// sync after launch never tombstones, so cookies wiped while the app
+    /// wasn't running still take the ITP recovery path.
+    private var previousLiveKeys: Set<String>?
     /// Keys persisted by the previous sync — used to only log the full
     /// backup listing when the set actually changed, so the 60s cadence
     /// doesn't flood the log with identical listings.
@@ -149,6 +159,14 @@ final class CookieBackupStore {
 
     private var visitMapURL: URL {
         backupDirURL.appendingPathComponent(".lastVisit.json")
+    }
+
+    /// Deletion tombstones (key → unix time deleted), a sibling file like
+    /// the visit map. A tombstoned cookie is never restored and is dropped
+    /// from the backup — this is what distinguishes "the website deleted
+    /// this cookie" (logout) from "WebKit wiped it" (ITP).
+    private var tombstoneMapURL: URL {
+        backupDirURL.appendingPathComponent(".tombstones.json")
     }
 
     /// Group key for the per-domain backup file: the registrable domain
@@ -246,19 +264,52 @@ final class CookieBackupStore {
         }
         let expiredDomains = droppedDomains
 
-        // Merge: start from the backup (pruning expired-by-time entries and
-        // aged-out domains), then let every live cookie overwrite its backup
-        // entry — the live store is authoritative for anything it still holds.
+        let liveEntries = live.map { BackupCookie(from: $0) }
+        let liveKeys = Set(liveEntries.map(\.key))
+
+        // [R3-092] Deletion tombstones. A cookie that was live at the
+        // previous sync and is gone now, WHILE its domain still has other
+        // live cookies, was deleted by the website itself (logout clears
+        // the auth cookie, not the domain's whole jar). ITP's signature is
+        // the opposite: the domain's ENTIRE cookie set vanishes at once.
+        // Without this distinction the merge below treated every
+        // backup-only cookie as ITP-wiped and resurrected cookies the
+        // site had deliberately deleted — a logged-out session silently
+        // came back. Tombstoned keys are excluded from the merge (so the
+        // backup forgets them too) and never restored; a key the site
+        // sets again while live clears its tombstone. Whole-domain
+        // disappearances keep the ITP recovery path, as does the first
+        // sync after launch (previousLiveKeys is nil — a wipe that
+        // happened while the app wasn't running is indistinguishable from
+        // a deletion then, and recovery is the designed behavior there).
+        var tombstones = loadTombstones().filter { now - $0.value <= Self.domainRetention }
+        for key in liveKeys where tombstones[key] != nil {
+            tombstones.removeValue(forKey: key)
+        }
+        if let previous = previousLiveKeys {
+            let activeDomains = Set(live.map { Self.registrableDomain($0.domain) })
+            for key in previous.subtracting(liveKeys) {
+                let cookieDomain = String(key.split(separator: "|", maxSplits: 1).first ?? "")
+                if activeDomains.contains(Self.registrableDomain(cookieDomain)) {
+                    tombstones[key] = now
+                    logger.info("tombstoned \(key) — cookie vanished while its domain still has live cookies (site deleted it, e.g. logout); will not be restored")
+                }
+            }
+        }
+        previousLiveKeys = liveKeys
+
+        // Merge: start from the backup (pruning expired-by-time entries,
+        // aged-out domains, and tombstoned deletions), then let every live
+        // cookie overwrite its backup entry — the live store is
+        // authoritative for anything it still holds.
         var merged: [String: BackupCookie] = [:]
         for entry in loadBackup() {
             if let e = entry.expires, e <= now { continue }
             if expiredDomains.contains(Self.registrableDomain(entry.domain)) { continue }
+            if tombstones[entry.key] != nil { continue }
             merged[entry.key] = entry
         }
-        var liveKeys = Set<String>()
-        for cookie in live {
-            let entry = BackupCookie(from: cookie)
-            liveKeys.insert(entry.key)
+        for entry in liveEntries {
             merged[entry.key] = entry
         }
 
@@ -274,6 +325,7 @@ final class CookieBackupStore {
             logger.info("dropped domain \(domain) (\(reason))")
         }
         persistVisitMap(visits)
+        persistTombstones(tombstones)
         persistBackup(Array(merged.values))
 
         logBackupSummary(merged)
@@ -392,6 +444,18 @@ final class CookieBackupStore {
         guard let data = try? JSONEncoder().encode(map),
               let text = String(data: data, encoding: .utf8) else { return }
         writeProtected(text, to: visitMapURL, label: ".lastVisit.json")
+    }
+
+    private func loadTombstones() -> [String: Double] {
+        guard let data = try? Data(contentsOf: tombstoneMapURL),
+              let map = try? JSONDecoder().decode([String: Double].self, from: data) else { return [:] }
+        return map
+    }
+
+    private func persistTombstones(_ map: [String: Double]) {
+        guard let data = try? JSONEncoder().encode(map),
+              let text = String(data: data, encoding: .utf8) else { return }
+        writeProtected(text, to: tombstoneMapURL, label: ".tombstones.json")
     }
 
     /// Atomic write with at-rest file protection (unreadable before first
