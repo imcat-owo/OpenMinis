@@ -1008,21 +1008,36 @@ final class ICloudSharedZoneTransport: NSObject, SyncTransport {
             logger.info("[iCloudTrace] fetchSessionPortables querying type=\(type) sid=\(sessionId.prefix(8))")
             let query = CKQuery(recordType: type, predicate: predicate)
             do {
-                let result = try await container.privateCloudDatabase.records(
+                var result = try await container.privateCloudDatabase.records(
                     matching: query,
                     inZoneWith: zoneID,
                     desiredKeys: nil,
                     resultsLimit: CKQueryOperation.maximumResults
                 )
-                for (_, recResult) in result.matchResults {
-                    if case .success(let rec) = recResult {
-                        byType[type, default: 0] += 1
-                        serverRecordCache[rec.recordID] = rec
-                        etagCacheDirty = true
-                        if let portable = toPortable(rec, registry: registry) {
-                            portables.append(portable)
+                // Follow the query cursor to the last page. One page caps
+                // at maximumResults (200), and the caller treats the
+                // returned set as the session's COMPLETE cloud state — it
+                // deletes the local rows before replaying — so stopping at
+                // page one silently drops the rest of a long session while
+                // the pull still reports success. (fetchRecentV2 paginates
+                // the same way for its full-history pulls.)
+                while true {
+                    for (_, recResult) in result.matchResults {
+                        if case .success(let rec) = recResult {
+                            byType[type, default: 0] += 1
+                            serverRecordCache[rec.recordID] = rec
+                            etagCacheDirty = true
+                            if let portable = toPortable(rec, registry: registry) {
+                                portables.append(portable)
+                            }
                         }
                     }
+                    guard let cursor = result.queryCursor else { break }
+                    result = try await container.privateCloudDatabase.records(
+                        continuingMatchFrom: cursor,
+                        desiredKeys: nil,
+                        resultsLimit: CKQueryOperation.maximumResults
+                    )
                 }
                 logger.info("[iCloudTrace] fetchSessionPortables type=\(type) count=\(byType[type] ?? 0)")
             } catch {
