@@ -107,7 +107,21 @@ static int open_handler(int argc, char **argv,
         }];
     });
 
-    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+    long waitResult = dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+    if (waitResult != 0) {
+        NSDictionary *err = noff_json_error(TOOL_NAME, @"open",
+                                             NOFF_ERR_INTERNAL_ERROR,
+                                             @"Timed out waiting for the system to open the URL.");
+        noff_emit_json(stdout_fd, err, compact, quiet);
+        return NOFF_EXIT_ERROR;
+    }
+    if (!opened) {
+        NSDictionary *err = noff_json_error(TOOL_NAME, @"open",
+                                             NOFF_ERR_NOT_AVAILABLE,
+                                             [NSString stringWithFormat:@"Could not open URL: %@", urlArg]);
+        noff_emit_json(stdout_fd, err, compact, quiet);
+        return NOFF_EXIT_ERROR;
+    }
 
     NSDictionary *data = @{
         @"url": urlArg,
