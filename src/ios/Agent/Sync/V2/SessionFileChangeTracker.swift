@@ -63,7 +63,7 @@ actor SessionFileChangeTracker {
         var firstSid: String? = nil
         var firstRel: String? = nil
         var firstIgnoredPath: String? = nil
-        for (sid, rawPath, opCode, _) in events {
+        for (sid, rawPath, opCode, tsNs) in events {
             totalRecorded &+= 1
             guard let rel = Self.resolveSessionRelative(
                 rawPath: rawPath, sessionId: sid, minisBaseURL: minisBaseURL
@@ -76,7 +76,7 @@ actor SessionFileChangeTracker {
             let isDelete = (opCode == 1)
             let change = Change(
                 op: isDelete ? .delete : .upsert,
-                lastTouchedAt: Date()
+                lastTouchedAt: Self.eventDate(tsNs: tsNs, arrivedAt: Date())
             )
             pending[sid, default: [:]][rel] = change
             accepted += 1
@@ -204,6 +204,31 @@ actor SessionFileChangeTracker {
     }
 
     // MARK: - Path parsing
+
+    /// Reconstruct an event's wall-clock time from its producer stamp.
+    ///
+    /// The fakefs producer stamps each event with a monotonic nanosecond
+    /// clock (the same `clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)` family
+    /// ISHKernel uses for its own timing). Converting via the monotonic
+    /// delta to *now* recovers when the write actually happened. The old
+    /// code discarded the stamp and used arrival time (`Date()` in
+    /// recordBatch) — but delivery crosses a detached task + actor hop and
+    /// can lag the write by seconds, while `drainAllWithMtimeFilter`
+    /// compares against the file's real mtime: a write delivered >1s late
+    /// failed the `mtime >= lastTouchedAt - 1s` check, sat in pending as
+    /// a presumed no-op open, and was dropped unsynced after 30s.
+    ///
+    /// Falls back to arrival time when the stamp is unusable (non-positive,
+    /// or so inconsistent with the monotonic clock that the event would
+    /// land in the future) — no worse than the old behavior.
+    private static func eventDate(tsNs: Int64, arrivedAt: Date) -> Date {
+        guard tsNs > 0 else { return arrivedAt }
+        let uptimeNow = ProcessInfo.processInfo.systemUptime
+        let eventUptime = TimeInterval(tsNs) / 1_000_000_000
+        let delta = uptimeNow - eventUptime
+        guard delta >= -1.0 else { return arrivedAt }
+        return arrivedAt.addingTimeInterval(-max(delta, 0))
+    }
 
     /// Resolve a path emitted by the iSH realfs hook into a SessionFile
     /// relative path ("<subdir>/<rel>"), or return nil to ignore.
