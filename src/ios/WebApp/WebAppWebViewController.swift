@@ -234,7 +234,11 @@ final class WebAppWebViewController: UIViewController, WKNavigationDelegate, WKU
         if scheme == "file" {
             let target = url.standardizedFileURL.path
             let root = resolved.readAccessRoot.standardizedFileURL.path
-            if target.hasPrefix(root + "/") || target == root || target.hasPrefix(root) {
+            // Boundary-checked containment only: `hasPrefix(root)` without
+            // the trailing "/" also matches sibling directories that merely
+            // share the name prefix (root2, root-backup, …) and would void
+            // the two checks above.
+            if target.hasPrefix(root + "/") || target == root {
                 decisionHandler(.allow)
                 return
             }
