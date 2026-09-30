@@ -95,12 +95,27 @@ final class BackupBlobStore {
             totalBytesStored += entry.size
             blobIndex.append(BackupBlobIndexEntry(
                 sha256: sha, size: entry.size, path: entry.path,
-                sessionId: nil, mime: Self.mimeType(for: blob)))
+                sessionId: Self.sessionId(fromLogicalPath: entry.path, category: entry.category),
+                mime: Self.mimeType(for: URL(fileURLWithPath: entry.path))))
             restored += 1
         }
         if restored > 0 {
             logger.info("[Backup] resume: recovered \(restored) blob(s) from a previous attempt")
         }
+    }
+
+    /// Session a rehydrated blob belongs to, recovered from its logical
+    /// path. Chat files are exported under `chats/<sid>/…` with the sid
+    /// passed explicitly to addFile, but the file index has no session
+    /// field of its own — parse it back out of the path. Other categories
+    /// never carry a session id. (mime likewise comes from the logical
+    /// path: the on-disk blob file is a bare hash with no extension, so
+    /// asking it for a type always yields nil.)
+    private static func sessionId(fromLogicalPath path: String, category: String) -> String? {
+        guard category == BackupCategory.chats.rawValue else { return nil }
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count > 2, parts[0] == "chats", !parts[1].isEmpty else { return nil }
+        return String(parts[1])
     }
 
     enum Outcome {
