@@ -1752,15 +1752,36 @@ final class ProviderConfigStore: ObservableObject {
                 logger.warning("[ModelList] replaceEntries caller=\(caller) instance=\(instanceLabel)(\(instanceId.prefix(8))) SUSPICIOUS SHRINK before=\(existing.count) after=\(models.count) — stale entries removed from modelEntries but group/agent-loop references PRESERVED as stale (user will see them as unavailable)")
             } else {
                 var affectedGroups: [String] = []
+                var preservedEmptyGroups: [String] = []
                 for i in config.modelGroups.indices {
-                    let before = config.modelGroups[i].memberEntryIds.count
-                    config.modelGroups[i].memberEntryIds.removeAll { prunedEntryIds.contains($0) }
-                    if config.modelGroups[i].memberEntryIds.count != before {
-                        affectedGroups.append(config.modelGroups[i].name)
+                    let before = config.modelGroups[i].memberEntryIds
+                    let kept = before.filter { !prunedEntryIds.contains($0) }
+                    if kept.count != before.count {
+                        // [R3-108] Never let a refresh prune a group
+                        // completely empty. The shrink guard above only
+                        // trips on a >50% drop, so a modest list correction
+                        // (e.g. the Codex OAuth seed fix swapping the
+                        // wrongly-seeded API-key list for the Codex list —
+                        // the two share only one model) sailed straight
+                        // through and emptied any group built solely from
+                        // the vanished entries, silently breaking routing
+                        // for it. Keep such a group's references as stale
+                        // instead — the same treatment the suspicious-shrink
+                        // path gives: the UI surfaces them as unavailable
+                        // and the user decides.
+                        if kept.isEmpty {
+                            preservedEmptyGroups.append(config.modelGroups[i].name)
+                        } else {
+                            config.modelGroups[i].memberEntryIds = kept
+                            affectedGroups.append(config.modelGroups[i].name)
+                        }
                     }
                 }
                 config.agentLoopModelEntryIds.removeAll { prunedEntryIds.contains($0) }
                 logger.info("[ModelList] replaceEntries caller=\(caller) instance=\(instanceLabel)(\(instanceId.prefix(8))) pruned \(prunedEntryIds.count) stale entries from groups=[\(affectedGroups.joined(separator: ","))]")
+                if !preservedEmptyGroups.isEmpty {
+                    logger.warning("[ModelList] replaceEntries caller=\(caller) instance=\(instanceLabel)(\(instanceId.prefix(8))) prune would have emptied groups=[\(preservedEmptyGroups.joined(separator: ","))] — references PRESERVED as stale")
+                }
             }
         }
 

@@ -257,7 +257,12 @@ enum ProviderMigration {
                 credentialType: .oauth
             )
             config.instances.append(instance)
-            let entries = LLMModel.allOpenAI.map {
+            // [R3-108] Codex OAuth must seed from the Codex-specific list:
+            // allOpenAI contains models the Codex backend rejects with
+            // HTTP 400 (gpt-5.2 / gpt-5). addInstance and the OAuth model
+            // fetch both use allOpenAICodexOAuth — migration was the only
+            // path still seeding the wrong list.
+            let entries = LLMModel.allOpenAICodexOAuth.map {
                 ModelEntry(providerInstanceId: instance.id, model: $0)
             }
             config.modelEntries.append(contentsOf: entries)
