@@ -459,6 +459,13 @@ final class BrowserResourceMonitor {
               let threads = threadList else { return -1 }
 
         defer {
+            // task_threads hands out a send right per thread; the array
+            // itself is the only thing vm_deallocate frees. Without a
+            // mach_port_deallocate per entry, every sample leaked one port
+            // reference per thread in the process.
+            for i in 0..<Int(threadCount) {
+                mach_port_deallocate(mach_task_self_, threads[i])
+            }
             vm_deallocate(
                 mach_task_self_,
                 vm_address_t(UInt(bitPattern: threads)),
