@@ -740,6 +740,19 @@ thinking 填/描/强调不必手写。贴包后跟 `colorsLight.accent` / 聊天
         isEnabled: Bool, installedAt: Date, updatedAt: Date,
         version: String? = nil, name: String? = nil, description: String? = nil
     ) -> Bool {
+        // skillId comes from the remote record (sync / backup) unvalidated.
+        // An empty id would make the skill's directory the skills root
+        // itself, and a `..` / `/`-bearing id escapes the skills directory
+        // when appended to the path (appendingPathComponent does not
+        // normalize). Refuse the record instead of writing outside.
+        let idIsSafe = !skillId.isEmpty
+            && skillId != "." && skillId != ".."
+            && !skillId.contains("/") && !skillId.contains("\\")
+        guard idIsSafe else {
+            AppLogger(category: "SkillSync").error(
+                "[IMPORT] refusing sync skill with unsafe id: '\(skillId)'")
+            return false
+        }
         // [T-icloud-cloud-overwrites-local-edits] Local-newer guard. Skill
         // files (SKILL.md + bundled files) are user-editable; below we
         // overwrite the on-disk SKILL.md + rootfs copy + DB row
