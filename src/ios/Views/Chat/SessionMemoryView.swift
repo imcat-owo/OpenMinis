@@ -248,12 +248,24 @@ struct SessionMemoryView: View {
 
 private struct MemoryContentView: View {
     let title: String
-    let content: String
     let fileURL: URL?
 
+    /// Live copy of the file's content. The `content` init parameter is
+    /// only the opening snapshot: save() writes to disk, and unless the
+    /// local copy advances too, the view keeps displaying — and
+    /// re-seeding the editor from — the pre-edit text, so a second save
+    /// silently overwrites the first edit with a draft based on the
+    /// old content.
+    @State private var currentContent: String
     @State private var editedContent: String = ""
     @State private var isEditing = false
     @State private var saved = false
+
+    init(title: String, content: String, fileURL: URL?) {
+        self.title = title
+        self.fileURL = fileURL
+        _currentContent = State(initialValue: content)
+    }
 
     var body: some View {
         Group {
@@ -263,7 +275,7 @@ private struct MemoryContentView: View {
                     .padding(.horizontal, 8)
             } else {
                 ScrollView {
-                    Text(content)
+                    Text(currentContent)
                         .font(.system(.caption, design: .monospaced))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding()
@@ -282,7 +294,7 @@ private struct MemoryContentView: View {
                         }
                     } else {
                         Button {
-                            editedContent = content
+                            editedContent = currentContent
                             isEditing = true
                         } label: {
                             Image(systemName: "pencil")
@@ -308,6 +320,7 @@ private struct MemoryContentView: View {
         guard let url = fileURL else { return }
         do {
             try editedContent.write(to: url, atomically: true, encoding: .utf8)
+            currentContent = editedContent
             // SOUL.md needs the same side effects SoulStore.save() does:
             // refresh the in-memory metadata cache (so the chat header /
             // SystemPromptBuilder pick up the new identity) and mark it
@@ -334,12 +347,25 @@ private struct MemoryContentView: View {
 private struct MemoryWriteDetailView: View {
     let item: SessionMemoryView.ToolMemoryItem
     @Environment(\.dismiss) private var dismiss
+    /// Live copy of the entry's written content. `item` is a snapshot
+    /// taken when the list was built; saveEdit replaces the log body by
+    /// matching the OLD written content, so after one successful edit
+    /// this copy must advance to the new content — otherwise the next
+    /// edit searches the log for text that no longer exists there,
+    /// finds nothing, and silently does nothing. Revoke reads it for
+    /// the same reason.
+    @State private var currentWrittenContent: String?
     @State private var isEditing = false
     @State private var editedContent: String = ""
     @State private var showRevokeAlert = false
     @State private var revokeResult: String?
     @State private var showResultAlert = false
     @State private var saved = false
+
+    init(item: SessionMemoryView.ToolMemoryItem) {
+        self.item = item
+        _currentWrittenContent = State(initialValue: item.writtenContent)
+    }
 
     var body: some View {
         Group {
@@ -350,7 +376,7 @@ private struct MemoryWriteDetailView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
-                        if let written = item.writtenContent {
+                        if let written = currentWrittenContent {
                             SectionHeader(title: "Written Content")
                             Text(written)
                                 .font(.system(.caption, design: .monospaced))
@@ -378,9 +404,9 @@ private struct MemoryWriteDetailView: View {
                 if isEditing {
                     Button("Save") { saveEdit() }
                 } else {
-                    if item.writtenContent != nil {
+                    if currentWrittenContent != nil {
                         Button {
-                            editedContent = item.writtenContent ?? ""
+                            editedContent = currentWrittenContent ?? ""
                             isEditing = true
                         } label: {
                             Image(systemName: "pencil")
@@ -391,7 +417,7 @@ private struct MemoryWriteDetailView: View {
                     } label: {
                         Image(systemName: "arrow.uturn.backward")
                     }
-                    .disabled(item.writtenContent == nil)
+                    .disabled(currentWrittenContent == nil)
                 }
             }
         }
@@ -425,9 +451,10 @@ private struct MemoryWriteDetailView: View {
     }
 
     private func saveEdit() {
-        guard let written = item.writtenContent else { return }
+        guard let written = currentWrittenContent else { return }
         let result = replaceEntryInLog(oldContent: written, newContent: editedContent)
         if result != nil {
+            currentWrittenContent = editedContent
             isEditing = false
             withAnimation { saved = true }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
@@ -491,7 +518,7 @@ private struct MemoryWriteDetailView: View {
     /// tool capsule's long-press menu uses too — the entry-deletion logic must
     /// not drift between the two entry points.
     private func revokeEntry() -> String {
-        guard let written = item.writtenContent else {
+        guard let written = currentWrittenContent else {
             return AppLocalized("No written content to revoke.")
         }
         return MemoryWriteRevoker.revoke(writtenContent: written)
