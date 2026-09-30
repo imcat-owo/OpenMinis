@@ -203,6 +203,10 @@ static int weather_handler(int argc, char **argv,
     NSString *daysStr = noff_find_arg(argc, argv, "--days");
     NSInteger maxHours = hoursStr ? [hoursStr integerValue] : 24;
     NSInteger maxDays = daysStr ? [daysStr integerValue] : 7;
+    // Clamp like --minutes below: a negative count converts to a huge
+    // NSUInteger in NSMakeRange and throws NSRangeException.
+    if (maxHours < 1) maxHours = 24;
+    if (maxDays < 1) maxDays = 7;
 
     if ([subcmd isEqualToString:@"current"]) {
         data = weatherData[@"current"] ?: @{};

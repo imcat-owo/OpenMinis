@@ -349,6 +349,10 @@ static int cmd_list(int argc, char **argv, int stdout_fd, BOOL compact, BOOL qui
 
     NSString *limitStr = noff_find_arg(argc, argv, "--limit");
     NSInteger limit = limitStr ? [limitStr integerValue] : DEFAULT_LIMIT;
+    // A negative limit converts to a huge NSUInteger in NSMakeRange
+    // (list) / makes the count check break immediately (reminders);
+    // fall back to the default.
+    if (limit < 1) limit = DEFAULT_LIMIT;
 
     NSString *calFilter = noff_find_arg(argc, argv, "--calendar");
 
@@ -416,6 +420,10 @@ int calendar_cmd_reminders(int argc, char **argv, int stdout_fd, BOOL compact, B
     BOOL showIncomplete = noff_has_flag(argc, argv, "--incomplete");
     NSString *limitStr = noff_find_arg(argc, argv, "--limit");
     NSInteger limit = limitStr ? [limitStr integerValue] : DEFAULT_LIMIT;
+    // A negative limit converts to a huge NSUInteger in NSMakeRange
+    // (list) / makes the count check break immediately (reminders);
+    // fall back to the default.
+    if (limit < 1) limit = DEFAULT_LIMIT;
     NSString *listName = noff_find_arg(argc, argv, "--list");
 
     NSArray<EKCalendar *> *calendars = nil;

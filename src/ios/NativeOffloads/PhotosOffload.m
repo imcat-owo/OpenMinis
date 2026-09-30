@@ -230,6 +230,9 @@ static int cmd_list(int argc, char **argv, int stdout_fd, BOOL compact, BOOL qui
 
     NSString *limitStr = noff_find_arg(argc, argv, "--limit");
     NSInteger limit = limitStr ? [limitStr integerValue] : 100;
+    // A negative limit converts to a huge NSUInteger in NSMakeRange /
+    // fetchLimit below and throws NSRangeException; fall back to the default.
+    if (limit < 1) limit = 100;
     NSString *typeStr = noff_find_arg(argc, argv, "--type");
 
     PHFetchOptions *opts = [[PHFetchOptions alloc] init];
@@ -315,6 +318,9 @@ static int cmd_near(int argc, char **argv, int stdout_fd, int stderr_fd, BOOL co
 
     NSString *limitStr = noff_find_arg(argc, argv, "--limit");
     NSInteger limit = limitStr ? [limitStr integerValue] : 100;
+    // A negative limit converts to a huge NSUInteger in NSMakeRange /
+    // fetchLimit below and throws NSRangeException; fall back to the default.
+    if (limit < 1) limit = 100;
 
     CLLocation *target = [[CLLocation alloc] initWithLatitude:lat longitude:lon];
 
@@ -433,6 +439,9 @@ static int cmd_album(int argc, char **argv, int stdout_fd, int stderr_fd, BOOL c
 
     NSString *limitStr = noff_find_arg(argc, argv, "--limit");
     NSInteger limit = limitStr ? [limitStr integerValue] : 100;
+    // A negative limit converts to a huge NSUInteger in NSMakeRange /
+    // fetchLimit below and throws NSRangeException; fall back to the default.
+    if (limit < 1) limit = 100;
 
     PHAssetCollection *collection = nil;
 

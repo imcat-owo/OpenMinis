@@ -315,6 +315,9 @@ static int cmd_search(int argc, char **argv, int stdout_fd, int stderr_fd, BOOL 
     NSString *type = noff_find_arg(argc, argv, "--type") ?: @"song";
     NSString *limitStr = noff_find_arg(argc, argv, "--limit");
     NSInteger limit = limitStr ? [limitStr integerValue] : 100;
+    // A negative limit converts to a huge NSUInteger in the NSMakeRange
+    // below and throws NSRangeException; fall back to the default.
+    if (limit < 1) limit = 100;
 
     MPMediaQuery *mediaQuery = nil;
     MPMediaPropertyPredicate *predicate = nil;
