@@ -659,7 +659,7 @@ thinking 填/描/强调不必手写。贴包后跟 `colorsLight.accent` / 聊天
     // MARK: - Import
 
     @discardableResult
-    func importSkill(content: String, source: SkillImportSource = .file) throws -> Skill {
+    func importSkill(content: String, source: SkillImportSource = .file, forcedId: String? = nil) throws -> Skill {
         var parsed = Self.parse(skillMD: content)
 
         // Fallback: use source path as name when frontmatter has no name
@@ -669,7 +669,10 @@ thinking 填/描/强调不必手写。贴包后跟 `colorsLight.accent` / 聊天
             }
         }
 
-        let id = Self.slugify(parsed.name)
+        // `forcedId` is used by the skill-detail "update from file" flow:
+        // the archive's contents must land in the skill the user opened,
+        // not in whatever skill the archive's frontmatter name slugs to.
+        let id = forcedId ?? Self.slugify(parsed.name)
         // A name with no slug-able characters (all symbols/emoji) would
         // produce an empty id, making the skill's directory the skills root
         // itself — refuse the import instead.
@@ -947,7 +950,7 @@ thinking 填/描/强调不必手写。贴包后跟 `colorsLight.accent` / 聊天
     }
 
     @discardableResult
-    func importFromArchive(at url: URL) throws -> Skill {
+    func importFromArchive(at url: URL, targetSkillId: String? = nil) throws -> Skill {
         let data = try Data(contentsOf: url)
         let entries = try Self.readZipEntries(data: data)
 
@@ -962,7 +965,7 @@ thinking 填/描/强调不必手写。贴包后跟 `colorsLight.accent` / 聊天
             throw SkillError.invalidContent
         }
 
-        let skill = try importSkill(content: skillContent, source: .file)
+        let skill = try importSkill(content: skillContent, source: .file, forcedId: targetSkillId)
 
         let prefix: String
         if skillMDEntry.name == "SKILL.md" {

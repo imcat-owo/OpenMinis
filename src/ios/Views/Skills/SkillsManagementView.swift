@@ -693,7 +693,7 @@ private struct SkillDetailView: View {
                     case .text(let newContent):
                         try store.updateSkillContent(skillId, newContent: newContent)
                     case .archiveURL(let url):
-                        _ = try store.importFromArchive(at: url)
+                        _ = try store.importFromArchive(at: url, targetSkillId: skillId)
                         try? FileManager.default.removeItem(at: url)
                     }
                     updateError = nil
