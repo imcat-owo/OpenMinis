@@ -231,6 +231,17 @@ final class MCPStore: ObservableObject {
         sqlite3_step(stmt)
     }
 
+    /// Drop every per-session override for a server being deleted, so a
+    /// recreated server with the same name doesn't inherit them.
+    private func dbDeleteSessionOverrides(serverId: String) {
+        let sql = "DELETE FROM mcp_session_overrides WHERE server_id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, (serverId as NSString).utf8String, -1, Self.SQLITE_TRANSIENT_DB)
+        sqlite3_step(stmt)
+    }
+
     private func dbSessionOverride(sessionId: String, serverId: String) -> Bool? {
         let sql = "SELECT is_enabled FROM mcp_session_overrides WHERE session_id = ? AND server_id = ?"
         var stmt: OpaquePointer?
@@ -443,6 +454,7 @@ final class MCPStore: ObservableObject {
         servers.removeAll { $0.id == id }
         save()
         noteSyncedLocalDeletion(names: [id])
+        dbDeleteSessionOverrides(serverId: id)
         // [T-mcp-static-oauth] Drop the server's OAuth credentials + guest
         // bridge file with it.
         MCPOAuthController.purge(server: id)
@@ -868,6 +880,11 @@ final class MCPStore: ObservableObject {
         var fp = Self.loadFingerprints()
         fp.removeValue(forKey: name)
         Self.saveFingerprints(fp)
+        // Match the local delete path: OAuth credentials, the seed file and
+        // per-session overrides must not survive to be inherited by a
+        // recreated server with the same name.
+        dbDeleteSessionOverrides(serverId: name)
+        MCPOAuthController.purge(server: name)
         AppLogger(category: "MCPStore").info("[Sync] applied MCPServerItem deletion '\(name)'")
     }
 

@@ -211,6 +211,12 @@ final class MCPOAuthController: NSObject, ObservableObject {
     static func purge(server: String) {
         keychainDelete(account: "\(server)#secret")
         signOut(server: server)
+        // Also drop any CLI-seeded secret file still waiting to be imported,
+        // or a recreated server with the same name would inherit it.
+        let seedURL = AIChatViewModel.minisMcpServersPersistentDir
+            .appendingPathComponent("oauth", isDirectory: true)
+            .appendingPathComponent("\(server).secret")
+        try? FileManager.default.removeItem(at: seedURL)
     }
 
     // MARK: - RFC 8707 resource indicator [T-mcp-oauth-resource]
