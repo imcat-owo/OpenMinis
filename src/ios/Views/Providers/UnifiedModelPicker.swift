@@ -1063,7 +1063,12 @@ struct UnifiedModelPicker: View {
     /// layers never fight over which voice speaks.
     @ViewBuilder
     private func ttsServiceRow(_ entry: ModelEntry) -> some View {
-        let serviceId = String(entry.id.dropFirst(ModelEntry.ttsServiceIdPrefix.count))
+        // The service id is encoded in the MODEL id ("tts-service:<sid>").
+        // Slicing the composite entry.id ("tts-services/tts-service:<sid>")
+        // by the prefix length instead leaves "/tts-service:<sid>" — a
+        // garbage id that never matches a stored service, so the row never
+        // shows selected / has-key and tapping persists the garbage id.
+        let serviceId = String(entry.model.id.dropFirst(ModelEntry.ttsServiceIdPrefix.count))
         let isSelected = TTSServiceStore.shared.selectedServiceId == serviceId
         let hasKey = TTSServiceStore.shared.hasAPIKey(forServiceId: serviceId)
         Button {
