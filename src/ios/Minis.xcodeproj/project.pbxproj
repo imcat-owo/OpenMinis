@@ -111,6 +111,9 @@
 		E52000005 /* SwiftAnthropic in Frameworks */ = {isa = PBXBuildFile; productRef = E52000021 /* SwiftAnthropic */; };
 		BC1000000000000000000003 /* BridgeCore in Frameworks */ = {isa = PBXBuildFile; productRef = BC1000000000000000000002 /* BridgeCore */; };
 		BC1000000000000000000005 /* BridgeKernelAssembly.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC1000000000000000000004 /* BridgeKernelAssembly.swift */; };
+		BC1900000000000000000102 /* OffloadToolRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC1900000000000000000101 /* OffloadToolRunner.swift */; };
+		BC1900000000000000000104 /* DeviceTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC1900000000000000000103 /* DeviceTools.swift */; };
+		BC1900000000000000000106 /* ClipboardDeviceTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC1900000000000000000105 /* ClipboardDeviceTool.swift */; };
 		BC1700000000000000000003 /* BridgeExternalMCPService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC1700000000000000000002 /* BridgeExternalMCPService.swift */; };
 		BC18A0000000000000000102 /* BridgeRelayProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC18A0000000000000000101 /* BridgeRelayProtocol.swift */; };
 		BC18A0000000000000000104 /* BridgeRelayTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC18A0000000000000000103 /* BridgeRelayTokenStore.swift */; };
@@ -784,6 +787,9 @@
 		E51000011 /* MinisApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MinisApp.swift; sourceTree = "<group>"; };
 		E51000012 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		BC1000000000000000000004 /* BridgeKernelAssembly.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeKernelAssembly.swift; sourceTree = "<group>"; };
+		BC1900000000000000000101 /* OffloadToolRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OffloadToolRunner.swift; sourceTree = "<group>"; };
+		BC1900000000000000000103 /* DeviceTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceTools.swift; sourceTree = "<group>"; };
+		BC1900000000000000000105 /* ClipboardDeviceTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardDeviceTool.swift; sourceTree = "<group>"; };
 		BC1700000000000000000002 /* BridgeExternalMCPService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeExternalMCPService.swift; sourceTree = "<group>"; };
 		BC18A0000000000000000101 /* BridgeRelayProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeRelayProtocol.swift; sourceTree = "<group>"; };
 		BC18A0000000000000000103 /* BridgeRelayTokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeRelayTokenStore.swift; sourceTree = "<group>"; };
@@ -1642,6 +1648,9 @@
 			isa = PBXGroup;
 			children = (
 				BC1000000000000000000004 /* BridgeKernelAssembly.swift */,
+				BC1900000000000000000101 /* OffloadToolRunner.swift */,
+				BC1900000000000000000103 /* DeviceTools.swift */,
+				BC1900000000000000000105 /* ClipboardDeviceTool.swift */,
 				BC1700000000000000000001 /* ExternalMCP */,
 				BC18A0000000000000000100 /* Relay */,
 			);
@@ -2805,6 +2814,9 @@
 			files = (
 				AC0000202 /* ProviderCustomizationGenerated.swift in Sources */,
 				BC1000000000000000000005 /* BridgeKernelAssembly.swift in Sources */,
+				BC1900000000000000000102 /* OffloadToolRunner.swift in Sources */,
+				BC1900000000000000000104 /* DeviceTools.swift in Sources */,
+				BC1900000000000000000106 /* ClipboardDeviceTool.swift in Sources */,
 				BC1700000000000000000003 /* BridgeExternalMCPService.swift in Sources */,
 				BC18A0000000000000000102 /* BridgeRelayProtocol.swift in Sources */,
 				BC18A0000000000000000104 /* BridgeRelayTokenStore.swift in Sources */,
