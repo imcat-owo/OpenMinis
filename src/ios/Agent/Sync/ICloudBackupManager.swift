@@ -343,6 +343,14 @@ final class ICloudBackupManager: ObservableObject {
                 let commentLen = Int(base.load(fromByteOffset: offset + 32, as: UInt16.self))
                 let localHeaderOffset = Int(base.load(fromByteOffset: offset + 42, as: UInt32.self))
 
+                // nameLen/extraLen/commentLen come straight from the file and
+                // were never checked against the bytes actually present: a
+                // truncated or crafted archive makes the name slice below —
+                // and the offset advance — read past the end of the buffer.
+                guard offset + 46 + nameLen + extraLen + commentLen <= size else {
+                    throw BackupError.zipError("Truncated ZIP: central directory entry overruns the archive")
+                }
+
                 let nameData = Data(bytes: base + offset + 46, count: nameLen)
                 let name = String(data: nameData, encoding: .utf8) ?? ""
 
@@ -354,6 +362,9 @@ final class ICloudBackupManager: ObservableObject {
                 let localNameLen = Int(base.load(fromByteOffset: localHeaderOffset + 26, as: UInt16.self))
                 let localExtraLen = Int(base.load(fromByteOffset: localHeaderOffset + 28, as: UInt16.self))
                 let dataStart = localHeaderOffset + 30 + localNameLen + localExtraLen
+                guard dataStart <= size else {
+                    throw BackupError.zipError("Truncated ZIP: local header overruns the archive")
+                }
 
                 let fileURL = destination.appendingPathComponent(name)
 
@@ -367,10 +378,16 @@ final class ICloudBackupManager: ObservableObject {
 
                     if method == 0 {
                         // Stored (no compression)
+                        guard dataStart + uncompressedSize <= size else {
+                            throw BackupError.zipError("Truncated ZIP: stored data overruns the archive")
+                        }
                         let fileData = Data(bytes: base + dataStart, count: uncompressedSize)
                         try fileData.write(to: fileURL)
                     } else if method == 8 {
                         // Deflate
+                        guard dataStart + compressedSize <= size else {
+                            throw BackupError.zipError("Truncated ZIP: deflate data overruns the archive")
+                        }
                         let compressedData = Data(bytes: base + dataStart, count: compressedSize)
                         let decompressed = try decompressDeflate(compressedData, expectedSize: uncompressedSize)
                         try decompressed.write(to: fileURL)
@@ -383,6 +400,11 @@ final class ICloudBackupManager: ObservableObject {
     }
 
     private func decompressDeflate(_ data: Data, expectedSize: Int) throws -> Data {
+        // A 0-byte file is perfectly legal (placeholders, empty logs); its
+        // deflate stream decodes to 0 bytes, which is success — the old
+        // `> 0` check threw and aborted the WHOLE restore over one empty file.
+        if expectedSize == 0 { return Data() }
+
         // Use Compression framework for raw deflate
         let destinationBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: max(expectedSize, 1))
         defer { destinationBuffer.deallocate() }
@@ -397,7 +419,10 @@ final class ICloudBackupManager: ObservableObject {
             )
         }
 
-        guard decompressedSize > 0 else {
+        // Require an EXACT size match: a truncated deflate stream can decode
+        // to a positive partial count, and writing that out would produce a
+        // silently truncated file under a perfectly valid name.
+        guard decompressedSize == expectedSize else {
             throw BackupError.zipError("Decompression failed")
         }
 
