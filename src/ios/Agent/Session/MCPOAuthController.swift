@@ -248,7 +248,7 @@ final class MCPOAuthController: NSObject, ObservableObject {
     /// delete outside it. Central choke point: every oauth-dir file URL is
     /// built here, and anything resolving outside the directory is refused
     /// (nil) instead of escaping.
-    private static func oauthFileURL(fileName: String) -> URL? {
+    private nonisolated static func oauthFileURL(fileName: String) -> URL? {
         let dir = AIChatViewModel.minisMcpServersPersistentDir
             .appendingPathComponent("oauth", isDirectory: true)
         let url = dir.appendingPathComponent(fileName)
