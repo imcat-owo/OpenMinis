@@ -893,6 +893,13 @@ final class VoiceInputViewModel: ObservableObject {
                                                              onDevice: onDevice)
                 VoiceLog.log("transcript: \"\(text)\"")
                 self.transcribeError = nil
+                // Success ends the auto-retry episode. Without this, the
+                // flag set by executeRetry stays true after a successful
+                // auto-retry, and the NEXT utterance's first transient
+                // failure is treated as "already auto-retried" — it goes
+                // straight to manual retry instead of getting its own
+                // automatic one.
+                self.isAutoRetry = false
             } catch is CancellationError {
                 VoiceLog.log("transcription task cancelled")
                 return
