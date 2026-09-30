@@ -117,6 +117,7 @@
 		BC1900000000000000000108 /* LocationDeviceTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC1900000000000000000107 /* LocationDeviceTool.swift */; };
 		BC1900000000000000000110 /* NotificationDeviceTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC1900000000000000000109 /* NotificationDeviceTool.swift */; };
 		BC1900000000000000000112 /* PhotosDeviceTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC1900000000000000000111 /* PhotosDeviceTool.swift */; };
+		BC1900000000000000000114 /* BluetoothDeviceTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC1900000000000000000113 /* BluetoothDeviceTool.swift */; };
 		BC1700000000000000000003 /* BridgeExternalMCPService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC1700000000000000000002 /* BridgeExternalMCPService.swift */; };
 		BC18A0000000000000000102 /* BridgeRelayProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC18A0000000000000000101 /* BridgeRelayProtocol.swift */; };
 		BC18A0000000000000000104 /* BridgeRelayTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC18A0000000000000000103 /* BridgeRelayTokenStore.swift */; };
@@ -796,6 +797,7 @@
 		BC1900000000000000000107 /* LocationDeviceTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationDeviceTool.swift; sourceTree = "<group>"; };
 		BC1900000000000000000109 /* NotificationDeviceTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationDeviceTool.swift; sourceTree = "<group>"; };
 		BC1900000000000000000111 /* PhotosDeviceTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosDeviceTool.swift; sourceTree = "<group>"; };
+		BC1900000000000000000113 /* BluetoothDeviceTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BluetoothDeviceTool.swift; sourceTree = "<group>"; };
 		BC1700000000000000000002 /* BridgeExternalMCPService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeExternalMCPService.swift; sourceTree = "<group>"; };
 		BC18A0000000000000000101 /* BridgeRelayProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeRelayProtocol.swift; sourceTree = "<group>"; };
 		BC18A0000000000000000103 /* BridgeRelayTokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeRelayTokenStore.swift; sourceTree = "<group>"; };
@@ -1660,6 +1662,7 @@
 				BC1900000000000000000107 /* LocationDeviceTool.swift */,
 				BC1900000000000000000109 /* NotificationDeviceTool.swift */,
 				BC1900000000000000000111 /* PhotosDeviceTool.swift */,
+				BC1900000000000000000113 /* BluetoothDeviceTool.swift */,
 				BC1700000000000000000001 /* ExternalMCP */,
 				BC18A0000000000000000100 /* Relay */,
 			);
@@ -2829,6 +2832,7 @@
 				BC1900000000000000000108 /* LocationDeviceTool.swift in Sources */,
 				BC1900000000000000000110 /* NotificationDeviceTool.swift in Sources */,
 				BC1900000000000000000112 /* PhotosDeviceTool.swift in Sources */,
+				BC1900000000000000000114 /* BluetoothDeviceTool.swift in Sources */,
 				BC1700000000000000000003 /* BridgeExternalMCPService.swift in Sources */,
 				BC18A0000000000000000102 /* BridgeRelayProtocol.swift in Sources */,
 				BC18A0000000000000000104 /* BridgeRelayTokenStore.swift in Sources */,

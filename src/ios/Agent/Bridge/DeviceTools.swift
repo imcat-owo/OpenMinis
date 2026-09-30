@@ -14,5 +14,6 @@ enum DeviceTools {
         try await LocationDeviceTool.register(into: registry)
         try await NotificationDeviceTool.register(into: registry)
         try await PhotosDeviceTool.register(into: registry)
+        try await BluetoothDeviceTool.register(into: registry)
     }
 }
