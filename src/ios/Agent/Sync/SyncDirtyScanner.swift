@@ -42,6 +42,12 @@ final class SyncDirtyScanner {
     /// so no per-access lock is needed.
     private var knownModDates: [String: Date] = [:]
 
+    /// Whether the memory scan has completed one full pass in this launch.
+    /// The first pass baselines pre-existing files; a memory file that only
+    /// appears in a LATER pass was created at runtime (shell / file tools),
+    /// which no event-driven path marks dirty — see scanMemoryFiles.
+    private var memoryBaselineEstablished = false
+
     private var skillsDir: URL {
         AIChatViewModel.minisSkillsPersistentDir
     }
@@ -283,6 +289,17 @@ final class SyncDirtyScanner {
                     }
                 } else {
                     knownModDates[cacheKey] = modDate
+                    if memoryBaselineEstablished {
+                        // Not seen by the baseline pass, so this file was
+                        // created at runtime (via shell or file tools — the
+                        // paths that never markDirty). Baseline-only would
+                        // strand it un-uploaded until its next edit. The
+                        // skills scan has the same backstop via
+                        // reconcileOrphanSkill; this is the memory analog.
+                        await ChatStore.shared.markDirty(recordType: "MemoryGlobalV2",
+                                                         recordId: "memory-global")
+                        logger.info("[SyncDirtyScanner] GLOBAL.md appeared at runtime, marked dirty")
+                    }
                 }
             } else {
                 // Daily log: check 30-day cutoff
@@ -299,9 +316,21 @@ final class SyncDirtyScanner {
                         }
                     } else {
                         knownModDates[cacheKey] = modDate
+                        if memoryBaselineEstablished {
+                            // Runtime-created daily log — same backstop as
+                            // the GLOBAL.md branch above.
+                            await ChatStore.shared.markDirty(recordType: "MemoryDailyV2",
+                                                             recordId: stem)
+                            logger.info("[SyncDirtyScanner] \(name) appeared at runtime, marked dirty")
+                        }
                     }
                 }
             }
         }
+
+        // Reaching here means the listing succeeded — this pass baselined
+        // every pre-existing file, so anything first seen from now on was
+        // created at runtime.
+        memoryBaselineEstablished = true
     }
 }
