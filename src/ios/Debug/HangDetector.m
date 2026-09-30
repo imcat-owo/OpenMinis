@@ -144,7 +144,10 @@ static void dumpAllThreadsToLog(thread_t monitorTid, double busyMs) {
 
     for (mach_msg_type_number_t i = 0; i < count; i++) {
         thread_t t = threads[i];
-        if (t == monitorTid) continue;
+        if (t == monitorTid) {
+            mach_port_deallocate(task, t);
+            continue;
+        }
 
         // Try to get a name via pthread_t. Many threads have nothing.
         pthread_t pt = pthread_from_mach_thread_np(t);
@@ -152,7 +155,10 @@ static void dumpAllThreadsToLog(thread_t monitorTid, double busyMs) {
         if (pt) pthread_getname_np(pt, nameBuf, sizeof(nameBuf));
 
         kern_return_t kr = thread_suspend(t);
-        if (kr != KERN_SUCCESS) continue;
+        if (kr != KERN_SUCCESS) {
+            mach_port_deallocate(task, t);
+            continue;
+        }
 
         uintptr_t frames[32];
         int n = 0;
@@ -164,6 +170,7 @@ static void dumpAllThreadsToLog(thread_t monitorTid, double busyMs) {
         if (n <= 0) {
             [out appendFormat:@"\n  tid=0x%x name=\"%s\" (no frames)",
                 (unsigned)t, nameBuf];
+            mach_port_deallocate(task, t);
             continue;
         }
 
@@ -186,6 +193,7 @@ static void dumpAllThreadsToLog(thread_t monitorTid, double busyMs) {
             [out appendFormat:@"\n    #%d %s + 0x%lx %s", j, img,
                 (unsigned long)off, sym];
         }
+        mach_port_deallocate(task, t);
     }
 
     // Release thread port array.
