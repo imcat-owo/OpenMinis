@@ -1068,6 +1068,27 @@ static BOOL ISHTaskIsDescendantOf(struct task *t, pid_t_ rootPid) {
     return i - 1;
 }
 
+/// YES when `bytes` is exactly one multi-byte UTF-8 sequence that is merely
+/// truncated: a valid leading byte followed only by continuation bytes,
+/// fewer than the sequence needs. `lastCompleteUTF8Length` returns 0 for
+/// such a buffer — the SAME value it returns for pure garbage — so the
+/// caller cannot tell "wait for the rest of this character" from "no valid
+/// UTF-8 at all" without this check.
++ (BOOL)isIncompleteUTF8Sequence:(const uint8_t *)bytes length:(NSUInteger)len {
+    if (len == 0 || len > 3) return NO;
+    uint8_t lead = bytes[0];
+    NSUInteger seqLen;
+    if ((lead & 0xE0) == 0xC0) seqLen = 2;
+    else if ((lead & 0xF0) == 0xE0) seqLen = 3;
+    else if ((lead & 0xF8) == 0xF0) seqLen = 4;
+    else return NO;
+    if (len >= seqLen) return NO;
+    for (NSUInteger i = 1; i < len; i++) {
+        if ((bytes[i] & 0xC0) != 0x80) return NO;
+    }
+    return YES;
+}
+
 + (void)readPipe:(int)fd context:(ISHShellExecutionContext *)ctx isStdErr:(BOOL)isStdErr {
     char buffer[4096];
     NSMutableString *lineBuffer = [NSMutableString string];
@@ -1141,12 +1162,25 @@ static BOOL ISHTaskIsDescendantOf(struct task *t, pid_t_ rootPid) {
             NSUInteger safeLen = [self lastCompleteUTF8Length:(const uint8_t *)pendingBytes.bytes
                                                       length:pendingBytes.length];
             if (safeLen == 0 && pendingBytes.length > 0) {
-                // No valid UTF-8 at all — fallback to Latin1 for the entire buffer
-                NSString *chunk = [[NSString alloc] initWithBytes:pendingBytes.bytes
-                                                           length:pendingBytes.length
-                                                         encoding:NSISOLatin1StringEncoding];
-                if (chunk) [lineBuffer appendString:chunk];
-                [pendingBytes setLength:0];
+                if ([self isIncompleteUTF8Sequence:(const uint8_t *)pendingBytes.bytes
+                                             length:pendingBytes.length]) {
+                    // The whole buffer is one half-written multi-byte
+                    // character (common when a small write splits a Chinese
+                    // character or emoji across reads). Hold it until the
+                    // remaining bytes arrive — the Latin-1 fallback below
+                    // would decode the lead byte as a stray letter, clear
+                    // the buffer, and desynchronise the rest of the
+                    // character into mojibake. A stream that truly ends
+                    // mid-character is handled by the EOF flush after the
+                    // loop.
+                } else {
+                    // No valid UTF-8 at all — fallback to Latin1 for the entire buffer
+                    NSString *chunk = [[NSString alloc] initWithBytes:pendingBytes.bytes
+                                                               length:pendingBytes.length
+                                                             encoding:NSISOLatin1StringEncoding];
+                    if (chunk) [lineBuffer appendString:chunk];
+                    [pendingBytes setLength:0];
+                }
             } else if (safeLen > 0) {
                 NSString *chunk = [[NSString alloc] initWithBytes:pendingBytes.bytes
                                                            length:safeLen
