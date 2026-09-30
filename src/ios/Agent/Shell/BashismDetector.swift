@@ -94,7 +94,10 @@ enum BashismDetector {
             let c = scalars[i]
             let next: Unicode.Scalar? = i + 1 < scalars.count ? scalars[i + 1] : nil
             if c == "$", next == "(", i + 2 < scalars.count, scalars[i + 2] == "(" {
-                depth += 1
+                // `$((` opens the expansion with TWO open parens — count
+                // both, so single parens inside can each count on their own
+                // below and the depth still lands back on zero at the end.
+                depth += 2
                 masked.append(contentsOf: "   ".unicodeScalars)
                 i += 3
                 continue
@@ -104,18 +107,21 @@ enum BashismDetector {
                 i += 1
                 continue
             }
-            if c == "(", next == "(" {
+            // Inside arithmetic EVERY paren counts, not only `((` / `))`
+            // pairs (AE B-3 regression): grouping uses single parens —
+            // `$(( (a + (b)) << 1 ))` — and counting pairs only either
+            // closes the mask early (a group close paren pairing with the
+            // final `))`, exposing the `<<` shift as a fake heredoc opener)
+            // or never closes it (single closes after a `((` never bring
+            // the depth down, so the rest of the script stays masked and a
+            // real heredoc opener is missed).
+            if c == "(" {
                 depth += 1
-                masked.append(contentsOf: "  ".unicodeScalars)
-                i += 2
-            } else if c == ")", next == ")" {
-                depth -= 1
-                masked.append(contentsOf: "  ".unicodeScalars)
-                i += 2
-            } else {
-                masked.append(" ")
-                i += 1
+            } else if c == ")" {
+                depth = max(0, depth - 1)
             }
+            masked.append(" ")
+            i += 1
         }
         var result = ""
         result.unicodeScalars.append(contentsOf: masked)
