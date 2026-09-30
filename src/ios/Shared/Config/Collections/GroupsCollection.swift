@@ -69,7 +69,14 @@ struct GroupsCollection: ConfigCollection {
         }
         var defaultThinking: ThinkingLevel? = nil
         if case .string(let s)? = dict["default_thinking_level"], !s.isEmpty {
-            defaultThinking = ThinkingLevel.decoded(s)
+            // CLI input must name a real level. `decoded` is a persistence
+            // tolerance helper (unknown → .xhigh) and must not be fed raw
+            // user input, or a typo silently becomes the strongest level.
+            guard let parsed = ThinkingLevel(rawValue: s) else {
+                let allowed = ThinkingLevel.allCases.map(\.rawValue).joined(separator: ", ")
+                throw ConfigError.invalidValue("`default_thinking_level` must be one of: \(allowed)")
+            }
+            defaultThinking = parsed
         }
         var contextLimit: Int? = nil
         if case .int(let i)? = dict["context_limit_tokens"], i > 0 {
