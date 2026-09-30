@@ -287,7 +287,7 @@ struct ModelsCollection: ConfigCollection {
             path: "models.\(id).modalitiesOverride",
             displayName: "Modalities override",
             description: "User override list. Pass [] or null to clear and fall back to inferred. Allowed: text_input, text_output, image_input, pdf_input, audio_input, video_input, image_output, audio_output, video_output.",
-            valueSchema: .array(.string()),
+            valueSchema: .optional(.array(.string())),
             risk: .sensitive, revertable: true,
             reader: { [self] in
                 guard let e = entry(id) else { return .null }
@@ -297,6 +297,13 @@ struct ModelsCollection: ConfigCollection {
                 return .array([])
             },
             writer: { [self] v in
+                // null clears, exactly like [] — the description promises
+                // both, and the .optional schema is what lets null through
+                // validation to reach this branch at all.
+                if case .null = v {
+                    try mutate(id) { $0.overrides.modalityOverride = nil }
+                    return
+                }
                 guard case .array(let arr) = v else { throw ConfigError.typeMismatch(expected: "array") }
                 let names: [String] = arr.compactMap {
                     if case .string(let s) = $0 { return s } else { return nil }
