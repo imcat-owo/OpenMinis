@@ -565,6 +565,38 @@ actor ProviderConfigDB {
         // restore it after the per-device keys are rewritten (same
         // anti-wipe idea as the agent-loop guard below).
         let existingLegacyUuidMap = localKV("legacyUuidMap")
+        // [R3-025] secret_blob/secret_* and the three tables' extras_json are
+        // NOT carried by the in-memory ProviderConfig — they are written only
+        // by the inbound-sync path (upsert*FromInbound). Rewriting every row
+        // with nil here therefore wiped synced secrets and newer-build
+        // unknown fields on the very next save()/merge. Snapshot them by row
+        // id before the wipe and re-apply them in the loops below (same
+        // capture/restore idea as legacyUuidMap above). Rows absent from
+        // `config` stay deleted — preservation is keyed by id, so a removed
+        // instance/entry/group does not resurrect.
+        var preservedInstanceSecrets: [String: (blob: String?, kind: String?, updatedAt: Double?, extras: String?)] = [:]
+        for row in loadAllInstanceRows() {
+            guard let id = row["id"] as? String else { continue }
+            let blob = row["secret_blob"] as? String
+            let kind = row["secret_kind"] as? String
+            let updatedAt = row["secret_updated_at"] as? Double
+            let extras = row["extras_json"] as? String
+            if blob != nil || kind != nil || updatedAt != nil || extras != nil {
+                preservedInstanceSecrets[id] = (blob, kind, updatedAt, extras)
+            }
+        }
+        var preservedEntryExtras: [String: String] = [:]
+        for row in loadAllEntryRows() {
+            if let id = row["id"] as? String, let extras = row["extras_json"] as? String {
+                preservedEntryExtras[id] = extras
+            }
+        }
+        var preservedGroupExtras: [String: String] = [:]
+        for row in loadAllGroupRows() {
+            if let id = row["id"] as? String, let extras = row["extras_json"] as? String {
+                preservedGroupExtras[id] = extras
+            }
+        }
         Self.exec(db: db, "DELETE FROM provider_model_groups")
         Self.exec(db: db, "DELETE FROM provider_model_entries")
         Self.exec(db: db, "DELETE FROM provider_instances")
@@ -613,12 +645,12 @@ actor ProviderConfigDB {
                 imageEndpointResolved: inst.imageEndpointResolved?.rawValue,
                 isEnabled: inst.isEnabled,
                 sortOrder: idx,
-                secretBlob: nil,
-                secretKind: nil,
-                secretUpdatedAt: nil,
+                secretBlob: preservedInstanceSecrets[inst.id]?.blob,
+                secretKind: preservedInstanceSecrets[inst.id]?.kind,
+                secretUpdatedAt: preservedInstanceSecrets[inst.id]?.updatedAt,
                 createdAt: inst.createdAt.timeIntervalSince1970,
                 updatedAt: now,
-                extrasJson: nil,
+                extrasJson: preservedInstanceSecrets[inst.id]?.extras,
                 customUserAgent: inst.customUserAgent,
                 azureMode: inst.azureMode
             )
@@ -653,7 +685,7 @@ actor ProviderConfigDB {
                 userModifiedAt: entry.userModifiedAt?.timeIntervalSince1970,
                 sortOrder: idx,
                 updatedAt: entry.userModifiedAt?.timeIntervalSince1970 ?? now,
-                extrasJson: nil
+                extrasJson: preservedEntryExtras[entry.uuid]
             )
         }
 
@@ -671,7 +703,7 @@ actor ProviderConfigDB {
                 memberEntryIdsJson: memberJSON,
                 sortOrder: idx,
                 updatedAt: now,
-                extrasJson: nil,
+                extrasJson: preservedGroupExtras[group.id],
                 removedMembersJson: Self.encodeMemberTimestamps(group.removedMembers),
                 addedMembersJson: Self.encodeMemberTimestamps(group.addedMembers)
             )
