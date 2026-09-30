@@ -1369,7 +1369,10 @@ final class BackgroundKeepAliveManager: NSObject, ObservableObject, CLLocationMa
             AudioSessionCoordinator.shared.begin(.backgroundKeepAlive)
         }
         logger.info("[BKA][Start] begin(.backgroundKeepAlive) — acquiring engine")
-        silentAudioActivationRetries = 0
+        // NOTE: silentAudioActivationRetries is only cleared on success
+        // below (AE C-3). Clearing it here, before the engine even exists,
+        // made the retry cap in scheduleSilentAudioActivationRetry
+        // unreachable and every re-entry look like a first attempt.
 
         let engine = AVAudioEngine()
         let player = AVAudioPlayerNode()
@@ -1381,6 +1384,14 @@ final class BackgroundKeepAliveManager: NSObject, ObservableObject, CLLocationMa
         guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1),
               let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
             logger.error("[BackgroundKeepAlive] Failed to create silent audio buffer")
+            // Pair off the begin(.backgroundKeepAlive) above (AE C-3):
+            // stopSilentAudio early-returns when silentAudioActive is
+            // false, so without this end() the intent would leak until a
+            // foreground reassert happens to clean it up.
+            MainActor.assumeIsolated {
+                AudioSessionCoordinator.shared.end(.backgroundKeepAlive)
+            }
+            scheduleSilentAudioActivationRetry()
             return
         }
         buffer.frameLength = frameCount
@@ -1396,10 +1407,15 @@ final class BackgroundKeepAliveManager: NSObject, ObservableObject, CLLocationMa
             audioEngine = engine
             silentPlayerNode = player
             silentAudioActive = true
+            silentAudioActivationRetries = 0
             startAudioUpdateTimer()
             logger.info("[BKA][Start] engine running — silent audio keep-alive ACTIVE")
         } catch {
             logger.error("[BKA][Start] engine.start() FAILED: \(error.localizedDescription)")
+            // The retry scheduler existed but was never called (AE C-3) —
+            // a transient activation rejection permanently killed
+            // keep-alive until some unrelated evaluate event happened by.
+            scheduleSilentAudioActivationRetry()
         }
     }
 
