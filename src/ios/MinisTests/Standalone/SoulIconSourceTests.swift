@@ -68,10 +68,24 @@ func looksLikeImageSource(_ raw: String) -> Bool {
 }
 
 func isBlockedHost(_ host: String) -> Bool {
-    let h = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+    var h = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
     if h == "localhost" || h.hasSuffix(".localhost") || h.hasSuffix(".local") { return true }
-    if h == "::1" || h == "0:0:0:0:0:0:0:1" { return true }
-    if h.hasPrefix("fc") || h.hasPrefix("fd") || h.hasPrefix("fe80:") { return true }
+    // Mirrors SoulStore.isBlockedHost: normalize IPv6 spellings via inet_pton.
+    if h.contains(":") {
+        var addr = in6_addr()
+        let parsed = h.withCString { inet_pton(AF_INET6, $0, &addr) } == 1
+        if parsed {
+            let b = withUnsafeBytes(of: &addr) { Array($0) }
+            if b.prefix(15).allSatisfy({ $0 == 0 }) && b[15] == 1 { return true }
+            if b.prefix(10).allSatisfy({ $0 == 0 }) && b[10] == 0xff && b[11] == 0xff {
+                h = "\(b[12]).\(b[13]).\(b[14]).\(b[15])"
+            } else {
+                return h.hasPrefix("fc") || h.hasPrefix("fd") || h.hasPrefix("fe80:")
+            }
+        } else if h.hasPrefix("fc") || h.hasPrefix("fd") || h.hasPrefix("fe80:") {
+            return true
+        }
+    }
     let parts = h.split(separator: ".", omittingEmptySubsequences: false)
     guard parts.count == 4, let a = Int(parts[0]), let b = Int(parts[1]),
           Int(parts[2]) != nil, Int(parts[3]) != nil else { return false }
@@ -256,11 +270,14 @@ check("an emoji is not base64", !isProbablyBareBase64("⚡"))
 print("\nSSRF — blocked hosts")
 for h in ["localhost", "127.0.0.1", "127.1.1.1", "0.0.0.0", "10.0.0.5",
           "172.16.0.1", "172.31.255.255", "192.168.1.1", "169.254.169.254",
-          "100.64.0.1", "::1", "fd00::1", "fe80::1", "printer.local", "app.localhost"] {
+          "100.64.0.1", "::1", "0::1", "0:0:0:0:0:0:0:1", "[0::1]",
+          "::ffff:127.0.0.1", "[::ffff:127.0.0.1]", "::ffff:10.0.0.5",
+          "fd00::1", "fe80::1", "printer.local", "app.localhost"] {
     check("blocks \(h)", isBlockedHost(h))
 }
 for h in ["example.com", "cdn.example.org", "8.8.8.8", "1.1.1.1",
-          "172.32.0.1", "172.15.0.1", "192.169.1.1", "100.63.0.1", "169.253.0.1"] {
+          "172.32.0.1", "172.15.0.1", "192.169.1.1", "100.63.0.1", "169.253.0.1",
+          "2606:4700:4700::1111"] {
     check("allows \(h)", !isBlockedHost(h), true)
 }
 print("  (note: 169.254.169.254 is the cloud metadata endpoint — the one that matters most)")

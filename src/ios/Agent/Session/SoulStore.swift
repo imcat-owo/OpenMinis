@@ -377,12 +377,28 @@ enum SoulIconSource {
     /// race against the connection's own resolution, so hostnames are allowed
     /// and the URLSession is instead denied ambient credentials.
     static func isBlockedHost(_ host: String) -> Bool {
-        let h = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        var h = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
         if h == "localhost" || h.hasSuffix(".localhost") || h.hasSuffix(".local") { return true }
-        if h == "::1" || h == "0:0:0:0:0:0:0:1" { return true }
-        // IPv6 unique-local / link-local (literal IPv6 only — a hostname
-        // like fc.example.com must not be mistaken for an fc00::/8 address)
-        if h.contains(":"), h.hasPrefix("fc") || h.hasPrefix("fd") || h.hasPrefix("fe80:") { return true }
+        // IPv6 literals come in many textual spellings of the same address
+        // (`0::1` is `::1`; `::ffff:127.0.0.1` is 127.0.0.1). String matching
+        // can't enumerate them, so normalize with inet_pton first: every
+        // spelling of ::1 is caught, and IPv4-mapped forms are judged by the
+        // embedded IPv4 address with the IPv4 rules below.
+        if h.contains(":") {
+            var addr = in6_addr()
+            let parsed = h.withCString { inet_pton(AF_INET6, $0, &addr) } == 1
+            if parsed {
+                let b = withUnsafeBytes(of: &addr) { Array($0) }
+                if b.prefix(15).allSatisfy({ $0 == 0 }) && b[15] == 1 { return true }
+                if b.prefix(10).allSatisfy({ $0 == 0 }) && b[10] == 0xff && b[11] == 0xff {
+                    h = "\(b[12]).\(b[13]).\(b[14]).\(b[15])"
+                } else {
+                    return h.hasPrefix("fc") || h.hasPrefix("fd") || h.hasPrefix("fe80:")
+                }
+            } else if h.hasPrefix("fc") || h.hasPrefix("fd") || h.hasPrefix("fe80:") {
+                return true
+            }
+        }
 
         let parts = h.split(separator: ".", omittingEmptySubsequences: false)
         guard parts.count == 4, let a = Int(parts[0]), let b = Int(parts[1]),
