@@ -133,6 +133,16 @@ enum BackupCrypto {
         switch kdf.alg {
         case "pbkdf2-hmac-sha256":
             let iterations = kdf.iterations ?? pbkdf2Iterations
+            // The iteration count comes from the package's own manifest and
+            // derivation runs BEFORE the verifier/MAC checks, so this value
+            // is attacker-controlled at the moment it is used: a negative or
+            // >UInt32 value traps in the UInt32 conversion, and a merely
+            // huge one pins the import for hours. Only the range a real
+            // build could write is accepted (we write 600k; the ceiling
+            // leaves generous headroom for raising it later).
+            guard (1...10_000_000).contains(iterations) else {
+                throw CryptoError.corruptMember("manifest.encryption.kdf.iterations")
+            }
             return Keys(kek: try pbkdf2(passphrase: passphrase, salt: salt, iterations: iterations))
         case "argon2id":
             // Written by a future build that vendors Argon2. Refusing loudly is
