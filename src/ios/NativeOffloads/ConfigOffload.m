@@ -159,11 +159,10 @@ static int cmd_list_topics(int argc, char **argv, int stdout_fd,
 
 static int cmd_topic_help(int argc, char **argv, int stdout_fd, int stderr_fd,
                           BOOL compact, BOOL quiet) {
-    NSString *topic = noff_get_subcommand(argc, argv);
-    // The actual topic is argv[2] when subcommand is "topic-help".
-    if (argc >= 3) topic = [NSString stringWithUTF8String:argv[2]];
-    if (!topic || topic.length == 0
-        || [topic isEqualToString:@"topic-help"]) {
+    // Positional args via noff_positional_args so leading global flags
+    // (--session … etc.) don't shift the topic into the wrong slot.
+    NSString *topic = noff_positional_args(argc, argv).firstObject;
+    if (!topic || topic.length == 0) {
         NSDictionary *err = noff_json_error(TOOL_NAME, @"topic-help",
                                              NOFF_ERR_INVALID_ARGS,
                                              @"topic-help <topic> requires a topic name. "
@@ -185,14 +184,15 @@ static int cmd_topic_help(int argc, char **argv, int stdout_fd, int stderr_fd,
 
 static int cmd_get(int argc, char **argv, int stdout_fd, int stderr_fd,
                    BOOL compact, BOOL quiet) {
-    if (argc < 3) {
+    NSArray<NSString *> *positional = noff_positional_args(argc, argv);
+    if (positional.count < 1) {
         NSDictionary *err = noff_json_error(TOOL_NAME, @"get",
                                              NOFF_ERR_INVALID_ARGS,
                                              @"get <path> requires a field path.");
         noff_emit_json(stdout_fd, err, compact, quiet);
         return NOFF_EXIT_INVALID_ARGS;
     }
-    NSString *path = [NSString stringWithUTF8String:argv[2]];
+    NSString *path = positional[0];
     NSString *filter = noff_find_arg(argc, argv, "--filter");
     if (!filter) filter = noff_find_arg(argc, argv, "-f");
     NSString *pageRaw = noff_find_arg(argc, argv, "--page");
@@ -213,13 +213,14 @@ static int cmd_get(int argc, char **argv, int stdout_fd, int stderr_fd,
 static int cmd_set(int argc, char **argv, int stdout_fd, int stderr_fd,
                    BOOL compact, BOOL quiet) {
     // [T-ios-minis-config-set-shell-escape] (issue #36) `--file <path>` reads
-    // the value-json from a file instead of argv[3]. The value normally rides
+    // the value-json from a file instead of the positional value argument. The value normally rides
     // through the shell as a positional arg, so busybox ash mangles embedded
     // double-quotes / backslashes / newlines / $ / backticks before this
     // binary sees them — breaking large free-text writes like soul.body.
     // Reading from a file bypasses shell escaping entirely.
     NSString *fileArg = get_arg(argc, argv, "--file");
-    if (argc < 3 || (argc < 4 && !fileArg)) {
+    NSArray<NSString *> *positional = noff_positional_args(argc, argv);
+    if (positional.count < 1 || (positional.count < 2 && !fileArg)) {
         NSDictionary *err = noff_json_error(TOOL_NAME, @"set",
                                              NOFF_ERR_INVALID_ARGS,
                                              @"set <path> <value-json> requires both arguments "
@@ -227,7 +228,7 @@ static int cmd_set(int argc, char **argv, int stdout_fd, int stderr_fd,
         noff_emit_json(stdout_fd, err, compact, quiet);
         return NOFF_EXIT_INVALID_ARGS;
     }
-    NSString *path = [NSString stringWithUTF8String:argv[2]];
+    NSString *path = positional[0];
     NSString *valueJSON;
     if (fileArg) {
         NSError *readErr = nil;
@@ -244,7 +245,7 @@ static int cmd_set(int argc, char **argv, int stdout_fd, int stderr_fd,
             return NOFF_EXIT_INVALID_ARGS;
         }
     } else {
-        valueJSON = [NSString stringWithUTF8String:argv[3]];
+        valueJSON = positional[1];
     }
     NSString *caption = get_arg(argc, argv, "--caption");
     NSString *actor = get_arg(argc, argv, "--actor") ?: @"agent";
@@ -267,7 +268,8 @@ static int cmd_set(int argc, char **argv, int stdout_fd, int stderr_fd,
 static int cmd_add(int argc, char **argv, int stdout_fd, int stderr_fd,
                    BOOL compact, BOOL quiet) {
     NSString *fileArg = get_arg(argc, argv, "--file");
-    if (argc < 3 || (argc < 4 && !fileArg)) {
+    NSArray<NSString *> *positional = noff_positional_args(argc, argv);
+    if (positional.count < 1 || (positional.count < 2 && !fileArg)) {
         NSDictionary *err = noff_json_error(TOOL_NAME, @"add",
                                              NOFF_ERR_INVALID_ARGS,
                                              @"add <topic> <value-json> requires both arguments "
@@ -276,7 +278,7 @@ static int cmd_add(int argc, char **argv, int stdout_fd, int stderr_fd,
         noff_emit_json(stdout_fd, err, compact, quiet);
         return NOFF_EXIT_INVALID_ARGS;
     }
-    NSString *topic = [NSString stringWithUTF8String:argv[2]];
+    NSString *topic = positional[0];
     NSString *valueJSON;
     if (fileArg) {
         NSError *readErr = nil;
@@ -293,7 +295,7 @@ static int cmd_add(int argc, char **argv, int stdout_fd, int stderr_fd,
             return NOFF_EXIT_INVALID_ARGS;
         }
     } else {
-        valueJSON = [NSString stringWithUTF8String:argv[3]];
+        valueJSON = positional[1];
     }
     // Route through the collection-add suffix the bridge already understands.
     NSString *path = [topic stringByAppendingString:@".add"];
@@ -370,14 +372,15 @@ static int cmd_audit_list(int argc, char **argv, int stdout_fd,
 
 static int cmd_audit_get(int argc, char **argv, int stdout_fd,
                          BOOL compact, BOOL quiet) {
-    if (argc < 3) {
+    NSArray<NSString *> *positional = noff_positional_args(argc, argv);
+    if (positional.count < 1) {
         NSDictionary *err = noff_json_error(TOOL_NAME, @"audit-get",
                                              NOFF_ERR_INVALID_ARGS,
                                              @"audit-get <audit-id> requires an id.");
         noff_emit_json(stdout_fd, err, compact, quiet);
         return NOFF_EXIT_INVALID_ARGS;
     }
-    NSString *idStr = [NSString stringWithUTF8String:argv[2]];
+    NSString *idStr = positional[0];
     NSDictionary *envelope = [ConfigOffloadBridge auditGetWithId:idStr];
     noff_emit_json(stdout_fd, envelope, compact, quiet);
     return exit_code_from_envelope(envelope);
@@ -385,14 +388,15 @@ static int cmd_audit_get(int argc, char **argv, int stdout_fd,
 
 static int cmd_audit_revert(int argc, char **argv, int stdout_fd,
                             BOOL compact, BOOL quiet) {
-    if (argc < 3) {
+    NSArray<NSString *> *positional = noff_positional_args(argc, argv);
+    if (positional.count < 1) {
         NSDictionary *err = noff_json_error(TOOL_NAME, @"audit-revert",
                                              NOFF_ERR_INVALID_ARGS,
                                              @"audit-revert <audit-id> requires an id.");
         noff_emit_json(stdout_fd, err, compact, quiet);
         return NOFF_EXIT_INVALID_ARGS;
     }
-    NSString *idStr = [NSString stringWithUTF8String:argv[2]];
+    NSString *idStr = positional[0];
     NSString *actor = get_arg(argc, argv, "--actor") ?: @"agent-revert";
     NSString *sessionId = get_arg(argc, argv, "--session");
     NSDictionary *envelope = [ConfigOffloadBridge auditRevertWithId:idStr
