@@ -119,7 +119,9 @@ extension ConfigRegistry {
             }
         ))
 
-        // [T-soul-custom-icon] [T-soul-icon-config-images] Emoji OR an image.
+        // [T-soul-custom-icon] [T-soul-icon-config-images] An image only —
+        // emoji are NOT accepted as the icon ([avatar]: the user removed
+        // emoji from the avatar entirely).
         //
         // An image may be given as a data URI, bare base64, a `minis-clone://`
         // resource, a path inside the minis directories, or an http(s) URL.
@@ -154,10 +156,7 @@ extension ConfigRegistry {
             description: "The Soul's identity icon — also called its avatar, its persona image, or its "
                 + "character image (中文：角色形象 / 图标 / 头像). All of those refer to THIS one setting; "
                 + "there is no separate avatar field. Shown beside the assistant name in the chat header "
-                + "and on the Soul settings card. Accepts an emoji or an image.\n"
-                + "\n"
-                + "EMOJI\n"
-                + "  A single emoji, e.g. \"⚡\". An empty string \"\" restores the default sparkle.\n"
+                + "and on the Soul settings card. Accepts an image only — emoji are not accepted.\n"
                 + "\n"
                 + "IMAGE — any of these forms:\n"
                 + "  • data URI (preferred for inline bytes):\n"
@@ -183,7 +182,6 @@ extension ConfigRegistry {
                 + "READING — `get soul.icon` returns \"<image>\" for an image, never the base64.\n"
                 + "\n"
                 + "EXAMPLES (note the value is JSON, so the string needs its own quotes)\n"
-                + "  minis-config set soul.icon '\"⚡\"'\n"
                 + "  minis-config set soul.icon '\"minis-clone://attachments/icon.png\"'\n"
                 + "  minis-config set soul.icon '\"https://example.com/icon.png\"'\n"
                 + "  minis-config set soul.icon '\"data:image/png;base64,iVBORw0KGgo...\"'\n"
@@ -195,16 +193,16 @@ extension ConfigRegistry {
                 + "Simpler still: point at the file directly with minis-clone:// or a path and skip base64 entirely.",
             // Wide enough for an inline base64 argument; `SoulIconSource`
             // applies the real byte/pixel limits once it knows the source
-            // kind. Emoji validation below is unchanged.
+            // kind.
             valueSchema: .string(maxLength: SoulIconSource.maxInlineBase64Chars),
             // .sensitive: this is the assistant's visible identity, and an
             // image write cannot be rolled back from the audit log (see
             // `revertable` below), so it deserves an explicit confirmation.
             risk: .sensitive,
-            // An emoji write is trivially revertable, but an image write is
-            // not: the audit log stores `<image>` rather than the base64, so
-            // there is nothing to restore from. Claiming otherwise would give
-            // `audit revert` a button that silently does the wrong thing.
+            // An image write is not revertable: the audit log stores
+            // `<image>` rather than the base64, so there is nothing to
+            // restore from. Claiming otherwise would give `audit revert`
+            // a button that silently does the wrong thing.
             revertable: false,
             reader: {
                 let raw = currentFile().metadata.icon
@@ -233,12 +231,13 @@ extension ConfigRegistry {
                         "image source was not resolved before the write — this is a bug; "
                         + "please report it")
                 }
-                // One grapheme cluster, so a flag or skin-toned/ZWJ emoji
-                // (several scalars, one glyph) counts as one.
-                guard trimmed.count == 1 else {
-                    throw ConfigError.invalidValue("icon must be a single emoji")
-                }
-                try updateMetadata { $0.icon = trimmed }
+                // [avatar] Emoji are not accepted: the icon is an image or
+                // nothing. Anything that is neither a finished data URI
+                // nor a resolvable image source is refused here.
+                throw ConfigError.invalidValue(
+                    "icon only accepts an image — pass a data URI, a minis-clone:// URL, "
+                    + "a local image path or an https URL; emoji are not supported. "
+                    + "Use an empty string to restore the default.")
             }
         ))
 

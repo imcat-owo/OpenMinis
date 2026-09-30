@@ -7,10 +7,11 @@ struct SoulSettingsView: View {
     @State private var name: String = SoulMetadata.default.name
     /// Raw emoji value loaded from SOUL.md. Not user-editable; preserved
     /// verbatim on save so we don't rewrite a value the user (or another
-    /// device) may have set in the file. UI always shows `displayEmoji`.
+    /// device) may have set in the file. It is never rendered anywhere.
     @State private var rawEmoji: String = SoulMetadata.default.emoji
-    /// [T-soul-custom-icon] The user's identity icon: an emoji, a
-    /// `data:image/png;base64,…` URI, or empty for the default sparkle.
+    /// [T-soul-custom-icon] The user's identity icon: a
+    /// `data:image/png;base64,…` URI, or empty for the default. (A legacy
+    /// non-image value is kept on disk but renders as the default.)
     @State private var icon: String = SoulMetadata.default.icon
     @State private var showIconOptions = false
     @State private var showPhotoPicker = false

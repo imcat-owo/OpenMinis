@@ -67,8 +67,9 @@ enum SoulIconImage {
         return .success(prefix + png.base64EncodedString())
     }
 
-    /// Decode a stored data URI back to an image. Returns nil for an emoji
-    /// value or anything malformed, so callers can fall back to text.
+    /// Decode a stored data URI back to an image. Returns nil for a
+    /// non-image value (including a legacy emoji) or anything malformed,
+    /// so callers fall back to the default presentation.
     static func decode(_ value: String) -> UIImage? {
         guard isDataURI(value) else { return nil }
         let b64 = String(value.dropFirst(prefix.count))
@@ -162,10 +163,11 @@ enum SoulIconSource {
         }
     }
 
-    /// True when `raw` should be treated as an image source rather than as an
-    /// emoji. Deliberately generous: anything that is clearly not a one-glyph
+    /// True when `raw` should be treated as an image source. Deliberately
+    /// generous: anything that is clearly not a one-glyph
     /// emoji gets routed here so the user sees a real diagnostic instead of
-    /// "icon must be a single emoji".
+    /// a generic rejection. (Emoji themselves are refused by the writer:
+    /// the icon accepts images only.)
     static func looksLikeImageSource(_ raw: String) -> Bool {
         let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if s.isEmpty { return false }
@@ -429,7 +431,7 @@ struct SoulIconView: View {
     let icon: String
     let size: CGFloat
     /// Gradient used for the default sparkle in the chat header. Nil renders
-    /// the plain emoji glyph, which is what the settings card wants.
+    /// the same SF Symbol in the default foreground style.
     var sparkleGradient: LinearGradient? = nil
 
     /// ~22% of the edge: iOS's own app-icon "squircle" proportion, which
@@ -444,17 +446,18 @@ struct SoulIconView: View {
                 .frame(width: size, height: size)
                 .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius(for: size),
                                             style: .continuous))
-        } else if icon.isEmpty, let gradient = sparkleGradient {
-            // Default: keep the SF Symbol so the chat header's existing
-            // gradient treatment is untouched for users who never set one.
+        } else if let gradient = sparkleGradient {
+            // No image set: the SF Symbol sparkle, keeping the chat
+            // header's existing gradient treatment.
             Image(systemName: "sparkles")
                 .font(.system(size: size, weight: .semibold))
                 .foregroundStyle(gradient)
         } else {
-            // A user-chosen emoji, or the default sparkle where no gradient
-            // was requested.
-            Text(icon.isEmpty ? "✨" : icon)
-                .font(.system(size: size))
+            // [avatar] Anything that is not an image — empty, or a legacy
+            // emoji value stored by an older build — renders as the
+            // default SF Symbol sparkle, never as an emoji glyph.
+            Image(systemName: "sparkles")
+                .font(.system(size: size, weight: .semibold))
         }
     }
 }
@@ -467,18 +470,20 @@ struct SoulMetadata: Equatable {
     var name: String
     /// Raw `emoji` value parsed from SOUL.md. Preserved on disk for
     /// backward compatibility but NOT shown anywhere in the UI: the chat
-    /// bubble header and Soul Settings preview always render
-    /// `displayEmoji` (a fixed sparkles glyph). User-customized emoji
-    /// was removed; this field is round-tripped untouched if the file
-    /// already has one.
+    /// bubble header and Soul Settings preview always render the fixed
+    /// default (an SF Symbol sparkles) when no icon image is set.
+    /// User-customized emoji was removed; this field is round-tripped
+    /// untouched if the file already has one.
     var emoji: String
     var style: String
     /// `"auto"`, `"zh"`, `"en"`, or any free-form tag.
     var lang: String
 
-    /// [T-soul-custom-icon] User-chosen identity icon. Either a short
-    /// literal (an emoji) or a `data:image/png;base64,…` URI produced by
-    /// `SoulIconImage.encode`. Empty means "use the default sparkle".
+    /// [T-soul-custom-icon] User-chosen identity icon: a
+    /// `data:image/png;base64,…` URI produced by
+    /// `SoulIconImage.encode`. Empty means "use the default". A non-image
+    /// value can only be a legacy emoji stored by an older build; it is
+    /// kept on disk untouched but never rendered as an avatar.
     ///
     /// This lives in SOUL.md frontmatter, NOT in the body, and that is
     /// load-bearing: `identitySection()` builds the system prompt from a
@@ -488,28 +493,25 @@ struct SoulMetadata: Equatable {
     /// against the body length limit.
     var icon: String
 
-    /// The icon shown in every UI surface (chat bubble header, Soul
-    /// Settings preview card): the user's `icon` when set, else the
-    /// canonical sparkle.
+    /// The icon image shown in every UI surface (chat bubble header, Soul
+    /// Settings preview card): the user's `icon` when it holds an image,
+    /// else empty — empty is what tells every surface to render the
+    /// default SF Symbol sparkle instead.
     ///
     /// `emoji` is deliberately NOT consulted. That field belongs to the
     /// removed pre-2026-05 customization (see its comment); reviving it
     /// implicitly would resurrect a value users last set under different
     /// UI they may not remember. `icon` is opt-in from a fresh choice.
-    var displayIcon: String { icon.isEmpty ? "✨" : icon }
+    var displayIcon: String { SoulIconImage.isDataURI(icon) ? icon : "" }
 
-    /// True when `icon` holds an image rather than a text glyph, i.e. the
-    /// UI must decode it instead of rendering it as a `Text`.
+    /// True when `icon` holds an image, i.e. the UI must decode it;
+    /// any other value is treated as "no avatar set".
     var iconIsImage: Bool { SoulIconImage.isDataURI(icon) }
-
-    /// Retained so existing call sites keep compiling and keep meaning
-    /// "the fixed sparkle". Prefer `displayIcon`.
-    var displayEmoji: String { "✨" }
 
     static let `default` = SoulMetadata(
         name: "我的小家",
-        // Default emoji is intentionally empty — the UI uses the fixed
-        // `displayEmoji` sparkle and serialize() no longer writes the
+        // Default emoji is intentionally empty — the UI renders the fixed
+        // SF Symbol sparkle and serialize() no longer writes the
         // `emoji:` line. Kept on the struct only so the parser can
         // round-trip an `emoji: "..."` line that survives in an old
         // user-authored SOUL.md (next save will drop it on disk too).
@@ -520,7 +522,7 @@ struct SoulMetadata: Equatable {
         // own.
         style: "",
         lang: "auto",
-        // No icon by default — `displayIcon` falls back to the sparkle, so
+        // No icon by default — `displayIcon` is empty, so
         // an untouched SOUL.md serializes without an `icon:` line at all.
         icon: ""
     )
@@ -586,9 +588,10 @@ enum SoulMDParser {
     /// `icon` when the user has set one, followed by an empty line and the
     /// body.
     ///
-    /// The `emoji` field is deliberately NOT written — the UI is locked to
-    /// a fixed sparkle (`displayEmoji`), so persisting a `emoji:` line would
-    /// imply user-controlled customization that doesn't exist. Old files
+    /// The `emoji` field is deliberately NOT written — the UI renders a
+    /// fixed SF Symbol sparkle when no icon image is set, so persisting a
+    /// `emoji:` line would imply user-controlled customization that
+    /// doesn't exist. Old files
     /// containing `emoji: "..."` still parse cleanly (the value is kept in
     /// memory for round-trip safety) but the line is dropped on the next
     /// save, naturally migrating disk state to the new schema.

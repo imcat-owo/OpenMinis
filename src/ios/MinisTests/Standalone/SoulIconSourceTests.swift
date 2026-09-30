@@ -166,11 +166,31 @@ for (label, s, want) in [
     checkEq("\(label)", looksLikeImageSource(s), want)
 }
 
-print("\nEmoji regression — the pre-existing behaviour must be untouched")
+print("\nEmoji — [avatar] refused everywhere, never rendered as an avatar")
 check("emoji is NOT routed to the image path", !looksLikeImageSource("⚡"))
 check("empty string is NOT routed to the image path", !looksLikeImageSource(""))
-check("multi-char text is NOT routed (falls to the 'single emoji' error)",
+check("multi-char text is NOT routed to the image path",
       !looksLikeImageSource("not an emoji"))
+// Routing alone is not the gate — the writer is. Anything that is not an
+// image must be refused with a clear error, and the help (which IS the
+// API doc) must no longer offer emoji as an option.
+check("config writer refuses non-images with a clear error",
+      builtinsSource.contains("icon only accepts an image"))
+check("the old 'single emoji' acceptance is gone from the writer",
+      !builtinsSource.contains("icon must be a single emoji"))
+check("help no longer offers emoji", !builtinsSource.contains("Accepts an emoji"))
+check("help states emoji are not accepted",
+      builtinsSource.contains("emoji are not accepted"))
+// Rendering: a stored legacy emoji value must NOT come back as a glyph —
+// the shared renderer treats any non-image as "no avatar" and falls
+// through to the SF Symbol default.
+check("SoulIconView never renders the icon as a Text glyph",
+      !soulSource.contains("Text(icon.isEmpty"))
+check("SoulIconView's default is the SF Symbol sparkle",
+      soulSource.contains("Image(systemName: \"sparkles\")"))
+check("displayIcon only surfaces an image value",
+      soulSource.contains("SoulIconImage.isDataURI(icon) ? icon : \"\""))
+check("the ✨ displayEmoji fallback is gone", !soulSource.contains("displayEmoji"))
 
 print("\nOpaque images — [T-soul-icon-opaque-rounded] these are now ACCEPTED")
 // The rule reversed: transparency used to be mandatory. It was a presentation

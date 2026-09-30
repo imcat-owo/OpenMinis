@@ -615,7 +615,10 @@ struct PersonAvatarView: View {
     var body: some View {
         Group {
             let icon = kind == .user ? studio.userAvatar : soulIcon
-            if !icon.isEmpty {
+            // [avatar] Only an image counts as an avatar. A legacy
+            // non-image value (an emoji stored by an older build) is
+            // treated as unset and falls through to the default tile.
+            if SoulIconImage.isDataURI(icon) {
                 SoulIconView(icon: icon, size: size)
             } else {
                 ZStack {
