@@ -93,8 +93,13 @@ struct GroupsCollection: ConfigCollection {
             defaultThinking = parsed
         }
         var contextLimit: Int? = nil
-        if case .int(let i)? = dict["context_limit_tokens"], i > 0 {
-            contextLimit = i
+        if case .int(let i)? = dict["context_limit_tokens"] {
+            // Same bounds as the field writer's schema (.int(min: 0, max: 4_000_000));
+            // 0 means "no limit" there, so it maps to nil here too.
+            guard (0...4_000_000).contains(i) else {
+                throw ConfigError.invalidValue("`context_limit_tokens` must be between 0 and 4000000")
+            }
+            contextLimit = i == 0 ? nil : i
         }
         let g = ModelGroup(
             name: name, memberEntryIds: members,
