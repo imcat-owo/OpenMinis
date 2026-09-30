@@ -227,6 +227,16 @@ enum BackupZipExtractor {
             let nameLen = Int(readU16(cd, pos + 28))
             let extraLen = Int(readU16(cd, pos + 30))
             let commentLen = Int(readU16(cd, pos + 32))
+            // The entry's three length fields come straight from the file
+            // and were trusted for the name slice below: a nameLen running
+            // past the end of the CD buffer trapped that slice, so a damaged
+            // package crashed the restore instead of reporting corruption.
+            // Require the whole fixed + variable span to fit (forwardScan
+            // guards its name slice the same way); this also bounds the
+            // ZIP64 extra-field walk further down.
+            guard pos + 46 + nameLen + extraLen + commentLen <= cd.count else {
+                throw ExtractError.truncated
+            }
             var localOffset = Int(readU32(cd, pos + 42))
             let nameStart = cd.startIndex + pos + 46
             let name = String(decoding: cd[nameStart..<(nameStart + nameLen)], as: UTF8.self)
