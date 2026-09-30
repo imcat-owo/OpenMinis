@@ -1346,6 +1346,10 @@ enum ChatStoreSyncHydrators {
         } else {
             logger.info("[v3] skipped ProviderInstanceV3 \(id.prefix(8)) — local row is newer (LWW)")
         }
+        // [R3-086] The instance exists locally now (just applied, or already
+        // present and newer) — replay any thinking rules that arrived before
+        // it and were stashed by mergeProviderThinkingRuleV3.
+        await replayPendingThinkingRules(forInstance: id)
     }
 
     private static func deleteProviderInstanceV3(id: String) async {
@@ -1354,6 +1358,8 @@ enum ChatStoreSyncHydrators {
             return
         }
         await db.deleteInstanceRow(id: id)
+        // [R3-086] Stashed rules for this instance can never land now.
+        removePendingThinkingRules(forInstance: id)
         // CASCADE FK on provider_model_entries.provider_instance_id
         // already removes the instance's entries server-side too — but
         // peers issue their own per-entry op=delete records, so the
@@ -1680,6 +1686,64 @@ enum ChatStoreSyncHydrators {
             .buildPortable(synced)
     }
 
+    // MARK: - Pending thinking rules (R3-086)
+
+    /// Thinking rules that arrived before their owning instance are stashed
+    /// here — the full PortableRecord, JSON-encoded in UserDefaults — and
+    /// replayed when the instance lands. Durable rather than in-memory so an
+    /// app restart between the rule's arrival and the instance's arrival
+    /// can't lose them either.
+    private static let pendingThinkingRulesKey = "sync.v3.pendingThinkingRules.v1"
+    private static let pendingThinkingRulesLock = NSLock()
+
+    private static func loadPendingThinkingRules() -> [PortableRecord] {
+        guard let datas = UserDefaults.standard.array(forKey: pendingThinkingRulesKey) as? [Data] else { return [] }
+        return datas.compactMap { try? JSONDecoder().decode(PortableRecord.self, from: $0) }
+    }
+
+    private static func savePendingThinkingRules(_ records: [PortableRecord]) {
+        let datas = records.compactMap { try? JSONEncoder().encode($0) }
+        UserDefaults.standard.set(datas, forKey: pendingThinkingRulesKey)
+    }
+
+    private static func stashPendingThinkingRule(_ record: PortableRecord) {
+        pendingThinkingRulesLock.lock(); defer { pendingThinkingRulesLock.unlock() }
+        var records = loadPendingThinkingRules()
+        records.removeAll { $0.id.id == record.id.id }
+        records.append(record)
+        savePendingThinkingRules(records)
+    }
+
+    private static func removePendingThinkingRule(id: String) {
+        pendingThinkingRulesLock.lock(); defer { pendingThinkingRulesLock.unlock() }
+        let records = loadPendingThinkingRules()
+        let kept = records.filter { $0.id.id != id }
+        if kept.count != records.count { savePendingThinkingRules(kept) }
+    }
+
+    private static func removePendingThinkingRules(forInstance instanceId: String) {
+        pendingThinkingRulesLock.lock(); defer { pendingThinkingRulesLock.unlock() }
+        let records = loadPendingThinkingRules()
+        let kept = records.filter { stringField($0, "instanceId") != instanceId }
+        if kept.count != records.count { savePendingThinkingRules(kept) }
+    }
+
+    /// Replay stashed rules whose owning instance has now landed. Each
+    /// record is removed from the stash BEFORE merging: terminal outcomes
+    /// (applied, local-newer, recently-deleted) leave it removed, and if
+    /// the instance is somehow still missing the merge simply re-stashes it.
+    private static func replayPendingThinkingRules(forInstance instanceId: String) async {
+        let pending: [PortableRecord] = {
+            pendingThinkingRulesLock.lock(); defer { pendingThinkingRulesLock.unlock() }
+            return loadPendingThinkingRules().filter { stringField($0, "instanceId") == instanceId }
+        }()
+        for record in pending {
+            removePendingThinkingRule(id: record.id.id)
+            logger.info("[v3] replaying stashed ProviderThinkingRuleV3 \(record.id.id.prefix(8)) (instance \(instanceId.prefix(8)) landed)")
+            await mergeProviderThinkingRuleV3(record: record)
+        }
+    }
+
     /// Inbound upsert. LWW by `updatedAt` is enforced inside the DB call.
     private static func mergeProviderThinkingRuleV3(record: PortableRecord) async {
         guard let db = ProviderConfigStore.shared.db else {
@@ -1702,10 +1766,16 @@ enum ChatStoreSyncHydrators {
         }
         // A rule whose owning instance does not exist here would be invisible and
         // un-deletable in the UI (the provider page is the only place it renders), so
-        // keep it out of the DB. The instance record syncs independently; when it
-        // arrives, a later push of this rule re-delivers it.
+        // keep it out of the DB. The instance record syncs independently, so
+        // [R3-086] stash the rule and replay it when the instance lands
+        // (see replayPendingThinkingRules, called from mergeProviderInstanceV3).
+        // Dropping it here lost it for good: this type's fetchRecentV2 anchor
+        // advances on its own clean-pull count whether or not the instance ever
+        // arrived, and once anchored, rules older than the 7-day window are
+        // never re-fetched.
         guard ProviderConfigStore.shared.config.instances.contains(where: { $0.id == instanceId }) else {
-            logger.info("[v3] mergeProviderThinkingRuleV3 SKIP (unknown instance \(instanceId.prefix(8))) id=\(id.prefix(8))")
+            stashPendingThinkingRule(record)
+            logger.info("[v3] mergeProviderThinkingRuleV3 STASHED (unknown instance \(instanceId.prefix(8))) id=\(id.prefix(8)) — will replay when the instance lands")
             return
         }
         let applied = await db.upsertThinkingRuleFromInbound(
@@ -1732,6 +1802,9 @@ enum ChatStoreSyncHydrators {
     /// Inbound delete. The local row really is removed — the tombstone written by the
     /// ORIGINATING device is what stops the resurrection race; this side just applies.
     private static func deleteProviderThinkingRuleV3(id: String) async {
+        // [R3-086] A stashed (not yet landed) copy must not survive the
+        // delete, or it would replay when the instance arrives.
+        removePendingThinkingRule(id: id)
         guard let db = ProviderConfigStore.shared.db else {
             logger.warning("[v3] deleteProviderThinkingRuleV3 DROPPED (DB not open yet) id=\(id.prefix(8))")
             return
