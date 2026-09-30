@@ -60,6 +60,15 @@ final class CookieBackupStore {
 
     private var lastSyncAt: Date?
     private var syncing = false
+    /// [R3-093] Clear/sync mutual exclusion. Bumped synchronously at the
+    /// start of every settings-side clear (forgetAll /
+    /// reconcileDomainAfterUserEdit); a running sync compares its captured
+    /// value after each await and aborts rather than writing cleared
+    /// cookies back. `userClearInProgress` additionally blocks a NEW sync
+    /// from starting while a reconcile is between its live-store read and
+    /// its backup rewrite.
+    private var clearEpoch = 0
+    private var userClearInProgress = false
     /// Cookie keys present in the live store at the previous sync of this
     /// run. Compared against the current live set to spot cookies that
     /// vanished while the app was watching (see the tombstone logic in
@@ -198,6 +207,13 @@ final class CookieBackupStore {
     /// same registrable domain) are preserved. `rawDomain` is a cookie domain
     /// (possibly with a leading dot / subdomain).
     func reconcileDomainAfterUserEdit(_ rawDomain: String) async {
+        // [R3-093] Claim the clear BEFORE the first await: bump the epoch so
+        // a sync currently in its restore loop stops re-inserting this
+        // domain's cookies, and hold userClearInProgress so no new sync
+        // starts (and re-reads the not-yet-reconciled backup) meanwhile.
+        clearEpoch += 1
+        userClearInProgress = true
+        defer { userClearInProgress = false }
         let key = Self.registrableDomain(rawDomain)
         let live = await WKWebsiteDataStore.default().httpCookieStore.allCookies()
         let remaining = live
@@ -217,6 +233,10 @@ final class CookieBackupStore {
     /// Wipe the entire backup — mirrors the user's "clear all website data"
     /// action so nothing is restored afterwards.
     func forgetAll() {
+        // [R3-093] Bump the epoch first: a sync suspended in its restore
+        // loop sees the change on its next iteration and stops putting
+        // cleared cookies back into the live store.
+        clearEpoch += 1
         try? FileManager.default.removeItem(at: backupDirURL)
         logger.info("cleared entire cookie backup (user cleared all website data)")
     }
@@ -227,12 +247,25 @@ final class CookieBackupStore {
     func syncIfNeeded() async {
         if let last = lastSyncAt, Date().timeIntervalSince(last) < Self.syncInterval { return }
         guard !syncing else { return }
+        // [R3-093] A settings-side clear is mid-flight — skip this round
+        // rather than racing its live-store read / backup rewrite.
+        guard !userClearInProgress else { return }
         syncing = true
         defer { syncing = false }
         lastSyncAt = Date()
+        let epochAtStart = clearEpoch
 
         let store = WKWebsiteDataStore.default().httpCookieStore
         let live = await store.allCookies()
+        // [R3-093] A clear landed while the cookie fetch was suspended:
+        // the snapshot may predate it, and merging from it would write
+        // cleared cookies back. Abort — the next action re-syncs from the
+        // true post-clear state.
+        guard clearEpoch == epochAtStart else {
+            lastSyncAt = nil
+            logger.info("sync aborted: website data was cleared concurrently")
+            return
+        }
         let now = Date().timeIntervalSince1970
 
         // Domains whose last real visit is older than the retention window are
@@ -335,6 +368,15 @@ final class CookieBackupStore {
         // back with full metadata.
         var restoredCount = 0
         for (key, entry) in merged.sorted(by: { $0.key < $1.key }) where !liveKeys.contains(key) {
+            // [R3-093] The clear wins: if the user cleared website data
+            // while this loop was suspended on a setCookie await, stop —
+            // the remaining entries were just deleted on purpose and must
+            // not be written back into the live store (they would be
+            // re-backed-up next sync while Settings already showed 0).
+            guard clearEpoch == epochAtStart else {
+                logger.info("sync restore aborted midway: website data was cleared concurrently (\(restoredCount) cookie(s) already restored were covered by the clear)")
+                return
+            }
             guard let cookie = entry.toHTTPCookie() else {
                 logger.error("failed to rebuild cookie \(key) from backup — skipping")
                 continue
