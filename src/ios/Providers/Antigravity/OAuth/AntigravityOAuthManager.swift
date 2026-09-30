@@ -215,9 +215,13 @@ final class AntigravityOAuthManager: NSObject, ObservableObject {
 
     func discoverProjectIfNeeded(instanceId: String) async {
         guard projectID(instanceId: instanceId) == nil else { return }
-        guard let storage = ProviderKeychainHelper.loadOAuthToken(instanceId: instanceId, as: AntigravityTokenStorage.self) else { return }
+        guard ProviderKeychainHelper.loadOAuthToken(instanceId: instanceId, as: AntigravityTokenStorage.self) != nil else { return }
         logger.info("Auto-discovering project (instance: \(instanceId))...")
-        if let (project, baseURL) = try? await discoverCloudCodeProject(token: storage.accessToken) {
+        // Use a validated access token: the stored one may be expired, and
+        // every provider build re-runs discovery, so a stale token would make
+        // this fail forever.
+        if let token = try? await validAccessToken(instanceId: instanceId),
+           let (project, baseURL) = try? await discoverCloudCodeProject(token: token) {
             ProviderKeychainHelper.saveOAuthString(project, instanceId: instanceId, account: "oauth-gcp-project")
             ProviderKeychainHelper.saveOAuthString(baseURL, instanceId: instanceId, account: "oauth-base-url")
             logger.info("Auto-discovered project: \(project) via \(baseURL)")

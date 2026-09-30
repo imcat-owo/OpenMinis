@@ -203,9 +203,13 @@ final class GeminiOAuthManager: NSObject, ObservableObject {
     /// Discover GCP project if authenticated but missing project ID.
     func discoverProjectIfNeeded(instanceId: String) async {
         guard gcpProjectID(instanceId: instanceId) == nil else { return }
-        guard let storage = ProviderKeychainHelper.loadOAuthToken(instanceId: instanceId, as: GeminiTokenStorage.self) else { return }
+        guard ProviderKeychainHelper.loadOAuthToken(instanceId: instanceId, as: GeminiTokenStorage.self) != nil else { return }
         logger.info("Auto-discovering GCP project (instance: \(instanceId))...")
-        if let projectID = try? await discoverCloudCodeProject(token: storage.accessToken) {
+        // Use a validated access token: the stored one may be expired, and
+        // every provider build re-runs discovery, so a stale token would make
+        // this fail forever.
+        if let token = try? await validAccessToken(instanceId: instanceId),
+           let projectID = try? await discoverCloudCodeProject(token: token) {
             ProviderKeychainHelper.saveOAuthString(projectID, instanceId: instanceId, account: "oauth-gcp-project")
             logger.info("Auto-discovered GCP project: \(projectID)")
         } else {
