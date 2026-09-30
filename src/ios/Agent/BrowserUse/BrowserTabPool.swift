@@ -753,11 +753,7 @@ final class BrowserTabPool: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 if self.tabSerialChains[tabId]?.token == token {
-                    if let predecessor {
-                        self.tabSerialChains[tabId] = predecessor
-                    } else {
-                        self.tabSerialChains.removeValue(forKey: tabId)
-                    }
+                    self.tabSerialChains[tabId] = predecessor
                 }
             }
             return nil
