@@ -828,6 +828,16 @@ private let logger = AppLogger(category: "ConfigOffload")
                     ))
                     auditIds.append(auditId)
                     applied.append(appliedRow)
+                    // [T-shared-event-log] Cross-session trace: other sessions
+                    // read /var/minis/shared/events.jsonl to see that config
+                    // changed here. appliedRow["new"] is the masked audit copy
+                    // (secrets never in clear); the old value is deliberately
+                    // omitted — the audit log keeps old secrets in clear.
+                    SharedEventLog.shared.emit(
+                        event: "config.changed",
+                        summary: "minis-config: \(appliedRow["display_name"] ?? appliedRow["path"] ?? "?") (\(finalKey)) → \(appliedRow["new"] ?? "")",
+                        sessionId: sessionId
+                    )
                 } catch {
                     // Write/add/remove failed AFTER user confirmed —
                     // surface the underlying error verbatim. For

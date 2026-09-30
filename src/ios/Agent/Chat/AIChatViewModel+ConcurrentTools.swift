@@ -947,6 +947,21 @@ extension AIChatViewModel {
             scrollToBottomSignal.send()
         }
 
+        // [T-shared-event-log] Cross-session trace when a heavy tool finishes,
+        // so other sessions can see it in /var/minis/shared/events.jsonl.
+        // The output excerpt goes through SharedEventLog.redact().
+        let toolDur = toolDuration ?? 0
+        if SharedEventLog.heavyToolNames.contains(tu.name) || toolDur >= SharedEventLog.heavyDurationThreshold {
+            let outcome = cancelledHere ? "cancelled" : (toolSuccess ? "ok" : "failed")
+            let firstLine = toolOutput.components(separatedBy: "\n").first?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            SharedEventLog.shared.emit(
+                event: "tool.finished",
+                summary: "\(tu.name) \(outcome) \(String(format: "%.1f", toolDur))s: \(String(firstLine.prefix(160)))",
+                sessionId: sessionId
+            )
+        }
+
         // Compose finalOutput with truncation/offload.
         let maxToolResultLength = Self.kMaxToolResultChars
         var finalOutput: String
