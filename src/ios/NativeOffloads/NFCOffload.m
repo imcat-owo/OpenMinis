@@ -1971,7 +1971,7 @@ static int cmd_read_emv(int argc, char **argv, int stdout_fd, BOOL compact, BOOL
 
 static int cmd_lookup_tag(int argc, char **argv, int stdout_fd, BOOL compact, BOOL quiet) {
     NSArray<NSString *> *positional = noff_positional_args(argc, argv);
-    NSString *tagHex = positional.count >= 2 ? positional[1] : nil;
+    NSString *tagHex = positional.count >= 1 ? positional[0] : nil;
     if (!tagHex) {
         noff_emit_json(stdout_fd,
             noff_json_error(TOOL_NAME, @"lookup-tag", NOFF_ERR_INVALID_ARGS,
@@ -2002,7 +2002,7 @@ static int cmd_lookup_tag(int argc, char **argv, int stdout_fd, BOOL compact, BO
 
 static int cmd_lookup_aid(int argc, char **argv, int stdout_fd, BOOL compact, BOOL quiet) {
     NSArray<NSString *> *positional = noff_positional_args(argc, argv);
-    NSString *aidHex = positional.count >= 2 ? positional[1] : nil;
+    NSString *aidHex = positional.count >= 1 ? positional[0] : nil;
     if (!aidHex) {
         noff_emit_json(stdout_fd,
             noff_json_error(TOOL_NAME, @"lookup-aid", NOFF_ERR_INVALID_ARGS,
@@ -2036,7 +2036,7 @@ static BOOL searchMatch(NSString *haystack, NSString *needle) {
 // envelope so callers (or an LLM) can discover what's supported.
 static int cmd_search(int argc, char **argv, int stdout_fd, BOOL compact, BOOL quiet) {
     NSArray<NSString *> *positional = noff_positional_args(argc, argv);
-    NSString *query = positional.count >= 2 ? positional[1] : nil;
+    NSString *query = positional.count >= 1 ? positional[0] : nil;
     NSString *filter = noff_find_arg(argc, argv, "--kind"); // "tag", "aid", "alias" or nil (all)
 
     NSMutableArray *tags = [NSMutableArray new];
