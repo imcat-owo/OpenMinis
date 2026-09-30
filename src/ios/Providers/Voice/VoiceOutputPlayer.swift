@@ -211,6 +211,11 @@ final class VoiceOutputPlayer: NSObject, ObservableObject {
     private var playingSeq = -1         // seq currently playing (-1 = idle)
     /// Owner session of the unit currently playing (nil = idle).
     private var playingSessionId: String?
+    /// The unit currently playing. pumpPlayback REMOVES it from `queue` when
+    /// playback starts, so without this reference its text is unrecoverable —
+    /// stopAll(collectRemainder:) used to search `queue` by playingSeq and
+    /// always miss, silently dropping the playing sentence on a voice switch.
+    private var playingUnit: Unit?
 
     /// Owner id used by non-session read-aloud entry points (long-press menu,
     /// markdown preview) — never collides with a real session id.
@@ -367,11 +372,9 @@ final class VoiceOutputPlayer: NSObject, ObservableObject {
             // would violate the switch.
             var texts: [String] = []
             var owner: String?
-            if playingSeq >= 0 {
-                if let idx = queue.firstIndex(where: { $0.seq == playingSeq }) {
-                    texts.append(queue[idx].text)
-                    owner = queue[idx].ownerSessionId
-                }
+            if let playing = playingUnit {
+                texts.append(playing.text)
+                owner = playing.ownerSessionId
             }
             for u in queue where u.seq != playingSeq && !u.failed {
                 texts.append(u.text)
@@ -389,6 +392,7 @@ final class VoiceOutputPlayer: NSObject, ObservableObject {
         stopProgressTick(reset: true)
         playingSeq = -1
         playingSessionId = nil
+        playingUnit = nil
         isPlaying = false
         isPaused = false
         isSynthesizing = false
@@ -412,6 +416,7 @@ final class VoiceOutputPlayer: NSObject, ObservableObject {
             player = nil
             playingSeq = -1
             playingSessionId = nil
+            playingUnit = nil
             isPaused = false
             pumpPlayback()   // continue with other sessions' queued content
         }
@@ -798,6 +803,7 @@ final class VoiceOutputPlayer: NSObject, ObservableObject {
         queue.removeFirst()
         playingSeq = front.seq
         playingSessionId = front.ownerSessionId
+        playingUnit = front
         do {
             try activatePlaybackSession()
             let p = try AVAudioPlayer(data: audio)
@@ -820,6 +826,7 @@ final class VoiceOutputPlayer: NSObject, ObservableObject {
             logger.error("TTS play failed #\(front.seq): \(error.localizedDescription)")
             playingSeq = -1
             playingSessionId = nil
+            playingUnit = nil
             pumpPlayback()                              // try next
         }
         pumpPrefetch()
@@ -885,6 +892,7 @@ extension VoiceOutputPlayer: AVAudioPlayerDelegate {
             self.player = nil
             self.playingSeq = -1
             self.playingSessionId = nil
+            self.playingUnit = nil
             // Detect an UNDER-RUN: audio finished but the next unit isn't ready yet
             // (still generating) → a gap. Logged so the dynamic window can be tuned.
             let nextReady = self.queue.first?.audio != nil
