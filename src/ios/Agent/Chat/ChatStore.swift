@@ -3971,7 +3971,9 @@ actor ChatStore {
     /// - Never deletes more than `totalCount - pruneThreshold` rows.
     /// - Verifies the count-to-delete is positive and less than totalCount
     ///   (always keeps at least `pruneThreshold` messages).
-    /// - Also cleans up stale compact markers.
+    /// - Marks every pruned row dirty (op=delete) before deleting, like
+    ///   `deleteMessages` — otherwise the deletion never syncs and iCloud
+    ///   re-hydrates the rows on the next pull.
     func pruneOldMessages(sessionId: String) {
         // 1. Count total messages
         var countStmt: OpaquePointer?
@@ -3998,6 +4000,26 @@ actor ChatStore {
             logger.warning("[Prune] Unexpected deleteCount=\(deleteCount) total=\(totalCount) — skipping")
             return
         }
+
+        // 2.5 Mark the rows about to be pruned dirty for cloud deletion BEFORE
+        // the DELETE (mirrors deleteMessages). Uses the exact same selection
+        // as the DELETE below — id ASC is the final tiebreaker, so the id set
+        // is deterministic and identical.
+        let markSql = """
+            SELECT id FROM messages WHERE session_id = ?
+            ORDER BY sort_order ASC, created_at ASC, id ASC
+            LIMIT ?
+        """
+        var markStmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, markSql, -1, &markStmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(markStmt, 1, (sessionId as NSString).utf8String, -1, nil)
+            sqlite3_bind_int64(markStmt, 2, Int64(deleteCount))
+            while sqlite3_step(markStmt) == SQLITE_ROW {
+                let msgId = String(cString: sqlite3_column_text(markStmt, 0))
+                markDirty(recordType: "Message", recordId: msgId, operation: "delete")
+            }
+        }
+        sqlite3_finalize(markStmt)
 
         // 3. Delete exactly deleteCount oldest rows by id (immune to sort_order duplicates)
         let delSql = """
