@@ -750,12 +750,21 @@ final class VoiceOutputPlayer: NSObject, ObservableObject {
 
     /// Split text into ≤`synthSplitChunkChars` chunks on sentence/pause boundaries.
     nonisolated private static func splitForRetry(_ text: String) -> [String] {
+        splitText(text, maxChars: synthSplitChunkChars)
+    }
+
+    /// [TTS-11] The sentence-boundary splitter, generalized: chunks of at
+    /// most `maxChars`, cut only at sentence/pause punctuation once the
+    /// running chunk reaches the cap. Shared by the read-aloud retry path
+    /// and the voice-bubble composer (which splits UP FRONT at the
+    /// vendor's per-request character limit instead of failing whole).
+    nonisolated static func splitText(_ text: String, maxChars: Int) -> [String] {
         let enders: Set<Character> = ["。", "！", "？", ".", "!", "?", "；", ";", "，", ",", "、", "\n"]
         var out: [String] = []
         var cur = ""
         for ch in text {
             cur.append(ch)
-            if cur.count >= synthSplitChunkChars && enders.contains(ch) {
+            if cur.count >= maxChars && enders.contains(ch) {
                 out.append(cur); cur = ""
             }
         }
@@ -770,7 +779,9 @@ final class VoiceOutputPlayer: NSObject, ObservableObject {
     /// by plain concatenation. Sniff the actual bytes rather than trusting
     /// the requested format, so a vendor that ignores the request can't
     /// corrupt the join.
-    nonisolated private static func concatPieces(_ pieces: [Data]) -> Data {
+    /// [TTS-11] Internal (was private) so the voice-bubble composer joins
+    /// its per-limit chunks with the exact same rules.
+    nonisolated static func concatPieces(_ pieces: [Data]) -> Data {
         guard let first = pieces.first else { return Data() }
         guard pieces.count > 1 else { return first }
         if isWAV(first) { return concatWav(pieces) }

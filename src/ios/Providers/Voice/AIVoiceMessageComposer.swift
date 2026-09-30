@@ -66,7 +66,7 @@ enum AIVoiceMessageComposer {
         }
         guard !data.isEmpty else { return nil }
 
-        let ext = dur > 0 ? "wav" : "mp3"   // wav duration reads 0 for mp3
+        let ext = Self.isWAVData(data) ? "wav" : "mp3"
         let fname = "tts-\(UUID().uuidString.prefix(8)).\(ext)"
         let hostDir = AIChatViewModel.minisAttachmentsPersistentDir(for: sessionId)
         try? FileManager.default.createDirectory(at: hostDir, withIntermediateDirectories: true)
@@ -106,6 +106,39 @@ enum AIVoiceMessageComposer {
         return "/var/minis/\(host)\(sub)"
     }
 
+    /// [TTS-11] RIFF/WAVE magic check — the saved bubble's extension must
+    /// describe the actual bytes (the old code guessed from whether a
+    /// WAV duration could be read, which mislabels any vendor that
+    /// returns WAV where MP3 was requested and vice versa).
+    nonisolated static func isWAVData(_ data: Data) -> Bool {
+        guard data.count >= 12 else { return false }
+        return data.subdata(in: 0..<4) == Data("RIFF".utf8)
+            && data.subdata(in: 8..<12) == Data("WAVE".utf8)
+    }
+
+    /// [TTS-11] Synthesize `text` through `synth`, splitting UP FRONT at
+    /// `limit` characters on sentence boundaries when the text exceeds
+    /// it, then joining the pieces into one blob with the read-aloud
+    /// path's concat rules. A long reply used to go out as ONE request:
+    /// past the vendor's per-request cap (Doubao 1024, OpenAI 4096, …)
+    /// the whole bubble failed and the reply stayed text-only. Any
+    /// chunk failing fails the whole bubble, same as before.
+    private static func synthesizeChunked(
+        _ text: String, limit: Int,
+        _ synth: (String) async throws -> Data
+    ) async throws -> Data {
+        let chunks = VoiceOutputPlayer.splitText(text, maxChars: limit)
+        guard chunks.count > 1 else { return try await synth(text) }
+        var pieces: [Data] = []
+        for chunk in chunks {
+            let d = try await synth(chunk)
+            guard !d.isEmpty else { throw VoiceProviderError.noAudioData }
+            pieces.append(d)
+        }
+        logger.info("[AIVoice] long reply synthesized in \(chunks.count) chunks (limit \(limit))")
+        return VoiceOutputPlayer.concatPieces(pieces)
+    }
+
     /// Selected TTS service (kelivo layer) first, then the model group.
     /// [T-tts-key-status 09-13] 醒醒 7: the selected service's own failures now
     /// LOG LOUDLY with the reason (was a silent skip): "it speaks but shows
@@ -119,9 +152,12 @@ enum AIVoiceMessageComposer {
             if !TTSServiceStore.shared.hasAPIKey(for: service) {
                 logger.warning("[AIVoice] selected TTS service '\(service.name)' has NO stored key — falling to model group (check the Keychain save in the service editor)")
             } else if let provider = TTSProviderBridge.provider(for: service) {
-                let request = TTSProviderBridge.request(for: service, text: text)
                 do {
-                    let data = try await provider.synthesize(request)
+                    // [TTS-11] Split at THIS vendor's per-request limit
+                    // before sending, not after a failure.
+                    let data = try await synthesizeChunked(text, limit: service.kind.bubbleSynthesisCharLimit) { chunk in
+                        try await provider.synthesize(TTSProviderBridge.request(for: service, text: chunk))
+                    }
                     if !data.isEmpty {
                         logger.info("[AIVoice] synthesized via service '\(service.name)' (\(service.kind.rawValue))")
                         return (data, service.kind == .azure ? "mp3" : "wav")
@@ -136,8 +172,11 @@ enum AIVoiceMessageComposer {
         }
         for entry in VoiceProviderResolver.resolvedOutputCandidates() {
             guard let provider = VoiceProviderResolver.outputProvider(for: entry) else { continue }
-            if let data = try? await provider.synthesize(
-                VoiceOutputRequest(input: text, model: entry.model.id)), !data.isEmpty {
+            // [TTS-11] Group entries carry no vendor kind here — split at
+            // the conservative shared limit (safe for every vendor).
+            if let data = try? await synthesizeChunked(text, limit: 1000, { chunk in
+                try await provider.synthesize(VoiceOutputRequest(input: chunk, model: entry.model.id))
+            }), !data.isEmpty {
                 logger.info("[AIVoice] synthesized via model-group entry \(entry.model.displayName)")
                 return (data, VoiceProviderResolver.isSystemEntry(entry.providerInstanceId) ? "wav" : "mp3")
             }

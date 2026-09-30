@@ -140,6 +140,23 @@ enum TTSServiceKind: String, CaseIterable, Codable, Identifiable {
         }
     }
 
+    /// [TTS-11] Per-request character limit for bubble synthesis, used to
+    /// split a long reply BEFORE sending (the read-aloud path queues
+    /// segments; the bubble path used to send the whole text in one
+    /// request and hard-fail past the vendor's cap). Only limits that
+    /// are documented are listed per-vendor; everything else gets the
+    /// conservative shared default — splitting smaller than necessary
+    /// costs extra requests, splitting larger costs the whole bubble.
+    var bubbleSynthesisCharLimit: Int {
+        switch self {
+        case .minimax:    return 5000
+        case .openai:     return 4096
+        case .elevenlabs: return 5000
+        case .doubao:     return 1024
+        default:          return 1000
+        }
+    }
+
     /// Whether the vendor needs a compound credential ("appId;key;secret").
     var compoundCredentialFormat: String? {
         self == .xunfei
