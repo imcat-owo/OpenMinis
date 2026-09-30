@@ -38,35 +38,59 @@ enum ModelsDevAPI {
         // Phase 1: Exact API base match (with/without /v1)
         let candidates = normalizedCandidates(for: baseURL)
         logger.info("models.dev phase1: candidates=\(candidates)")
+        var exactMatches: [ModelsDevProvider] = []
         for (_, provider) in registry {
             guard let api = provider.api, !api.isEmpty else { continue }
             let normalizedAPI = stripTrailingSlash(api)
             for candidate in candidates {
                 if candidate == normalizedAPI {
-                    let models = buildModels(from: provider)
-                    logger.info("Exact match \(provider.id) (api=\(api)) — \(models.count) models")
-                    return models
+                    logger.info("Exact match \(provider.id) (api=\(api)) — \(provider.models.count) models")
+                    exactMatches.append(provider)
+                    break
                 }
             }
         }
-
-        // Phase 2: Hostname fallback — match by full hostname when exact path doesn't match
-        let inputHost = extractHost(from: baseURL)
-        logger.info("models.dev phase2: inputHost=\(inputHost ?? "nil")")
-        if let inputHost {
-            for (_, provider) in registry {
-                guard let api = provider.api, !api.isEmpty,
-                      let providerHost = extractHost(from: api) else { continue }
-                if inputHost == providerHost {
-                    let models = buildModels(from: provider)
-                    logger.info("Host match \(provider.id) (host=\(providerHost), api=\(api)) — \(models.count) models")
-                    return models
+        // Phase 2: Hostname fallback — match by host + effective port when no
+        // exact path matches. (Host-only matching merged providers that share
+        // a domain, e.g. llmgateway.io serves several unrelated entries; the
+        // same key must always resolve to the same provider.)
+        if exactMatches.isEmpty {
+            let inputKey = hostKey(from: baseURL)
+            logger.info("models.dev phase2: inputHost=\(inputKey ?? "nil")")
+            if let inputKey {
+                for (_, provider) in registry {
+                    guard let api = provider.api, !api.isEmpty,
+                          let providerKey = hostKey(from: api) else { continue }
+                    if inputKey == providerKey {
+                        logger.info("Host match \(provider.id) (host=\(providerKey), api=\(api)) — \(provider.models.count) models")
+                        exactMatches.append(provider)
+                    }
                 }
             }
+        }
+        if let winner = pickDeterministicWinner(from: exactMatches, for: baseURL) {
+            return buildModels(from: winner)
         }
 
         logger.info("No models.dev match for base URL: \(baseURL)")
         return []
+    }
+
+    /// When several registry entries match the same address, pick one
+    /// deterministically: the entry with the most models wins (best coverage
+    /// for capability lookup), ties broken by provider id.
+    private static func pickDeterministicWinner(
+        from matches: [ModelsDevProvider], for baseURL: String
+    ) -> ModelsDevProvider? {
+        guard !matches.isEmpty else { return nil }
+        if matches.count > 1 {
+            let ids = matches.map(\.id).sorted()
+            logger.warning("models.dev: \(matches.count) entries match \(baseURL) — picking \(ids)")
+        }
+        return matches.max { a, b in
+            if a.models.count != b.models.count { return a.models.count < b.models.count }
+            return a.id > b.id
+        }
     }
 
     private static func buildModels(from provider: ModelsDevProvider) -> [LLMModel] {
@@ -93,10 +117,15 @@ enum ModelsDevAPI {
         }
     }
 
-    /// Extract the full hostname from a URL string.
-    /// e.g. "https://coding.dashscope.aliyuncs.com/v1" → "coding.dashscope.aliyuncs.com"
-    private static func extractHost(from urlString: String) -> String? {
-        URL(string: stripTrailingSlash(urlString))?.host?.lowercased()
+    /// Host identity of an address: lowercased host + effective port.
+    /// Host-only comparison merges providers that share a domain but listen
+    /// on different ports.
+    private static func hostKey(from urlString: String) -> String? {
+        guard let url = URL(string: stripTrailingSlash(urlString)),
+              let host = url.host?.lowercased() else { return nil }
+        let scheme = (url.scheme ?? "https").lowercased()
+        let port = url.port ?? (scheme == "http" ? 80 : 443)
+        return "\(host):\(port)"
     }
 
     // MARK: - Public: Enrich a single model with models.dev data
