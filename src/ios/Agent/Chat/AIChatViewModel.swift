@@ -2522,9 +2522,10 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
                 agentHistory.removeSubrange((keepUpTo + 1)...)
             }
             // Trim persisted messages.
-            // Phase B: agentHistory is no longer mutated by compact, so agentHistory.count
-            // is 1:1 with the DB row count; passing it as keepCount is semantically correct.
-            let persistedKeepCount = agentHistory.count
+            // Phase B: agentHistory is no longer mutated by compact, but memory-only
+            // entries (orphan tool_use placeholders, takeover screenshots) are never
+            // persisted, so keepCount must count persisted entries only.
+            let persistedKeepCount = agentHistory.filter { $0.dbMessageId != nil }.count
             let hasMarker = cachedLatestMarker != nil
             logger.info("[DeleteAfter] edit path: sid=\(sessionId?.prefix(8) ?? "nil") keepCount=\(persistedKeepCount) hasMarker=\(hasMarker)")
             if let sessionId {
@@ -3546,7 +3547,7 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
 
         // Trim persisted messages to match.
         // Phase B: agentHistory is no longer mutated by compact, so keepCount is valid.
-        let persistedKeepCount = agentHistory.count
+        let persistedKeepCount = agentHistory.filter { $0.dbMessageId != nil }.count
         let hasMarkerResend = cachedLatestMarker != nil
         logger.info("[DeleteAfter] resend path: sid=\(sessionId?.prefix(8) ?? "nil") keepCount=\(persistedKeepCount) hasMarker=\(hasMarkerResend)")
         if let sessionId {
@@ -3672,7 +3673,7 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
 
         logger.info("[DeleteDiag] deleteFromMessage idx=\(idx) deleted=\(deletedCount) messagesLeft=\(self.messages.count) historyLeft=\(self.agentHistory.count)")
 
-        let persistedKeepCount = agentHistory.count
+        let persistedKeepCount = agentHistory.filter { $0.dbMessageId != nil }.count
         if let sessionId {
             Task { @MainActor [weak self] in
                 await ChatStore.shared.deleteMessagesAfter(sessionId: sessionId, keepCount: persistedKeepCount)
@@ -3952,7 +3953,7 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
             if let ei = dropFromEntry, ei < agentHistory.count {
                 agentHistory.removeSubrange(ei...)
             }
-            let keepCount = agentHistory.count
+            let keepCount = agentHistory.filter { $0.dbMessageId != nil }.count
             logger.info("[RerunToolBlock] degenerate (no precedingUser) → truncate from assistant start tuId=\(targetToolUseId.prefix(12)) keepCount=\(keepCount)")
             if let sessionId {
                 Task { await ChatStore.shared.deleteMessagesAfter(sessionId: sessionId, keepCount: keepCount) }
@@ -4045,7 +4046,7 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
 
         // 3. Persist: delete rows after the trimmed assistant entry, then
         //    rewrite the trimmed entry's row in place.
-        let persistedKeepCount = agentHistory.count
+        let persistedKeepCount = agentHistory.filter { $0.dbMessageId != nil }.count
         logger.info("[RerunToolBlock] sub-message cut tuId=\(targetToolUseId.prefix(12)) keepCount=\(persistedKeepCount) trimmedRow=\(trimmedEntryDbId?.prefix(8) ?? "nil")")
         if let sessionId {
             // [T-ios-retry-from-tool-block-oob] Snapshot the whole trimmed entry
