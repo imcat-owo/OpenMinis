@@ -52,6 +52,25 @@ struct RetryRunIntent: AppIntent {
             eagerKeepAliveArmed: eagerResult.armed,
             eagerKeepAliveSkippedReason: eagerResult.skipReason
         )
+        // Every exit from here must resolve the pending record and the
+        // eager activity entry. The paths below that complete (or hand the
+        // pending record to the async completion Task) do their own
+        // cleanup and set pendingHandedOff; any OTHER exit — above all the
+        // user cancelling the message picker, whose requestDisambiguation
+        // throws — falls to this defer. Without it, a cancelled retry left
+        // the pending record for the next launch to report as "Automation
+        // may not have completed", plus a phantom running entry in the
+        // activity tracker for the rest of the process's life.
+        var pendingHandedOff = false
+        defer {
+            if !pendingHandedOff {
+                ShortcutRunTracker.markCompleted(recordId: pendingId, reason: "throwOrCancel.cleanup")
+                if eagerResult.armed {
+                    SessionActivityTracker.shared.setInactive(session.id,
+                        source: "RetryRunIntent.eager.throwCleanup")
+                }
+            }
+        }
 
         let (vm, isNew) = ViewModelCache.shared.getOrCreate(for: session.id)
         // [T-shortcut-duplicate-completion-notification] See SendPromptIntent.
@@ -77,6 +96,7 @@ struct RetryRunIntent: AppIntent {
             // work — clear the pending marker so the next foreground scan
             // doesn't flag this as orphaned.
             ShortcutRunTracker.markCompleted(recordId: pendingId, reason: "earlyReturn.noUserMessages")
+            pendingHandedOff = true
             // [T-ios-session-status-mismatch] The eager setActive above added
             // this session id to the tracker before we knew we'd bail. The VM
             // sink pairs setActive/setInactive on $isProcessing transitions,
@@ -135,6 +155,7 @@ struct RetryRunIntent: AppIntent {
         guard chosenEntity.sessionId == session.id,
               chosenEntity.index >= 1, chosenEntity.index <= userMessages.count else {
             ShortcutRunTracker.markCompleted(recordId: pendingId, reason: "earlyReturn.messageSessionMismatch")
+            pendingHandedOff = true
             if eagerResult.armed {
                 SessionActivityTracker.shared.setInactive(session.id,
                     source: "RetryRunIntent.eager.messageSessionMismatch")
@@ -201,6 +222,7 @@ struct RetryRunIntent: AppIntent {
 
             // [T-shortcuts-diag-and-pending] Loop finished.
             ShortcutRunTracker.markCompleted(recordId: pendingId, reason: "waitForResult.done")
+            pendingHandedOff = true
 
             let responseText = SendPromptIntent.extractResponseText(from: vm)
 
@@ -250,6 +272,8 @@ struct RetryRunIntent: AppIntent {
                 )
             }
         }
+        // The pending record now belongs to the Task above.
+        pendingHandedOff = true
 
         let result = SendPromptResult(
             sessionId: sid,
