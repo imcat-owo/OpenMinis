@@ -13,8 +13,6 @@ struct SoulSettingsView: View {
     /// `data:image/png;base64,…` URI, or empty for the default sparkle.
     @State private var icon: String = SoulMetadata.default.icon
     @State private var showIconOptions = false
-    @State private var showEmojiPrompt = false
-    @State private var emojiDraft = ""
     @State private var showPhotoPicker = false
     @State private var photoItem: PhotosPickerItem? = nil
     @State private var iconError: String? = nil
@@ -132,8 +130,6 @@ struct SoulSettingsView: View {
         }
         .modifier(SoulIconEditing(
             icon: $icon,
-            showEmojiPrompt: $showEmojiPrompt,
-            emojiDraft: $emojiDraft,
             showPhotoPicker: $showPhotoPicker,
             photoItem: $photoItem,
             iconError: $iconError
@@ -210,17 +206,11 @@ struct SoulSettingsView: View {
             // dialog needs the anchor; the alerts and the photo picker are
             // centered/full-screen and stay at page level.
             .confirmationDialog(AppLocalized("Change icon"), isPresented: $showIconOptions) {
-                Button(AppLocalized("Choose Emoji…")) {
-                    emojiDraft = (icon.isEmpty || SoulIconImage.isDataURI(icon)) ? "" : icon
-                    showEmojiPrompt = true
-                }
                 Button(AppLocalized("Choose Image…")) { showPhotoPicker = true }
                 if !icon.isEmpty {
                     Button(AppLocalized("Use Default"), role: .destructive) { icon = "" }
                 }
                 Button(AppLocalized("Cancel"), role: .cancel) {}
-            } message: {
-                Text(AppLocalized("Images must have a transparent background (PNG). Photos without transparency can't be used."))
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(name.isEmpty ? "我的小家" : name)
@@ -363,136 +353,6 @@ struct SoulSettingsView: View {
     }
 }
 
-private extension Character {
-    /// True for characters that are genuinely emoji.
-    ///
-    /// `isEmoji` alone is not enough: Unicode gives ASCII digits and `#`/`*`
-    /// the Emoji property (they are the bases of keycap sequences like 1️⃣), so
-    /// a bare "1" would pass. The rule below accepts a scalar only when it
-    /// either defaults to emoji presentation, or is part of a multi-scalar
-    /// cluster (a keycap, flag or ZWJ sequence), which is what excludes plain
-    /// digits and letters while keeping 1️⃣ and 🇯🇵.
-    var isEmojiGlyph: Bool {
-        guard let first = unicodeScalars.first else { return false }
-        if unicodeScalars.count > 1 {
-            return unicodeScalars.contains { $0.properties.isEmoji }
-        }
-        return first.properties.isEmojiPresentation
-    }
-}
-
-/// [T-soul-custom-icon] Emoji picker for the Soul identity icon: two rows of
-/// suggestions plus a free-form field.
-///
-/// The suggestions are all **Unicode 6.0 (2010)** characters — the original
-/// emoji block that every platform has shipped for over a decade. That matters
-/// because this value syncs: an icon set on iOS is read by the Android build
-/// and rendered with the system font there. Newer additions (🫡 U+1FAE1, 2021;
-/// 🩻 2022) render as a blank box on anything that has not updated its font,
-/// which would look like data loss rather than a style choice. Skin-toned and
-/// ZWJ-sequence emoji are avoided for the same reason.
-///
-/// Chosen for "an agent's face": expressive enough to read as a persona at
-/// 18pt in the chat header, and visually distinct from each other at that size.
-private struct SoulEmojiPickerSheet: View {
-    @Binding var draft: String
-    let onPick: (String) -> Void
-    @Environment(\.dismiss) private var dismiss
-
-    private static let suggestions: [[String]] = [
-        ["✨", "🤖", "🐱", "🦊", "🐧", "🦉", "🌟", "⚡"],
-        ["🧠", "💡", "🔮", "🚀", "🌊", "🍀", "🎯", "🐳"],
-    ]
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 20) {
-                // Live preview at the size the chat header actually uses, so
-                // the user judges the glyph at its real scale rather than at
-                // whatever the field happens to render.
-                // Same circular treatment as the settings card, so the preview
-                // shows what the icon will actually look like in place.
-                SoulIconView(icon: draft, size: SoulIconImage.renderPoints)
-                    .frame(width: 52, height: 52)
-                    .background(Circle().fill(Color.secondary.opacity(0.12)))
-                    .padding(.top, 8)
-
-                ForEach(Array(Self.suggestions.enumerated()), id: \.offset) { _, row in
-                    HStack(spacing: 10) {
-                        ForEach(row, id: \.self) { emoji in
-                            Button {
-                                // Tap fills the field AND becomes the value —
-                                // "点击和自动填入".
-                                draft = emoji
-                            } label: {
-                                Text(emoji)
-                                    .font(.system(size: 28))
-                                    .frame(width: 38, height: 38)
-                                    .background(
-                                        Circle().fill(draft == emoji
-                                                      ? MinisTheme.accent.opacity(0.22)
-                                                      : Color.secondary.opacity(0.10))
-                                    )
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-
-                TextField("✨", text: $draft)
-                    .font(.system(size: 28))
-                    .multilineTextAlignment(.center)
-                    .frame(height: 52)
-                    .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
-                    // Every keystroke is normalized to a single emoji: typing
-                    // a second one REPLACES the first, and non-emoji input is
-                    // dropped outright rather than rejected later with an
-                    // error the user has to read.
-                    .onChange(of: draft) { newValue in
-                        let cleaned = Self.normalize(newValue, previous: draft)
-                        if cleaned != newValue { draft = cleaned }
-                    }
-
-                Text(AppLocalized("Tap a suggestion or type one emoji. These render the same on iOS and Android."))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 20)
-            .navigationTitle(AppLocalized("Choose Emoji"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(AppLocalized("Cancel")) { dismiss() }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(AppLocalized("Set")) {
-                        onPick(draft)
-                        dismiss()
-                    }
-                    .disabled(draft.isEmpty)
-                }
-            }
-        }
-        .presentationDetents([.height(380)])
-    }
-
-    /// Keep at most one emoji, preferring whatever the user just added.
-    ///
-    /// Works on `Character` (grapheme clusters) so a flag or ZWJ sequence —
-    /// several scalars rendering as one glyph — survives as a single unit
-    /// instead of being sliced apart.
-    static func normalize(_ input: String, previous: String) -> String {
-        let emoji = input.filter(\.isEmojiGlyph)
-        guard let last = emoji.last else { return "" }
-        // Taking the LAST emoji is what makes a second keystroke replace the
-        // first rather than being ignored.
-        return String(last)
-    }
-}
-
 /// [T-soul-custom-icon] The icon picker's presentation chain, lifted out of
 /// `SoulSettingsView.body`.
 ///
@@ -502,21 +362,12 @@ private struct SoulEmojiPickerSheet: View {
 /// solver a fresh, small expression to work on.
 private struct SoulIconEditing: ViewModifier {
     @Binding var icon: String
-    @Binding var showEmojiPrompt: Bool
-    @Binding var emojiDraft: String
     @Binding var showPhotoPicker: Bool
     @Binding var photoItem: PhotosPickerItem?
     @Binding var iconError: String?
 
     func body(content: Content) -> some View {
         content
-            // A sheet, not an alert: an alert body only takes text fields and
-            // buttons, so the suggestion grid could not live in one.
-            .sheet(isPresented: $showEmojiPrompt) {
-                SoulEmojiPickerSheet(draft: $emojiDraft) { chosen in
-                    icon = chosen
-                }
-            }
             .photosPicker(isPresented: $showPhotoPicker, selection: $photoItem,
                           matching: .images, photoLibrary: .shared())
             // Single-parameter form: the two-parameter `onChange` is iOS 17+,
@@ -532,22 +383,6 @@ private struct SoulIconEditing: ViewModifier {
             } message: {
                 Text(iconError ?? "")
             }
-    }
-
-    /// Accept exactly one emoji.
-    ///
-    /// Counting `Character`s (grapheme clusters), not scalars, so a flag or a
-    /// skin-toned/ZWJ emoji — several scalars rendering as one glyph — counts
-    /// as one. Empty input clears back to the default rather than storing a
-    /// blank.
-    private func applyEmojiDraft() {
-        let trimmed = emojiDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { icon = ""; return }
-        guard trimmed.count == 1 else {
-            iconError = AppLocalized("Please enter exactly one emoji.")
-            return
-        }
-        icon = trimmed
     }
 
     /// Load, validate and normalize a picked photo into the stored form.
