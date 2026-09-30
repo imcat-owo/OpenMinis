@@ -452,16 +452,16 @@ struct AppearanceStudioView: View {
         .modifier(CompactListSections())
         .onChange(of: wallpaperItem) { item in
             guard let item else { return }
-            Task { await importImage(item) { studio.setWallpaper($0, for: wallpaperScope) } }
+            Task { await importImage(item, downsampleTo: 2200) { studio.setWallpaper($0, for: wallpaperScope) } }
         }
         .onChange(of: userAvatarItem) { item in
             guard let item else { return }
-            Task { await importImage(item) { studio.setUserAvatar($0) } }
+            Task { await importImage(item, downsampleTo: 512) { studio.setUserAvatar($0) } }
         }
         .onChange(of: assistantAvatarItem) { item in
             guard let item else { return }
             Task {
-                await importImage(item) { image in
+                await importImage(item, downsampleTo: 512) { image in
                     do { try studio.setAssistantAvatar(image) }
                     catch { errorText = error.localizedDescription }
                 }
@@ -470,7 +470,7 @@ struct AppearanceStudioView: View {
         .onChange(of: iconItem) { item in
             guard let item, let slot = iconPickSlot else { return }
             Task {
-                await importImage(item) { image in
+                await importImage(item, downsampleTo: 512) { image in
                     studio.setIcon(image, for: slot.id)
                 }
                 iconItem = nil
@@ -479,16 +479,16 @@ struct AppearanceStudioView: View {
         }
         .onChange(of: thinkingCardItem) { item in
             guard let item else { return }
-            Task { await importImage(item) { studio.setThinkingCardImage($0) } }
+            Task { await importImage(item, downsampleTo: 1400) { studio.setThinkingCardImage($0) } }
         }
         .onChange(of: inputBarItem) { item in
             guard let item else { return }
-            Task { await importImage(item) { studio.setInputBarImage($0) } }
+            Task { await importImage(item, downsampleTo: 1400) { studio.setInputBarImage($0) } }
         }
         .onChange(of: categoryImageItem) { item in
             guard let item, let key = categoryImageKey else { return }
             Task {
-                await importImage(item) { studio.setCategoryImage($0, for: key) }
+                await importImage(item, downsampleTo: 256) { studio.setCategoryImage($0, for: key) }
                 categoryImageItem = nil
                 categoryImageKey = nil
             }
@@ -565,6 +565,7 @@ struct AppearanceStudioView: View {
 
     @MainActor
     private func importImage(_ item: PhotosPickerItem,
+                             downsampleTo maxEdge: CGFloat,
                              apply: @escaping @MainActor (UIImage) -> Void) async {
         defer {
             wallpaperItem = nil
@@ -574,8 +575,12 @@ struct AppearanceStudioView: View {
             inputBarItem = nil
             categoryImageItem = nil
         }
+        // [PIC-4] Downsample-decode to the target's final size instead of
+        // expanding the full photo: the apply step never needs more pixels
+        // than it stores (avatar 512 / category 256 / cards 1400 /
+        // wallpaper 2200 — same caps the setters use).
         guard let data = try? await item.loadTransferable(type: Data.self),
-              let image = UIImage(data: data) else {
+              let image = ThumbnailCache.downsampledImage(from: data, maxEdge: maxEdge) else {
             errorText = "选中的图读不出来。"
             return
         }

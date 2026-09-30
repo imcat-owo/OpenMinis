@@ -118,6 +118,37 @@ final class ThumbnailCache {
 
     // MARK: - Direct (for UIImage at URL)
 
+    /// [PIC-4] Decode `data` to at most `maxEdge` on the long side WITHOUT
+    /// decoding the full image first: read the pixel size from the file
+    /// header, and only when it exceeds the cap, ask ImageIO for a
+    /// thumbnail (which downsamples during decode). Used by the image
+    /// pickers (wallpaper / avatar / cards): the old path ran
+    /// `UIImage(data:)` on the full file, so a 48 MP photo expanded to
+    /// ~200 MB of bitmap before the apply step scaled it back down.
+    /// Animated sources flatten to the first frame — correct here, since
+    /// every picker target is a still image.
+    static func downsampledImage(from data: Data, maxEdge: CGFloat) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+            return UIImage(data: data)
+        }
+        if let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+           let w = props[kCGImagePropertyPixelWidth] as? CGFloat,
+           let h = props[kCGImagePropertyPixelHeight] as? CGFloat,
+           max(w, h) <= maxEdge {
+            return UIImage(data: data)
+        }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxEdge,
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return UIImage(data: data)
+        }
+        return UIImage(cgImage: cgImage)
+    }
+
     /// Load a thumbnail from a file URL.
     func loadThumbnail(
         for url: URL,

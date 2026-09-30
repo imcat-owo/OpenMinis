@@ -393,8 +393,11 @@ private struct SoulIconEditing: ViewModifier {
     /// Load, validate and normalize a picked photo into the stored form.
     private func applyPickedImage(_ item: PhotosPickerItem) async {
         defer { photoItem = nil }
+        // [PIC-4] Downsample-decode to the stored 512px cap instead of
+        // expanding the full photo first (same treatment as the
+        // Appearance studio picker).
         guard let data = try? await item.loadTransferable(type: Data.self),
-              let image = UIImage(data: data) else {
+              let image = ThumbnailCache.downsampledImage(from: data, maxEdge: 512) else {
             await MainActor.run { iconError = AppLocalized("That image couldn't be read.") }
             return
         }
