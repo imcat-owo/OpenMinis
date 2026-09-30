@@ -376,12 +376,26 @@ extension BackupImporter {
                 report.skipped += 1
                 continue
             }
-            try? fm.removeItem(at: to)
+            // Stage next to the destination and swap, rather than
+            // removeItem-then-copyItem (the pattern restoreFileTree's
+            // comment documents): deleting first meant a failed copy —
+            // disk full, IO error — left the user's file simply GONE.
+            // A failure here now throws, so the category fails and the
+            // rollback snapshot taken for .memory is actually used;
+            // counting it as "unreadable" and carrying on bypassed both
+            // protections.
+            let staged = dst.appendingPathComponent(".restore-\(UUID().uuidString).tmp")
             do {
-                try fm.copyItem(at: from, to: to)
+                try fm.copyItem(at: from, to: staged)
+                if fm.fileExists(atPath: to.path) {
+                    _ = try fm.replaceItemAt(to, withItemAt: staged)
+                } else {
+                    try fm.moveItem(at: staged, to: to)
+                }
                 report.imported += 1
             } catch {
-                report.unreadable += 1
+                try? fm.removeItem(at: staged)
+                throw error
             }
         }
 
