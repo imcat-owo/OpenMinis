@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import CryptoKit
 
 // MARK: - Voice-output preference (persisted)
 
@@ -566,7 +567,7 @@ final class VoiceOutputPlayer: NSObject, ObservableObject {
                         let (d, u) = try await Self.synthWithFailover(
                             text: unit.text, candidates: candidates, seq: seq)
                         data = d; used = u
-                        self.storeCachedAudio(text: unit.text, candidateKey: u.key, audio: d)
+                        self.storeCachedAudio(text: unit.text, candidate: u, audio: d)
                     }
                     guard let audio = data, let chosen = used else { return }
                     if Task.isCancelled { return }
@@ -612,39 +613,65 @@ final class VoiceOutputPlayer: NSObject, ObservableObject {
     // Replaying the same reply (or re-reading the same sentence) skips the
     // vendor call entirely. Cleared when the switch turns OFF. Bounded so a
     // long reading session can't grow it without limit.
+    //
+    // [TTS-7] Two levels now: the memory LRU in front of TTSDiskCache, so
+    // replays survive relaunch. Both levels share ONE key — a SHA-256
+    // fingerprint over candidate + model + voice + speed + format +
+    // tuning extras + text, built from the candidate's actual request.
+    // (The old key used `text.hashValue`, which is randomized per launch
+    // and ignores tuning: change the speed and the stale audio still hit.)
 
     private static let synthCacheLimit = 64
     private var synthCache: [String: (data: Data, candidateKey: String)] = [:]
     private var synthCacheOrder: [String] = []
 
-    private func cacheKey(text: String, candidateKey: String) -> String {
-        "\(candidateKey)|\(text.hashValue)"
+    private func cacheKey(text: String, candidate: Candidate) -> String {
+        let req = candidate.makeRequest(text)
+        var parts: [String] = [
+            candidate.key,
+            req.model ?? "",
+            req.voice ?? "",
+            req.speed.map { String(format: "%.3f", Double($0)) } ?? "",
+            req.responseFormat.rawValue,
+        ]
+        for k in req.extras.keys.sorted() { parts.append("\(k)=\(req.extras[k] ?? "")") }
+        parts.append(text)
+        let digest = SHA256.hash(data: Data(parts.joined(separator: "|").utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 
     /// Find cached audio for this text among the given candidates (sticky
     /// candidate first — it's been moved to the front by the caller).
+    /// Memory first, then disk (a disk hit refills the memory level).
     private func cachedAudio(for text: String, candidates: [Candidate]) -> (data: Data, candidate: Candidate)? {
         guard VoiceOutputPreferences.cacheNetworkAudio else { return nil }
         for c in candidates {
-            if let hit = synthCache[cacheKey(text: text, candidateKey: c.key)] {
+            let k = cacheKey(text: text, candidate: c)
+            if let hit = synthCache[k] {
                 return (hit.data, c)
+            }
+            if let disk = TTSDiskCache.load(key: k) {
+                synthCache[k] = (disk, c.key)
+                synthCacheOrder.append(k)
+                return (disk, c)
             }
         }
         return nil
     }
 
-    private func storeCachedAudio(text: String, candidateKey: String, audio: Data) {
+    private func storeCachedAudio(text: String, candidate: Candidate, audio: Data) {
         guard VoiceOutputPreferences.cacheNetworkAudio, !audio.isEmpty else { return }
-        let k = cacheKey(text: text, candidateKey: candidateKey)
+        let k = cacheKey(text: text, candidate: candidate)
         if synthCache[k] != nil {
             if let i = synthCacheOrder.firstIndex(of: k) { synthCacheOrder.remove(at: i) }
         }
-        synthCache[k] = (audio, candidateKey)
+        synthCache[k] = (audio, candidate.key)
         synthCacheOrder.append(k)
         while synthCacheOrder.count > Self.synthCacheLimit {
             let oldest = synthCacheOrder.removeFirst()
             synthCache.removeValue(forKey: oldest)
         }
+        TTSDiskCache.store(key: k, data: audio)
     }
 
     // MARK: - Synthesis with retry / split fallback
