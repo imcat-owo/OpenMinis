@@ -12,5 +12,6 @@ enum DeviceTools {
     static func registerAll(into registry: ToolRegistry) async throws {
         try await ClipboardDeviceTool.register(into: registry)
         try await LocationDeviceTool.register(into: registry)
+        try await NotificationDeviceTool.register(into: registry)
     }
 }
