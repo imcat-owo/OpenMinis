@@ -1048,6 +1048,12 @@ struct BackupSettingsView: View {
                     atPath: stable.path)[.size] as? Int64) ?? summary.totalBytes
                 let names = BackupDestinations.selectedFolders.map(\.name)
                     + RcloneRemoteStore.enabledRemotes.map(\.name)
+                let entries: [(id: String, name: String)] =
+                    BackupDestinations.selectedFolders.map {
+                        (BackupTransferStatus.mountKey($0.id), $0.name)
+                    } + RcloneRemoteStore.enabledRemotes.map {
+                        (BackupTransferStatus.remoteKey($0.name), $0.name)
+                    }
                 // Mirror transfer events into this run's record. The live rows
                 // disappear when the run ends, so without this the log jumped
                 // from "Export complete" straight to a finished backup with no
@@ -1059,7 +1065,7 @@ struct BackupSettingsView: View {
                 }
                 BackupHistory.shared.log(runId, String(
                     localized: "Sending \(ByteCountFormatter.string(fromByteCount: packageBytes, countStyle: .file)) to \(names.count) destination(s)…"))
-                BackupTransferStatus.shared.begin(names: names, totalBytes: packageBytes)
+                BackupTransferStatus.shared.begin(entries: entries, totalBytes: packageBytes)
                 // [T-ios-backup-transient-success] This run's result belongs to
                 // the visit the user is in right now. Marking it presented here
                 // means opening a history record mid-run and coming back does

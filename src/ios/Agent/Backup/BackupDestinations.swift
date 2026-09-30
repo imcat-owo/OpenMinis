@@ -214,7 +214,9 @@ enum BackupDestinations {
                 guard let root = target.root else {
                     let message = AppLocalized("This folder isn't available right now.")
                     await MainActor.run {
-                        BackupTransferStatus.shared.finish(name: target.name, error: message)
+                        BackupTransferStatus.shared.finish(
+                            id: BackupTransferStatus.mountKey(target.id),
+                            name: target.name, error: message)
                     }
                     results.append(.init(id: target.id, folderName: target.name,
                                          destination: nil,
@@ -225,15 +227,19 @@ enum BackupDestinations {
                     let dest = try BackupDelivery.copyToMountedFolder(packageURL, into: root)
                     logger.info("[Backup] delivered to '\(target.name)': \(dest.lastPathComponent)")
                     await MainActor.run {
-                        BackupTransferStatus.shared.finish(name: target.name, error: nil)
+                        BackupTransferStatus.shared.finish(
+                            id: BackupTransferStatus.mountKey(target.id),
+                            name: target.name, error: nil)
                     }
                     results.append(.init(id: target.id, folderName: target.name,
                                          destination: dest, error: nil))
                 } catch {
                     logger.error("[Backup] delivery to '\(target.name)' failed: \(error.localizedDescription)")
                     await MainActor.run {
-                        BackupTransferStatus.shared.finish(name: target.name,
-                                                           error: error.localizedDescription)
+                        BackupTransferStatus.shared.finish(
+                            id: BackupTransferStatus.mountKey(target.id),
+                            name: target.name,
+                            error: error.localizedDescription)
                     }
                     results.append(.init(id: target.id, folderName: target.name,
                                          destination: nil, error: error.localizedDescription))
@@ -273,13 +279,16 @@ enum BackupDestinations {
                                               remote: r, backupId: backupId,
                                               progress: { p in
                         Task { @MainActor in
-                            BackupTransferStatus.shared.update(name: r.name,
-                                                               bytesSent: p.bytesSent)
+                            BackupTransferStatus.shared.update(
+                                id: BackupTransferStatus.remoteKey(r.name),
+                                name: r.name, bytesSent: p.bytesSent)
                         }
                     })
                     logger.info("[Backup] uploaded to remote '\(r.name)'")
                     await MainActor.run {
-                        BackupTransferStatus.shared.finish(name: r.name, error: nil)
+                        BackupTransferStatus.shared.finish(
+                            id: BackupTransferStatus.remoteKey(r.name),
+                            name: r.name, error: nil)
                     }
                     out.append(.init(id: UUID(), folderName: r.name,
                                      destination: URL(fileURLWithPath: "\(r.name):\(r.path)"),
@@ -288,8 +297,10 @@ enum BackupDestinations {
                 } catch {
                     logger.error("[Backup] upload to '\(r.name)' failed: \(error.localizedDescription)")
                     await MainActor.run {
-                        BackupTransferStatus.shared.finish(name: r.name,
-                                                           error: error.localizedDescription)
+                        BackupTransferStatus.shared.finish(
+                            id: BackupTransferStatus.remoteKey(r.name),
+                            name: r.name,
+                            error: error.localizedDescription)
                     }
                     out.append(.init(id: UUID(), folderName: r.name,
                                      destination: nil, error: error.localizedDescription,

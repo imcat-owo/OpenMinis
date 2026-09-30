@@ -14,7 +14,11 @@ final class BackupTransferStatus: ObservableObject {
     static let shared = BackupTransferStatus()
 
     struct Destination: Identifiable {
-        let id = UUID()
+        /// Stable row key, namespaced by destination kind ("mount:<uuid>" /
+        /// "remote:<name>"). Mount names and remote names live in independent
+        /// namespaces and CAN collide, so rows are keyed by this — never by
+        /// the display name alone.
+        let id: String
         let name: String
         var bytesSent: Int64 = 0
         var totalBytes: Int64 = 0
@@ -79,10 +83,13 @@ final class BackupTransferStatus: ObservableObject {
 
     private init() {}
 
-    func begin(names: [String], totalBytes: Int64) {
-        destinations = names.map { .init(name: $0, totalBytes: totalBytes) }
+    static func mountKey(_ id: UUID) -> String { "mount:\(id.uuidString)" }
+    static func remoteKey(_ name: String) -> String { "remote:\(name)" }
+
+    func begin(entries: [(id: String, name: String)], totalBytes: Int64) {
+        destinations = entries.map { .init(id: $0.id, name: $0.name, totalBytes: totalBytes) }
         cleanupNote = nil
-        isTransferring = !names.isEmpty
+        isTransferring = !entries.isEmpty
         ticker?.invalidate()
         guard isTransferring else { return }
         ticker = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -90,17 +97,17 @@ final class BackupTransferStatus: ObservableObject {
         }
     }
 
-    func update(name: String, bytesSent: Int64) {
-        guard let i = destinations.firstIndex(where: { $0.name == name }) else { return }
+    func update(id: String, name: String, bytesSent: Int64) {
+        guard let i = destinations.firstIndex(where: { $0.id == id }) else { return }
         destinations[i].bytesSent = bytesSent
 
         // Throttled copy into the record, marked transient so each line
         // replaces the previous one instead of stacking one row every 5s.
         let now = Date()
-        if let last = lastLogged[name], now.timeIntervalSince(last) < Self.logInterval {
+        if let last = lastLogged[id], now.timeIntervalSince(last) < Self.logInterval {
             return
         }
-        lastLogged[name] = now
+        lastLogged[id] = now
         let d = destinations[i]
         let sent = ByteCountFormatter.string(fromByteCount: d.bytesSent, countStyle: .file)
         let total = ByteCountFormatter.string(fromByteCount: d.totalBytes, countStyle: .file)
@@ -114,8 +121,8 @@ final class BackupTransferStatus: ObservableObject {
     /// Mark a destination finished. `startedAt` is reset for the NEXT one so
     /// its rate is not skewed by time spent on this one — uploads run in
     /// sequence, not in parallel.
-    func finish(name: String, error: String?) {
-        guard let i = destinations.firstIndex(where: { $0.name == name }) else { return }
+    func finish(id: String, name: String, error: String?) {
+        guard let i = destinations.firstIndex(where: { $0.id == id }) else { return }
         destinations[i].finishedAt = Date()
         destinations[i].error = error
         if error == nil { destinations[i].bytesSent = destinations[i].totalBytes }
