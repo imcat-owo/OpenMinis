@@ -282,7 +282,9 @@ extension AIChatViewModel {
                     role: agentHistory[mi].role,
                     parts: newParts,
                     isInterrupted: agentHistory[mi].isInterrupted,
-                    reasoningContent: agentHistory[mi].reasoningContent
+                    reasoningContent: agentHistory[mi].reasoningContent,
+                    reasoningEcho: agentHistory[mi].reasoningEcho,
+                    dbMessageId: agentHistory[mi].dbMessageId
                 )
             }
         }
