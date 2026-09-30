@@ -868,6 +868,11 @@ private struct SkillFileDetailView: View {
 
     @ObservedObject private var store = SkillStore.shared
     @State private var content: String = ""
+    /// Content as loaded (or last saved) — the dirty baseline. The old code
+    /// set `hasChanges` on ANY content change, including the programmatic
+    /// assignment in onAppear, so opening a non-empty file immediately lit
+    /// Save with nothing edited.
+    @State private var originalContent: String = ""
     @State private var hasChanges = false
     @State private var saveError: String?
 
@@ -879,7 +884,7 @@ private struct SkillFileDetailView: View {
         TextEditor(text: $content)
             .font(.system(.caption, design: .monospaced))
             .padding(.horizontal, 8)
-            .onChange(of: content) { _ in hasChanges = true }
+            .onChange(of: content) { newValue in hasChanges = newValue != originalContent }
             .overlay(alignment: .bottom) {
                 if let saveError {
                     Text(saveError)
@@ -900,13 +905,16 @@ private struct SkillFileDetailView: View {
                 }
             }
             .onAppear {
-                content = store.readSkillFile(skillId, relativePath: relativePath) ?? ""
+                let loaded = store.readSkillFile(skillId, relativePath: relativePath) ?? ""
+                originalContent = loaded
+                content = loaded
             }
     }
 
     private func save() {
         do {
             try store.writeSkillFile(skillId, relativePath: relativePath, content: content)
+            originalContent = content
             hasChanges = false
             saveError = nil
         } catch {
