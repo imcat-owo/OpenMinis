@@ -4628,17 +4628,47 @@ private func parseJSONToDynamicContent(_ json: String) -> MessageResponse.Conten
     }
     var result: MessageResponse.Content.Input = [:]
     for (key, value) in dict {
-        if let s = value as? String {
-            result[key] = .string(s)
-        } else if let n = value as? NSNumber {
-            if CFBooleanGetTypeID() == CFGetTypeID(n) {
-                result[key] = .bool(n.boolValue)
-            } else {
-                result[key] = .integer(n.intValue)
-            }
+        if let v = dynamicContentValue(value) {
+            result[key] = v
         }
     }
     return result
+}
+
+/// Recursive scalar/collection mapping for `parseJSONToDynamicContent`,
+/// mirroring the R3-053 fix in AnthropicAgentProvider: nested objects and
+/// arrays are converted recursively, decimals keep their fractional part,
+/// NSNull maps to .null — values are no longer silently dropped (nested)
+/// or truncated (decimals forced through `intValue`).
+private func dynamicContentValue(_ value: Any) -> MessageResponse.Content.DynamicContent? {
+    if let s = value as? String {
+        return .string(s)
+    }
+    if let n = value as? NSNumber {
+        if CFBooleanGetTypeID() == CFGetTypeID(n) {
+            return .bool(n.boolValue)
+        }
+        // Keep decimals as doubles; whole numbers as integers.
+        let d = n.doubleValue
+        if d == d.rounded(), !d.isInfinite, abs(d) < Double(Int.max) {
+            return .integer(n.intValue)
+        }
+        return .double(d)
+    }
+    if let dict = value as? [String: Any] {
+        var out: [String: MessageResponse.Content.DynamicContent] = [:]
+        for (k, v) in dict {
+            if let cv = dynamicContentValue(v) { out[k] = cv }
+        }
+        return .dictionary(out)
+    }
+    if let arr = value as? [Any] {
+        return .array(arr.compactMap { dynamicContentValue($0) })
+    }
+    if value is NSNull {
+        return .null
+    }
+    return nil
 }
 
 private func parseJSONToDict(_ json: String) -> [String: Any] {
