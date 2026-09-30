@@ -1948,6 +1948,12 @@ thinking 填/描/强调不必手写。贴包后跟 `colorsLight.accent` / 聊天
 
             let relPath = relativeTo.isEmpty ? name : "\(relativeTo)/\(name)"
 
+            // Zip-slip (same guard as ZIP import): a crafted entry name like
+            // `a/../../other-skill/x` must never write outside this skill's
+            // own directory.
+            if relPath.hasPrefix("/")
+                || relPath.split(separator: "/").contains("..") { continue }
+
             if type == "dir" {
                 // Recurse into subdirectory
                 let subRemote = remotePath.isEmpty ? name : "\(remotePath)/\(name)"
