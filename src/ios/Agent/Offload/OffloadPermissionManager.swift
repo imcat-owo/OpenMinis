@@ -148,6 +148,14 @@ final class OffloadPermissionManager: ObservableObject {
 
     @Published var pendingRequest: PermissionRequest?
 
+    /// Requests waiting behind `pendingRequest`. Concurrent tool calls can
+    /// ask at the same time (TaskGroup fan-out); with a single slot the
+    /// second ask overwrote the first, whose continuation then had no path
+    /// back — respond() and the timeout both key off the current slot — so
+    /// the first caller hung forever. Excess asks now queue FIFO and are
+    /// presented one at a time.
+    private var pendingQueue: [PermissionRequest] = []
+
     /// Per-session "Ask Once" grants: [sessionId: Set<commandName>]
     private var sessionGrants: [String: Set<String>] = [:]
 
@@ -259,16 +267,7 @@ final class OffloadPermissionManager: ObservableObject {
                     fullCommand: fullCommand,
                     continuation: continuation
                 )
-                self.pendingRequest = request
-
-                // 30s timeout
-                Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 30_000_000_000)
-                    if self.pendingRequest?.id == request.id {
-                        self.pendingRequest = nil
-                        continuation.resume(returning: false)
-                    }
-                }
+                self.enqueue(request)
             }
 
             if allowed {
@@ -286,12 +285,47 @@ final class OffloadPermissionManager: ObservableObject {
         }
     }
 
+    // MARK: - Request Queue
+
+    /// Present `request` now if no prompt is up, else park it behind the
+    /// current one. The 30s timeout starts when a request is PRESENTED, not
+    /// when it is enqueued — a queued request the user hasn't seen yet must
+    /// not time out unseen.
+    private func enqueue(_ request: PermissionRequest) {
+        guard pendingRequest == nil else {
+            pendingQueue.append(request)
+            return
+        }
+        present(request)
+    }
+
+    private func present(_ request: PermissionRequest) {
+        pendingRequest = request
+
+        // 30s timeout
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
+            if self.pendingRequest?.id == request.id {
+                self.finishCurrent(resumingWith: false)
+            }
+        }
+    }
+
+    /// Resolve the presented request and promote the next queued one, if any.
+    private func finishCurrent(resumingWith allowed: Bool) {
+        guard let request = pendingRequest else { return }
+        pendingRequest = nil
+        request.continuation.resume(returning: allowed)
+        if !pendingQueue.isEmpty {
+            present(pendingQueue.removeFirst())
+        }
+    }
+
     // MARK: - UI Response
 
     func respond(to requestId: String, allowed: Bool) {
         guard let request = pendingRequest, request.id == requestId else { return }
-        pendingRequest = nil
-        request.continuation.resume(returning: allowed)
+        finishCurrent(resumingWith: allowed)
     }
 
     // MARK: - Session Reset
