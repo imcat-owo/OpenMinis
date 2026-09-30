@@ -43,18 +43,48 @@ final class ConfigRegistry {
     /// children (`<base>.<id>.<sub>`). Returns nil for unknown paths.
     func resolveField(path: String) -> ConfigField? {
         if let f = fields[path] { return f }
-        // Collection child lookup: split into [base, id, leaf] (leaf
-        // may itself contain dots, e.g. `models.<uuid>.modality.video`).
-        let segments = path.split(separator: ".", maxSplits: 2,
-                                  omittingEmptySubsequences: true).map(String.init)
-        guard segments.count == 3 else { return nil }
-        let base = segments[0]
-        let id = segments[1]
+        // Collection child lookup. The child id is matched against the
+        // collection's known ids rather than derived by splitting on
+        // dots: ids may themselves contain dots (a model entry id is
+        // "<instance>/<model id>", and model ids like "gpt-4.1" carry
+        // dots), so splitting `models.<uuid>/gpt-4.1.displayName` after
+        // the second dot mangles the id and the lookup always missed.
+        // The longest matching id wins so an id that is a prefix of
+        // another still resolves to the right child.
+        guard let dot = path.firstIndex(of: ".") else { return nil }
+        let base = String(path[..<dot])
         guard let coll = collections[base] else { return nil }
-        // The leaf path the collection produces matches its full child
-        // path; we filter by suffix so callers don't need to know the
-        // collection's leaf naming scheme.
-        return coll.fields(for: id).first { $0.path == path }
+        let remainder = String(path[path.index(after: dot)...])
+        let prefix = "\(base)."
+        let childId = coll.childIds()
+            .filter { remainder == $0 || remainder.hasPrefix("\($0).") }
+            .max(by: { $0.count < $1.count })
+        guard let childId else { return nil }
+        let childFields = coll.fields(for: childId)
+        if remainder == childId {
+            // Bare child read (`get models.<id>`): no single field owns
+            // this path, so synthesize a read-only aggregate of every
+            // child field, mirroring the snapshot the remove path takes.
+            // Fields that refuse to read (hidden secrets) are skipped.
+            return ReadOnlyField(
+                path: path,
+                displayName: coll.displayName,
+                description: "All fields of \(base) entry \(childId).",
+                valueSchema: .json,
+                reader: {
+                    var obj: [String: ConfigValue] = [:]
+                    for f in childFields where f.access != .hidden {
+                        guard let v = try? f.read() else { continue }
+                        let leaf = f.path.hasPrefix(prefix + childId + ".")
+                            ? String(f.path.dropFirst(prefix.count + childId.count + 1))
+                            : f.path
+                        obj[leaf] = v
+                    }
+                    return .object(obj)
+                }
+            )
+        }
+        return childFields.first { $0.path == path }
     }
 
     func collection(basePath: String) -> ConfigCollection? {
