@@ -244,6 +244,24 @@ final class OpenAIAgentProvider: AgentProvider {
                 }
 
                 do {
+                    // Flush the accumulated tool calls as .toolCallComplete
+                    // events, exactly once. The finish_reason branch does it on
+                    // a real finish reason; the [DONE] branch does it when the
+                    // stream ends without one (some providers omit
+                    // finish_reason, or send it as ""). An empty accumulator is
+                    // a no-op, so calling from both paths is safe.
+                    func flushToolCalls(source: String) {
+                        for (_, entry) in toolCallAccum.sorted(by: { $0.key < $1.key }) {
+                            let args = Self.parseJsonToDict(entry.json)
+                            if args.isEmpty {
+                                Self.diagEmptyToolArgs(rawJson: entry.json, toolName: entry.name, toolId: entry.id, model: self.model.id, source: source)
+                            }
+                            continuation.yield(.toolCallComplete(
+                                id: entry.id, name: entry.name, args: args, metadata: nil
+                            ))
+                        }
+                        toolCallAccum.removeAll()
+                    }
                     for try await line in lineStream {
                         diagLineCount += 1
                         if diagFirstLines.count < diagCaptureLimit {
@@ -255,6 +273,10 @@ final class OpenAIAgentProvider: AgentProvider {
                             // Flush the think parser's tail (cross-chunk tag
                             // fragment / withheld trailing whitespace).
                             emitParsed(thinkParser.finishTurn())
+                            // Flush tool calls too: the stream may end without
+                            // a finish_reason, but the .done reason below can
+                            // still be .toolUse.
+                            flushToolCalls(source: "chatCompletions.done")
                             if sawReasoningFieldEver || !reasoningContent.isEmpty {
                                 continuation.yield(.reasoningContent(reasoningContent))
                             }
@@ -394,16 +416,7 @@ final class OpenAIAgentProvider: AgentProvider {
                             emitParsed(thinkParser.finishTurn())
                             logger.info("SSE finish_reason=\(fr) hasToolCalls=\(hasToolCalls) emittedTextStart=\(emittedTextStart) reasoningLen=\(reasoningContent.count)")
                             // Emit completed tool calls
-                            for (_, entry) in toolCallAccum.sorted(by: { $0.key < $1.key }) {
-                                let args = Self.parseJsonToDict(entry.json)
-                                if args.isEmpty {
-                                    Self.diagEmptyToolArgs(rawJson: entry.json, toolName: entry.name, toolId: entry.id, model: self.model.id, source: "chatCompletions.finishReason")
-                                }
-                                continuation.yield(.toolCallComplete(
-                                    id: entry.id, name: entry.name, args: args, metadata: nil
-                                ))
-                            }
-                            toolCallAccum.removeAll()
+                            flushToolCalls(source: "chatCompletions.finishReason")
 
                             // Emit accumulated reasoning content from thinking models.
                             // Also emit when the field appeared on the wire as an empty
