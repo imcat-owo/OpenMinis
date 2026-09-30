@@ -10,8 +10,8 @@
 // The pure logic under test (encode rules, host blocking, source sniffing,
 // containment) is reproduced here rather than imported, because the shipping
 // types pull in AIChatViewModel and the whole app graph. To stop that copy
-// from silently drifting, `testSourcesMatchShippingCode` re-extracts the two
-// tables that matter — the blocked-host ranges and the stored-size cap — from
+// from silently drifting, `testSourcesMatchShippingCode` re-extracts the
+// table that matters — the blocked-host ranges — from
 // SoulStore.swift itself and fails if they no longer agree.
 
 import Foundation
@@ -48,7 +48,6 @@ let builtinsSource = (try? String(contentsOfFile: builtinsPath, encoding: .utf8)
 
 // MARK: - Logic under test (mirrors SoulIconSource)
 
-let maxStoredChars = 64 * 1024
 let dataURIPrefix = "data:image/png;base64,"
 
 func isProbablyBareBase64(_ s: String) -> Bool {
@@ -272,31 +271,32 @@ try! fm.createDirectory(at: impostor, withIntermediateDirectories: true)
 check("a sibling whose name prefixes the root is refused",
       !isInsideAnyRoot(impostor.appendingPathComponent("x.png"), roots: roots))
 
-print("\nSize caps")
-checkEq("stored cap matches Android's MAX_DATA_URI_CHARS", maxStoredChars, 64 * 1024)
+print("\nNo stored-size cap — [avatar] the stored icon is never refused for size")
+// The 64 KB stored cap (Android TOO_LARGE parity) was removed by user
+// request: the avatar is a normal photo-library pick and must not be
+// turned away for being large. `encode` bounds only the stored RESOLUTION
+// (512px, never upscaling); the encoded length is whatever it is.
 let encodedReal = dataURIPrefix + makePNG(width: 96, height: 96, alpha: true).base64EncodedString()
-check("a real 96px icon fits well under the cap (\(encodedReal.count) chars)",
-      encodedReal.count < maxStoredChars)
-check("an oversized data URI would be refused",
-      (dataURIPrefix + String(repeating: "A", count: maxStoredChars)).count > maxStoredChars)
+check("a real icon still encodes to a data URI (\(encodedReal.count) chars)",
+      encodedReal.hasPrefix(dataURIPrefix))
+check("shipping code has no stored-char cap left",
+      !soulSource.contains("maxStoredChars"))
+check("shipping encode has no size refusal",
+      !soulSource.contains("case tooLarge(Int)"))
 
 print("\nShipping code agreement — the copies above must not drift")
 check("SoulIconSource exists in SoulStore.swift", soulSource.contains("enum SoulIconSource"))
-check("stored cap is 64 KB in shipping code",
-      soulSource.contains("maxStoredChars = 64 * 1024"))
 check("resolution reuses SoulIconImage.encode (rules are not duplicated)",
       soulSource.contains("SoulIconImage.encode(image)"))
-// [T-soul-icon-size-cap / #299] Cap must live IN encode so the Settings
-// picker path cannot bypass it (config/resolve previously checked alone).
-check("SoulIconImage.encode enforces maxStoredChars (picker + config share it)",
-      soulSource.contains("uri.count <= SoulIconSource.maxStoredChars"))
-check("encode rejects with tooLarge (Android TOO_LARGE parity)",
-      soulSource.contains("case tooLarge(Int)") || soulSource.contains(".failure(.tooLarge"))
-check("SoulSettingsView surfaces tooLarge distinctly from unreadable",
+// [avatar] The stored-size cap is GONE from encode, so neither the Settings
+// picker nor the config path can refuse an image for its size.
+check("SoulIconImage.encode has no stored-size cap (picker + config share it)",
+      !soulSource.contains("SoulIconSource.maxStoredChars"))
+check("SoulSettingsView has no tooLarge branch",
       ((try? String(contentsOfFile: URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         .appendingPathComponent("Views/Settings/SoulSettingsView.swift").path,
-        encoding: .utf8)) ?? "").contains(".failure(.tooLarge)"))
+        encoding: .utf8)) ?? "").contains(".failure(.tooLarge)") == false)
 for needle in ["case 0, 10, 127:", "169 where b == 254", "172 where (16...31)",
                "192 where b == 168", "100 where (64...127)"] {
     check("blocked-host table still contains `\(needle)`", soulSource.contains(needle))
@@ -312,7 +312,7 @@ for needle in ["data:image/png;base64,iVBORw0KGgo",
                "/var/minis/attachments/icon.png",
                "https://example.com/icon.png",
                "bare base64",
-               "96×96",
+               "512×512",
                "--file /tmp/icon-value.json",
                "\\\"<image>\\\""] {
     check("help mentions `\(needle)`", builtinsSource.contains(needle))

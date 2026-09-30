@@ -9,12 +9,16 @@ import UIKit
 /// Xcode group, not a synchronized one — a new file there means editing
 /// `project.pbxproj`, which several sessions contend over.
 enum SoulIconImage {
-    /// Rendered edge, in points, of the largest surface that shows the icon
+    /// Largest rendered edge, in points, of any surface that shows the icon
     /// (the Soul Settings preview card; the chat header draws it at 18pt).
     static let renderPoints: CGFloat = 32
-    /// Stored edge in pixels — the render size at @3x, so the icon is crisp
-    /// on every current device and never larger than it needs to be.
-    static let storedPixels: CGFloat = renderPoints * 3
+    /// Stored edge in pixels. Deliberately far above any render surface
+    /// (the largest draws at 54pt, i.e. 162px @3x): this is the normal
+    /// avatar treatment — keep the picked photo at a useful resolution,
+    /// bounded only so the stored value stays a sane size for SOUL.md.
+    /// Smaller sources are never upscaled. There is NO stored-size
+    /// refusal: no image is turned away for being too large.
+    static let storedPixels: CGFloat = 512
 
     private static let prefix = "data:image/png;base64,"
 
@@ -32,16 +36,11 @@ enum SoulIconImage {
     /// problem the renderer already solves.
     enum RejectionReason: Error {
         case unreadable
-        /// Encoded data URI exceeds `SoulIconSource.maxStoredChars`.
-        /// Same gate Android's `SoulIcon.encode` applies via `TOO_LARGE` /
-        /// `MAX_DATA_URI_CHARS`, so the Settings picker and the config path
-        /// cannot diverge on what is storable. Associated value is the
-        /// refused URI's character count (for config diagnostics).
-        case tooLarge(Int)
     }
 
-    /// Normalize a picked image into the stored form: square, downscaled,
-    /// PNG, base64 data URI.
+    /// Normalize a picked image into the stored form: square, downscaled
+    /// to at most `storedPixels`, PNG, base64 data URI. No size limit is
+    /// applied to the result — a large photo is stored, never refused.
     ///
     /// Accepts opaque and transparent images alike — anything UIKit can
     /// decode. Re-encoding to PNG regardless keeps one stored format (so
@@ -65,14 +64,7 @@ enum SoulIconImage {
         }
 
         guard let png = scaled.pngData() else { return .failure(.unreadable) }
-        let uri = prefix + png.base64EncodedString()
-        // Cap lives HERE so every caller — Settings picker and SoulIconSource
-        // alike — refuses the same oversized payload. Mirrors Android
-        // `SoulIcon.encode` checking `MAX_DATA_URI_CHARS`.
-        guard uri.count <= SoulIconSource.maxStoredChars else {
-            return .failure(.tooLarge(uri.count))
-        }
-        return .success(uri)
+        return .success(prefix + png.base64EncodedString())
     }
 
     /// Decode a stored data URI back to an image. Returns nil for an emoji
@@ -107,9 +99,8 @@ enum SoulIconImage {
 ///
 /// The picker path is `SoulIconImage.encode` and nothing here re-implements
 /// it: every image source below decodes to a `UIImage` and then goes through
-/// that one function, so square cropping, the 96px pixel cap, PNG re-encoding
-/// and the stored-size cap (`maxStoredChars`) are shared by construction
-/// rather than by copy.
+/// that one function, so square cropping, the stored-pixel bound and PNG
+/// re-encoding are shared by construction rather than by copy.
 ///
 /// Why resolution happens HERE and not in the field's `writer`:
 /// `ConfigField.write` is synchronous and `@MainActor`, but an https source
@@ -121,8 +112,9 @@ enum SoulIconImage {
 /// promise something the write then fails to deliver.
 enum SoulIconSource {
     /// Ceiling on what any source may expand to in memory before decoding.
-    /// Generous next to a real icon (a 96px PNG is ~1-4 KB) and small enough
-    /// that a hostile or mistaken input cannot exhaust memory.
+    /// Generous next to a real icon and small enough that a hostile or
+    /// mistaken input cannot exhaust memory. This bounds the raw INPUT a
+    /// tool call may hand over; the stored avatar itself has no size limit.
     static let maxSourceBytes = 8 * 1024 * 1024
 
     /// Hard cap on the base64 text accepted as a literal argument. Bounds the
@@ -131,11 +123,6 @@ enum SoulIconSource {
 
     /// Wall-clock budget for an http(s) fetch.
     static let downloadTimeout: TimeInterval = 15
-
-    /// Cap on the stored data URI. Mirrors Android's
-    /// `SoulIcon.MAX_DATA_URI_CHARS` — the value syncs between platforms, so
-    /// a value one side would refuse to load must not be storable on the other.
-    static let maxStoredChars = 64 * 1024
 
     enum SourceError: LocalizedError {
         case tooLarge(String)
@@ -147,7 +134,6 @@ enum SoulIconSource {
         case blockedHost(String)
         case httpStatus(Int)
         case network(String)
-        case storedTooLarge(Int)
 
         var errorDescription: String? {
             switch self {
@@ -172,8 +158,6 @@ enum SoulIconSource {
                 return "the server returned HTTP \(code)"
             case .network(let msg):
                 return "download failed: \(msg)"
-            case .storedTooLarge(let n):
-                return "the encoded icon is \(n) chars, over the \(maxStoredChars) limit"
             }
         }
     }
@@ -204,7 +188,7 @@ enum SoulIconSource {
 
         // Already stored form — re-encode anyway rather than trusting it, so a
         // hand-written data URI gets the same alpha/size treatment as a picked
-        // image and cannot smuggle in an oversized or opaque payload.
+        // image and cannot smuggle in an unvalidated payload.
         let data: Data
         if s.hasPrefix("data:") {
             data = try decodeDataURI(s)
@@ -234,12 +218,9 @@ enum SoulIconSource {
         }
 
         // The shared rules. Not reimplemented — this is the picker's function.
-        // Size cap is inside encode (parity with Android), so a success is
-        // already within maxStoredChars; map tooLarge for the config diagnostic.
+        // No stored-size check: encode never refuses an image for its size.
         switch SoulIconImage.encode(image) {
         case .failure(.unreadable): throw SourceError.unreadable
-        case .failure(.tooLarge(let n)):
-            throw SourceError.storedTooLarge(n)
         case .success(let uri):
             return uri
         }
@@ -502,7 +483,7 @@ struct SoulMetadata: Equatable {
     /// This lives in SOUL.md frontmatter, NOT in the body, and that is
     /// load-bearing: `identitySection()` builds the system prompt from a
     /// fixed whitelist (`name` / `style` / body) and never serializes
-    /// frontmatter wholesale, so a ~20 KB data URI here costs zero prompt
+    /// frontmatter wholesale, so a data URI here costs zero prompt
     /// tokens. Putting it in the body would both burn context and count
     /// against the body length limit.
     var icon: String

@@ -125,7 +125,8 @@ extension ConfigRegistry {
         // resource, a path inside the minis directories, or an http(s) URL.
         // Whatever the source, it is decoded and pushed through the SAME
         // `SoulIconImage.encode` the Settings picker uses — square crop,
-        // 96px cap, PNG, and maxStoredChars — and the RESULT is stored inline.
+        // 512px stored bound, PNG — and the RESULT is stored inline. There is
+        // no stored-size refusal on this path either.
         //
         // An address is an import source only, never the stored value: keeping
         // a path would leave the icon dangling the moment the attachment is
@@ -174,7 +175,7 @@ extension ConfigRegistry {
                 + "when the source has it.\n"
                 + "\n"
                 + "PROCESSING — identical to picking an image in Settings → Soul: "
-                + "the image is centre-cropped to a square, downscaled to 96×96 and re-encoded as PNG, "
+                + "the image is centre-cropped to a square, downscaled to at most 512×512 and re-encoded as PNG, "
                 + "then stored inline. An address is only an import source — "
                 + "it is never persisted, so the file can be deleted afterwards and the icon survives "
                 + "attachment cleanup and syncing to other devices.\n"
@@ -221,10 +222,6 @@ extension ConfigRegistry {
                 // Already a stored icon: either the bridge resolved an image
                 // source into one, or a caller handed us the final form.
                 if SoulIconImage.isDataURI(trimmed) {
-                    guard trimmed.count <= SoulIconSource.maxStoredChars else {
-                        throw ConfigError.invalidValue(
-                            "encoded icon is \(trimmed.count) chars, over the \(SoulIconSource.maxStoredChars) limit")
-                    }
                     try updateMetadata { $0.icon = trimmed }
                     return
                 }
