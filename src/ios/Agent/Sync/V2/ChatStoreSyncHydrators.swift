@@ -1155,7 +1155,21 @@ enum ChatStoreSyncHydrators {
         //   suffix deterministic — re-merging the same pair never produces
         //   a third copy, so the file can't grow on each sync round.
         var merged: [String: MemoryEntry] = [:]
-        for e in localEntries { merged[e.timestamp] = e }
+        // Seed locals with the same conflict handling used for remote
+        // entries below: two local entries can share a timestamp with
+        // different content, and a plain keyed insert would silently
+        // collapse one of them before the merged set is written back.
+        for e in localEntries {
+            if let existing = merged[e.timestamp] {
+                if existing.content != e.content {
+                    let hashSuffix = String(abs(e.content.hashValue) % 100_000_000)
+                    let conflictKey = "\(e.timestamp)#\(hashSuffix)"
+                    if merged[conflictKey] == nil { merged[conflictKey] = e }
+                }
+            } else {
+                merged[e.timestamp] = e
+            }
+        }
         for e in remoteEntries {
             if let existing = merged[e.timestamp] {
                 if existing.content != e.content {
@@ -1181,7 +1195,9 @@ enum ChatStoreSyncHydrators {
         // re-push the (unchanged) day, and every peer's apply would do the
         // same — a perpetual cross-device echo of identical content. The
         // union can only grow, so equal counts means no new entries.
-        if newCount == 0, fm.fileExists(atPath: url.path) {
+        // `<=` (not `==`) so a count that somehow shrank can never rewrite
+        // the day file with fewer entries than it already has.
+        if newCount <= 0, fm.fileExists(atPath: url.path) {
             return
         }
         let allEntries = Array(merged.values)
