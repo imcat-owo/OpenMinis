@@ -293,6 +293,10 @@ final class MCPStore: ObservableObject {
         // createdAt (older build / CLI-added) gets a stable value assigned ONCE
         // on first sight and persisted back, so it doesn't churn on every read.
         let now = Date().timeIntervalSince1970
+        // Raw copy of the on-disk map, patched in place below when a stable
+        // createdAt is assigned — so the write-back preserves entries that
+        // failed to decode instead of dropping them from the file.
+        var patchedRaw = rawServers
         for (name, rawEntry) in rawServers.sorted(by: { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }) {
             do {
                 let entryData = try JSONSerialization.data(withJSONObject: rawEntry)
@@ -303,6 +307,10 @@ final class MCPStore: ObservableObject {
                 } else {
                     createdAt = now
                     assignedCreatedAt = true
+                    if var rawDict = rawEntry as? [String: Any] {
+                        rawDict["createdAt"] = now
+                        patchedRaw[name] = rawDict
+                    }
                 }
                 configs.append(MCPServerConfig(
                     id: name,
@@ -325,11 +333,18 @@ final class MCPStore: ObservableObject {
 
         // Persist the stable-assigned createdAt back to disk ONCE so subsequent
         // reads don't re-stamp (and so peers converge on the same value via the
-        // whole-file LWW sync). Done after building `configs` to avoid mutating
-        // `servers` mid-read; save() reads from the assigned configs.
+        // whole-file LWW sync). Write the patched RAW map rather than going
+        // through save(): save() rebuilds the file from decoded configs only,
+        // which would permanently delete any malformed entries skipped above.
         if assignedCreatedAt {
-            servers = configs
-            save()
+            var newRoot = root
+            newRoot["mcpServers"] = patchedRaw
+            if let out = try? JSONSerialization.data(withJSONObject: newRoot,
+                                                      options: [.prettyPrinted, .sortedKeys]) {
+                try? fm.createDirectory(at: serversFileURL.deletingLastPathComponent(),
+                                        withIntermediateDirectories: true)
+                try? out.write(to: serversFileURL, options: .atomic)
+            }
         }
         AppLogger(category: "MCPStore").info("[Load] \(configs.count) server(s) from \(serversFileURL.path)")
         return configs
