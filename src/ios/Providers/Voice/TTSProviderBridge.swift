@@ -182,6 +182,12 @@ final class TTSPreviewPlayer: NSObject, AVAudioPlayerDelegate {
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer,
                                                 successfully flag: Bool) {
         Task { @MainActor in
+            // Only the current player's finish releases the slot + intent.
+            // This callback hops through a Task, so it can land AFTER a new
+            // preview has already replaced `self.player` — clearing
+            // unconditionally would kill the new preview mid-playback (its
+            // only strong reference) and end an intent it doesn't own.
+            guard self.player === player else { return }
             self.player = nil
             AudioSessionCoordinator.shared.end(.replyTTS)
         }
