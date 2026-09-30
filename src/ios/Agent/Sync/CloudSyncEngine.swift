@@ -335,6 +335,32 @@ final class CloudSyncEngine: ObservableObject {
         for task in tasks { await task.value }
     }
 
+    /// Processing tasks spawned for `.sentRecordZoneChanges` batches, with
+    /// the same registration discipline as the fetch side above. The send
+    /// processing runs detached (it awaits a ChatStore clear-dirty loop
+    /// before its MainActor tally hop), so `engine.sendChanges()` returning
+    /// does NOT mean the results have been applied — `forceFullSync` must
+    /// drain these before reading `fullSyncUploadCounts`, or the tally is
+    /// read early (counts lost) or late (counts land in the NEXT run's
+    /// bucket, which the nil-guard then swallows or misattributes).
+    private let sendProcessingLock = NSLock()
+    nonisolated(unsafe) private var sendProcessingTasks: [Task<Void, Never>] = []
+
+    nonisolated private func registerSendProcessing(_ task: Task<Void, Never>) {
+        sendProcessingLock.lock()
+        sendProcessingTasks.append(task)
+        sendProcessingLock.unlock()
+    }
+
+    /// Wait for every send-processing task registered so far to finish.
+    private func awaitSendProcessing() async {
+        sendProcessingLock.lock()
+        let tasks = sendProcessingTasks
+        sendProcessingTasks = []
+        sendProcessingLock.unlock()
+        for task in tasks { await task.value }
+    }
+
     /// Thread-safe storage for pre-computed records, accessible from nonisolated delegate callbacks.
     private let pendingChanges = PendingRecordChanges()
     /// Guard against concurrent sendChanges() calls — CKSyncEngine asserts if re-entered.
@@ -779,6 +805,13 @@ final class CloudSyncEngine: ObservableObject {
 
         // 7. Push all dirty records (including our SyncDevice record queued by start())
         await triggerSend()
+
+        // The .sentRecordZoneChanges processing is detached: sendChanges()
+        // returning only means the engine sent, not that the results (and
+        // the tally below) have been applied. Drain it before reading the
+        // bucket, or uploads are under-counted — or land after the bucket
+        // is reset and get credited to the NEXT full sync instead.
+        await awaitSendProcessing()
 
         // Summary of what actually got uploaded during this full-sync window.
         // Warn about any category with zero uploads — that's the signature of
@@ -2911,7 +2944,9 @@ extension CloudSyncEngine: CKSyncEngineDelegate {
         case .sentRecordZoneChanges(let sentChanges):
             // Process results off the main thread to avoid blocking UI.
             // Only hop to MainActor for state mutations (cacheServerRecord, etc.).
-            Task { [weak self] in
+            // Registered synchronously (like the fetch side) so forceFullSync
+            // can drain it before reading the upload tally.
+            let sendProcessingTask = Task { [weak self] in
                 guard let self else { return }
                 let batchStart = CFAbsoluteTimeGetCurrent()
                 let savedCount = sentChanges.savedRecords.count
@@ -3188,6 +3223,7 @@ extension CloudSyncEngine: CKSyncEngineDelegate {
                     }
                 }
             }
+            registerSendProcessing(sendProcessingTask)
 
         case .willFetchChanges:
             Task { @MainActor [weak self] in
