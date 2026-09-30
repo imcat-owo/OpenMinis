@@ -107,6 +107,13 @@ final class AntigravityAgentProvider: AgentProvider {
     private var isClaude: Bool { model.id.lowercased().contains("claude") }
 
     private func convertMessages(_ messages: [AgentMessage]) -> [[String: Any]] {
+        // [IMG-3] Vision-capability gate (assembly layer): a text-only
+        // model gets text placeholders instead of raw image bytes — same
+        // rule the OpenAI path has always applied.
+        let messages = AgentMessage.gatedForVisionCapability(
+            messages,
+            supportsImageInput: model.capabilities.supportedModalities.contains(.imageInput)
+        )
         var toolNameMap: [String: String] = [:]
         for msg in messages {
             for part in msg.parts {
@@ -160,14 +167,16 @@ final class AntigravityAgentProvider: AgentProvider {
                         parts.append(fcPart)
                     }
 
-                case .toolResult(let id, let name, let content, _, let imageData, let imageMimeType, _, _):
+                case .toolResult(let id, let name, let content, _, let imageData, _, _, _):
                     let resolvedName = (!name.isEmpty ? name : toolNameMap[id]) ?? "unknown"
                     if unsignedToolCallIds.contains(id) {
                         let truncated = content.count > 500 ? String(content.prefix(500)) + "..." : content
                         parts.append(["text": "[Result of \(resolvedName): \(truncated)]"])
-                        if let data = imageData {
-                            let mime = imageMimeType ?? "image/jpeg"
-                            parts.append(["inlineData": ["mimeType": mime, "data": data.base64EncodedString()]])
+                        // Normalized through the unified prep (sniffed
+                        // label, caps) — same rule as the Gemini exit.
+                        if let data = imageData,
+                           let prepared = ImagePayloadPrep.preparedForContext(data, passthroughFormats: ImagePayloadPrep.geminiPassthroughFormats) {
+                            parts.append(["inlineData": ["mimeType": prepared.mimeType, "data": prepared.data.base64EncodedString()]])
                         }
                     } else {
                         var frPart = GeminiConversation.functionResponsePart(
@@ -179,15 +188,20 @@ final class AntigravityAgentProvider: AgentProvider {
                             frPart["functionResponse"] = fr
                         }
                         parts.append(frPart)
-                        if let data = imageData {
-                            let mime = imageMimeType ?? "image/jpeg"
-                            parts.append(["inlineData": ["mimeType": mime, "data": data.base64EncodedString()]])
+                        if let data = imageData,
+                           let prepared = ImagePayloadPrep.preparedForContext(data, passthroughFormats: ImagePayloadPrep.geminiPassthroughFormats) {
+                            parts.append(["inlineData": ["mimeType": prepared.mimeType, "data": prepared.data.base64EncodedString()]])
                         }
                     }
 
-                case .imageData(let data, let mimeType, _):
-                    let base64 = data.base64EncodedString()
-                    parts.append(["inlineData": ["mimeType": mimeType, "data": base64]])
+                case .imageData(let data, _, _):
+                    // [IMG-1/IMG-3] Normalize through the unified prep
+                    // instead of forwarding the recorded mime + raw bytes.
+                    if let prepared = ImagePayloadPrep.preparedForContext(data, passthroughFormats: ImagePayloadPrep.geminiPassthroughFormats) {
+                        parts.append(["inlineData": ["mimeType": prepared.mimeType, "data": prepared.data.base64EncodedString()]])
+                    } else {
+                        parts.append(GeminiWireFormat.textPart("[image omitted: unsupported or unreadable image format]"))
+                    }
                 }
             }
 

@@ -357,6 +357,12 @@ extension AIChatViewModel {
         // only `[image omitted ...]`, falls back to OCR or refuses to answer.
         let inlineBudget = Self.kImageContextKeepCount
         var inlinedImages = 0
+        // [IMG-4] Cumulative byte budget, mirroring the main send path.
+        // This queued path previously inlined images with ONLY the count
+        // cap — no per-image 5 MB ladder, no message byte budget — so a
+        // batch of full-size photos sent while the agent was busy produced
+        // exactly the oversize payloads the main path was fixed to avoid.
+        var cumulativeImageBytes = 0
 
         for (i, attachment) in attachments.enumerated() {
             let fileExists = fm.fileExists(atPath: attachment.cacheURL.path)
@@ -403,23 +409,24 @@ extension AIChatViewModel {
 
             if attachment.kind == .image {
                 if inlinedImages < inlineBudget {
-                    let resized = Self.resizedImageData(data, maxLongEdge: 2000) ?? data
-                    let ext = attachment.cacheURL.pathExtension.lowercased()
-                    let mime: String
-                    // resizedImageData re-encodes to JPEG whenever it returns
-                    // data, so a resized payload must be labelled image/jpeg
-                    // for every source type — same rule the normal send path
-                    // applies (AIChatViewModel.swift).
-                    switch ext {
-                    case "png": mime = resized.count == data.count ? "image/png" : "image/jpeg"
-                    case "gif": mime = resized.count == data.count ? "image/gif" : "image/jpeg"
-                    case "webp": mime = resized.count == data.count ? "image/webp" : "image/jpeg"
-                    default: mime = "image/jpeg"
+                    // Same unified preparation as the main send path:
+                    // sniffed label matching the bytes, ≤1536px long edge,
+                    // ≤5 MB per image, cumulative message budget on top.
+                    // The old code labelled the payload by file extension,
+                    // corrected only when the resized byte count happened
+                    // to differ — an untouched HEIC went out as image/jpeg.
+                    if let prepared = ImagePayloadPrep.preparedForContext(data),
+                       cumulativeImageBytes + prepared.data.count <= Self.kMessageImageMaxBytes {
+                        parts.append(.text("[attached image: \(linuxPath)]"))
+                        parts.append(.imageData(data: prepared.data, mimeType: prepared.mimeType, linuxPath: linuxPath))
+                        inlinedImages += 1
+                        cumulativeImageBytes += prepared.data.count
+                        logger.info("📎[QUEUE-DRAIN]   image \(inlinedImages)/\(inlineBudget) inlined for inference: \(prepared.data.count) bytes, mime=\(prepared.mimeType), cumulative=\(cumulativeImageBytes)/\(Self.kMessageImageMaxBytes)")
+                    } else {
+                        let placeholder = Self.imagePlaceholderText(data: data, originalPath: linuxPath, snapshotPath: nil)
+                        parts.append(.text(placeholder))
+                        logger.warning("📎[QUEUE-DRAIN]   image degraded to placeholder — unpreparable or over byte budget (orig=\(data.count) bytes), kept at \(linuxPath)")
                     }
-                    parts.append(.text("[attached image: \(linuxPath)]"))
-                    parts.append(.imageData(data: resized, mimeType: mime, linuxPath: linuxPath))
-                    inlinedImages += 1
-                    logger.info("📎[QUEUE-DRAIN]   image \(inlinedImages)/\(inlineBudget) inlined for inference: \(resized.count) bytes, mime=\(mime)")
                 } else {
                     let placeholder = Self.imagePlaceholderText(data: data, originalPath: linuxPath, snapshotPath: nil)
                     parts.append(.text(placeholder))

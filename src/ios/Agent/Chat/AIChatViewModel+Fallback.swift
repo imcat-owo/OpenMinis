@@ -107,6 +107,24 @@ extension AIChatViewModel {
 
     // MARK: - Group-Level Fallback
 
+    /// [IMG-2b] Heuristic: does this error read like the provider rejected
+    /// the request over an IMAGE payload (bad format, dimension/size limit,
+    /// payload too large)? Deliberately conservative — the strip-retry it
+    /// gates costs the turn its images, so phrases stay image-specific
+    /// rather than matching any 400. Provider wordings covered: Anthropic
+    /// ("image exceeds size limit", "Could not process image",
+    /// media_type mismatches, its 413 "image content" text), OpenAI
+    /// ("Invalid image", "image_url" errors), Gemini ("image" rejections),
+    /// and bare HTTP 413s surfaced by relays.
+    static func errorImplicatesImagePayload(_ error: Error) -> Bool {
+        let text = ((error as? LLMError)?.fallbackReason ?? error.localizedDescription).lowercased()
+        let needles = [
+            "image", "media_type", "media type", "413",
+            "payload too large", "request too large", "too many images",
+        ]
+        return needles.contains { text.contains($0) }
+    }
+
     /// Resolve the entry and open a stream. This is the entry point for EVERY
     /// LLM request in the agent loop — it tries the current entry first and
     /// returns its stream on success. The `🔀ROUTE start → success with original
@@ -136,6 +154,13 @@ extension AIChatViewModel {
         var currentEntryId = activeEntryId
         var triedEntries: Set<String> = []
         if let eid = currentEntryId { triedEntries.insert(eid) }
+        // [IMG-2b] Mutable copy for the image-strip self-heal below: when a
+        // provider rejects the request over an image payload, we retry ONCE
+        // on the same entry with images degraded to text placeholders
+        // instead of advancing through the whole group re-sending the same
+        // offending bytes to every member.
+        var effectiveMessages = messages
+        var didStripImagesForRetry = false
 
         do {
             let _aeid = activeEntryId; let _agid = activeGroupId
@@ -162,7 +187,7 @@ extension AIChatViewModel {
                     thinkLvl = min(thinkLvl, entry.effectiveMaxThinkingLevel)
                 }
                 let stream = try await currentProvider.streamAgentMessage(
-                    messages: messages,
+                    messages: effectiveMessages,
                     systemPrompt: currentSystemPrompt,
                     tools: tools,
                     maxTokens: maxTok,
@@ -197,6 +222,21 @@ extension AIChatViewModel {
                 }
                 return stream
             } catch let error as LLMError where error.isFallbackable {
+                // [IMG-2b] Image-payload self-heal, BEFORE any group advance:
+                // when the error points at an image and the request carries
+                // image bytes, degrade every image to a text placeholder and
+                // retry once on the SAME entry. Advancing first (the old
+                // behaviour) re-sent the identical offending payload to each
+                // group member in turn — burning the whole group on a client
+                // side data problem no other member could accept either.
+                if !didStripImagesForRetry,
+                   Self.errorImplicatesImagePayload(error),
+                   AgentMessage.containsImagePayload(effectiveMessages) {
+                    didStripImagesForRetry = true
+                    effectiveMessages = AgentMessage.replacingImagesWithPlaceholders(effectiveMessages)
+                    logger.error("🔀ROUTE entry=\(currentEntryId ?? "nil") image-implicated error — stripped image payloads, retrying same entry once: \(error.localizedDescription)")
+                    continue
+                }
                 // [T-kelivo-retry 09-10] Rate limits no longer switch models
                 // immediately — a 429 is usually seconds-long throttling, and
                 // kelivo's approach (back off, retry same model) keeps the
@@ -259,6 +299,16 @@ extension AIChatViewModel {
                 currentSystemPrompt = rebuiltPrompt
                 // continue loop — will try next entry immediately
             } catch {
+                // [IMG-2b] Same image-payload self-heal for errors that
+                // surface as generic (non-LLMError) throws at stream open.
+                if !didStripImagesForRetry,
+                   Self.errorImplicatesImagePayload(error),
+                   AgentMessage.containsImagePayload(effectiveMessages) {
+                    didStripImagesForRetry = true
+                    effectiveMessages = AgentMessage.replacingImagesWithPlaceholders(effectiveMessages)
+                    logger.error("🔀ROUTE entry=\(currentEntryId ?? "nil") image-implicated error (generic) — stripped image payloads, retrying same entry once: \(error.localizedDescription)")
+                    continue
+                }
                 // Check if group uses "always" fallback strategy — if so, treat all
                 // errors as immediately fallbackable (skip auto-retry on current model).
                 let groupFallbackStrategy = activeGroupId
@@ -321,7 +371,7 @@ extension AIChatViewModel {
                 do {
                     let stream = try await streamWithAutoRetry(
                         provider: currentProvider,
-                        messages: messages,
+                        messages: effectiveMessages,
                         systemPrompt: currentSystemPrompt,
                         tools: tools,
                         maxTokens: dynamicMaxTokens(provider: currentProvider, model: retryModel, lastContextTokens: lastContextTokens),

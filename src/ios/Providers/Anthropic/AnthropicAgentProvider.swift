@@ -484,7 +484,14 @@ final class AnthropicAgentProvider: AgentProvider {
         //   2. stripOrphanToolResults — the inverse: drop tool_results with no
         //      matching tool_use.
         // (1) runs first so any result it injects is then validated by (2).
-        let healed = Self.injectMissingToolResults(messages)
+        // [IMG-3] Vision-capability gate (assembly layer): a text-only
+        // model gets text placeholders instead of raw image bytes — same
+        // rule the OpenAI path has always applied.
+        let gated = AgentMessage.gatedForVisionCapability(
+            messages,
+            supportsImageInput: model.capabilities.supportedModalities.contains(.imageInput)
+        )
+        let healed = Self.injectMissingToolResults(gated)
         let cleaned = Self.stripOrphanToolResults(healed)
         let mapped: [MessageParameter.Message] = cleaned.map { msg in
             let role: MessageParameter.Message.Role = msg.role == .user ? .user : .assistant
@@ -494,7 +501,7 @@ final class AnthropicAgentProvider: AgentProvider {
                     return .text(text)
                 case .toolUse(let id, let name, let input):
                     return .toolUse(sanitizeToolId(id), name, convertToInput(input))
-                case .toolResult(let id, _, let content, let isError, let imageData, let imageMimeType, _, _):
+                case .toolResult(let id, _, let content, let isError, let imageData, _, _, _):
                     let safeId = sanitizeToolId(id)
                     if let data = imageData {
                         // Downscale to Anthropic's recommended 1568px to avoid
@@ -503,22 +510,61 @@ final class AnthropicAgentProvider: AgentProvider {
                         // the mime type to match — prevents media_type/data mismatch
                         // when restored sessions have PNG data sniffed as image/png.
                         let downscaled = Self.downscaleForAnthropic(data)
-                        let finalData = downscaled ?? data
-                        let finalMime = downscaled != nil ? "image/jpeg" : (imageMimeType ?? "image/jpeg")
-                        self.pendingToolResultImages[safeId] = (data: finalData, mimeType: finalMime)
+                        // Label from the FINAL bytes: downscale output is
+                        // JPEG; a within-bounds payload keeps its bytes, so
+                        // the sniffed format wins over the recorded mime
+                        // (it can be stale/wrong); a payload in a format
+                        // Anthropic doesn't accept is converted via the
+                        // unified prep, and one that can't be prepared at
+                        // all is not spliced in.
+                        if let downscaled {
+                            self.pendingToolResultImages[safeId] = (data: downscaled, mimeType: "image/jpeg")
+                        } else if let sniffed = ImagePayloadPrep.sniffMimeType(data),
+                                  ImagePayloadPrep.standardPassthroughFormats.contains(sniffed) {
+                            self.pendingToolResultImages[safeId] = (data: data, mimeType: sniffed)
+                        } else if let prepared = ImagePayloadPrep.preparedForContext(data) {
+                            self.pendingToolResultImages[safeId] = (data: prepared.data, mimeType: prepared.mimeType)
+                        }
                     }
                     return .toolResult(safeId, content, isError: isError)
-                case .imageData(let data, let mimeType, _):
-                    let finalData = Self.downscaleForAnthropic(data) ?? data
-                    let base64 = finalData.base64EncodedString()
-                    let mediaType: MessageParameter.Message.Content.ImageSource.MediaType
-                    switch mimeType {
-                    case "image/png": mediaType = .png
-                    case "image/gif": mediaType = .gif
-                    case "image/webp": mediaType = .webp
-                    default: mediaType = .jpeg
+                case .imageData(let data, _, _):
+                    // [IMG-1] The mediaType must describe the FINAL bytes.
+                    // downscaleForAnthropic re-encodes to JPEG whenever it
+                    // returns data — the old code still labelled the result
+                    // with the ORIGINAL mimeType, so a resized PNG went out
+                    // as JPEG bytes claiming image/png (and HEIC bytes,
+                    // which pass the extension-era labelling as "jpeg"
+                    // without conversion, claimed whatever was recorded).
+                    if let downscaled = Self.downscaleForAnthropic(data) {
+                        return .image(.init(type: .base64, mediaType: .jpeg, data: downscaled.base64EncodedString()))
                     }
-                    return .image(.init(type: .base64, mediaType: mediaType, data: base64))
+                    // No re-encode happened: bytes go out as-is, so derive
+                    // the label from the bytes (sniffing), not the record.
+                    if let sniffed = ImagePayloadPrep.sniffMimeType(data),
+                       ImagePayloadPrep.standardPassthroughFormats.contains(sniffed) {
+                        let mediaType: MessageParameter.Message.Content.ImageSource.MediaType
+                        switch sniffed {
+                        case "image/png": mediaType = .png
+                        case "image/gif": mediaType = .gif
+                        case "image/webp": mediaType = .webp
+                        default: mediaType = .jpeg
+                        }
+                        return .image(.init(type: .base64, mediaType: mediaType, data: data.base64EncodedString()))
+                    }
+                    // Format Anthropic doesn't accept (HEIC/TIFF/…) or
+                    // unreadable bytes: convert via the unified prep, or
+                    // drop to text — never send mislabelled bytes.
+                    if let prepared = ImagePayloadPrep.preparedForContext(data) {
+                        let mediaType: MessageParameter.Message.Content.ImageSource.MediaType
+                        switch prepared.mimeType {
+                        case "image/png": mediaType = .png
+                        case "image/gif": mediaType = .gif
+                        case "image/webp": mediaType = .webp
+                        default: mediaType = .jpeg
+                        }
+                        return .image(.init(type: .base64, mediaType: mediaType, data: prepared.data.base64EncodedString()))
+                    }
+                    return .text("[image omitted: unsupported or unreadable image format]")
                 }
             }
             return MessageParameter.Message(role: role, content: .list(objects))

@@ -438,9 +438,22 @@ enum VisionGroupResolver {
             + "imageCarried=true bytes=\(imageData.count) mime=\(mimeType)")
 
         let work = Task { () throws -> String in
+            // [IMG-1/IMG-2] Run the incoming bytes through the unified prep
+            // before handing them to any vision candidate: callers
+            // (read_image, attachment 代看) label everything "image/jpeg"
+            // from a resize-or-reencode attempt, but undecodable originals
+            // fall through raw — sniffed label + caps keep the request
+            // honest, and an unpreparable image fails fast with a clear
+            // error instead of a provider 400.
+            let prepared = ImagePayloadPrep.preparedForContext(imageData)
+            guard let prepared else {
+                throw VisionError.allCandidatesFailed(
+                    "image could not be prepared for analysis (unreadable or over the per-image budget); no vision candidate was called"
+                )
+            }
             let messages = [AgentMessage(role: .user, parts: [
                 .text(instruction),
-                .imageData(data: imageData, mimeType: mimeType, linuxPath: nil),
+                .imageData(data: prepared.data, mimeType: prepared.mimeType, linuxPath: nil),
             ])]
             // thinkingLevel .off for the same reason title generation uses it:
             // some models otherwise return an empty body with a reasoning-only

@@ -108,6 +108,14 @@ final class GeminiAgentProvider: AgentProvider {
     // MARK: - Message Conversion
 
     private func convertMessages(_ messages: [AgentMessage]) -> [[String: Any]] {
+        // [IMG-3] Vision-capability gate (assembly layer): a text-only
+        // model gets text placeholders instead of raw image bytes — same
+        // rule the OpenAI path has always applied. Gemini previously sent
+        // images to text-only models untouched.
+        let messages = AgentMessage.gatedForVisionCapability(
+            messages,
+            supportsImageInput: model.capabilities.supportedModalities.contains(.imageInput)
+        )
         // Pre-scan: build tool call ID → name map so functionResponse can always
         // include the required name (ToolResult loaded from DB may have name="").
         var toolNameMap: [String: String] = [:]
@@ -167,7 +175,7 @@ final class GeminiAgentProvider: AgentProvider {
                         ))
                     }
 
-                case .toolResult(let id, let name, let content, _, let imageData, let imageMimeType, _, _):
+                case .toolResult(let id, let name, let content, _, let imageData, _, _, _):
                     // Resolve tool name: prefer the name from the matching toolUse part
                     // (ToolResult loaded from DB may have name="" since it's not persisted there)
                     let resolvedName = (!name.isEmpty ? name : toolNameMap[id]) ?? "unknown"
@@ -175,10 +183,11 @@ final class GeminiAgentProvider: AgentProvider {
                         // Convert orphaned function response to text summary
                         let truncated = content.count > 500 ? String(content.prefix(500)) + "..." : content
                         parts.append(["text": "[Result of \(resolvedName): \(truncated)]"])
-                        // Still include image data if present
-                        if let data = imageData {
-                            let mime = imageMimeType ?? "image/jpeg"
-                            parts.append(["inlineData": ["mimeType": mime, "data": data.base64EncodedString()]])
+                        // Still include image data if present — normalized
+                        // through the unified prep (sniffed label, caps).
+                        if let data = imageData,
+                           let prepared = ImagePayloadPrep.preparedForContext(data, passthroughFormats: ImagePayloadPrep.geminiPassthroughFormats) {
+                            parts.append(["inlineData": ["mimeType": prepared.mimeType, "data": prepared.data.base64EncodedString()]])
                         }
                     } else {
                         // [T-gemini-empty-part-oneof-400] Never ship an empty
@@ -187,15 +196,23 @@ final class GeminiAgentProvider: AgentProvider {
                             name: resolvedName,
                             response: GeminiWireFormat.functionResponseResult(content)
                         ))
-                        if let data = imageData {
-                            let mime = imageMimeType ?? "image/jpeg"
-                            parts.append(["inlineData": ["mimeType": mime, "data": data.base64EncodedString()]])
+                        if let data = imageData,
+                           let prepared = ImagePayloadPrep.preparedForContext(data, passthroughFormats: ImagePayloadPrep.geminiPassthroughFormats) {
+                            parts.append(["inlineData": ["mimeType": prepared.mimeType, "data": prepared.data.base64EncodedString()]])
                         }
                     }
 
-                case .imageData(let data, let mimeType, _):
-                    let base64 = data.base64EncodedString()
-                    parts.append(["inlineData": ["mimeType": mimeType, "data": base64]])
+                case .imageData(let data, _, _):
+                    // [IMG-1/IMG-3] Normalize through the unified prep:
+                    // label sniffed from the bytes, size/byte caps, formats
+                    // Gemini doesn't accept (TIFF/BMP/AVIF…) converted to
+                    // JPEG; unpreparable payloads degrade to text instead of
+                    // going out raw (this exit previously had NO safeguards).
+                    if let prepared = ImagePayloadPrep.preparedForContext(data, passthroughFormats: ImagePayloadPrep.geminiPassthroughFormats) {
+                        parts.append(["inlineData": ["mimeType": prepared.mimeType, "data": prepared.data.base64EncodedString()]])
+                    } else {
+                        parts.append(GeminiWireFormat.textPart("[image omitted: unsupported or unreadable image format]"))
+                    }
                 }
             }
 

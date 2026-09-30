@@ -5102,7 +5102,23 @@ extension RawMessage {
                 agentParts.append(.text(s))
             case .mediaRef(let ref):
                 if let data = try? Data(contentsOf: mediaResolver(ref)) {
-                    agentParts.append(.imageData(data: data, mimeType: ref.mimeType, linuxPath: ref.linuxPath))
+                    // [IMG-2a] History reload now goes through the same
+                    // unified preparation as the send paths. Previously the
+                    // stored bytes were inlined untouched with the recorded
+                    // mimeType — so an image that entered history
+                    // oversize/mislabelled (e.g. HEIC bytes labelled
+                    // image/jpeg) re-failed EVERY request for the rest of
+                    // the session, with no resend path to ever fix it.
+                    // Preparing at load makes stored history self-healing:
+                    // the label is sniffed from the bytes, payloads are
+                    // capped, and an image that can't be made compliant is
+                    // dropped to a text note (path kept) instead of
+                    // poisoning the session again.
+                    if let prepared = ImagePayloadPrep.preparedForContext(data) {
+                        agentParts.append(.imageData(data: prepared.data, mimeType: prepared.mimeType, linuxPath: ref.linuxPath))
+                    } else if let path = ref.linuxPath {
+                        agentParts.append(.text("[image at \(path) could not be loaded into context — view it with read_image if needed]"))
+                    }
                 }
             case .toolUse(let tu):
                 let input = parseJSONToDict(tu.input)
@@ -5113,9 +5129,13 @@ extension RawMessage {
                 if let ref = tr.mediaRef {
                     let fileURL = mediaResolver(ref)
                     if let data = try? Data(contentsOf: fileURL) {
-                        imgData = data
-                        // Sniff actual image format — stored mimeType may be wrong (e.g. png for jpeg data)
-                        imgMime = Self.sniffImageMimeType(data) ?? ref.mimeType
+                        // Same unified preparation (sniffed label + caps);
+                        // an unpreparable tool image is dropped while its
+                        // text output survives.
+                        if let prepared = ImagePayloadPrep.preparedForContext(data) {
+                            imgData = prepared.data
+                            imgMime = prepared.mimeType
+                        }
                     }
                 }
                 agentParts.append(.toolResult(id: tr.toolUseId, name: "", content: tr.output, isError: !tr.success, imageData: imgData, imageMimeType: imgMime, imageLinuxPath: tr.mediaRef?.linuxPath))
@@ -5125,25 +5145,6 @@ extension RawMessage {
         var msg = AgentMessage(role: agentRole, parts: agentParts)
         msg.reasoningContent = reasoningContent
         return msg
-    }
-
-    /// Detect actual image format from file magic bytes.
-    private static func sniffImageMimeType(_ data: Data) -> String? {
-        guard data.count >= 3 else { return nil }
-        let bytes = [UInt8](data.prefix(4))
-        if bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF {
-            return "image/jpeg"
-        }
-        if data.count >= 4 && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47 {
-            return "image/png"
-        }
-        if data.count >= 4 && bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x38 {
-            return "image/gif"
-        }
-        if data.count >= 4 && bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46 {
-            return "image/webp"
-        }
-        return nil
     }
 }
 

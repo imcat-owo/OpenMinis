@@ -2693,57 +2693,49 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
                     continue
                 }
 
-                // For images: send a resized + size-budgeted copy to the
-                // model. Two budgets layered on top of the existing 20-image
-                // count cap:
-                //   1. Per-image: if the resize-to-2000px output is still
-                //      over 5 MB, run the compressor ladder (smaller edges,
-                //      lower JPEG quality) until it fits or until we've
-                //      shrunk it as far as we usefully can.
-                //   2. Per-message: cap cumulative inlined bytes at 20 MB.
-                //      Once that's hit, remaining images fall through to
-                //      the same text placeholder the count cap uses.
-                // T-imgsize-13b7d81c.
+                // For images: send a copy prepared by the unified
+                // ImagePayloadPrep (sniffed label always matches the bytes,
+                // long edge ≤1536, per-image ≤5 MB — see its docstring).
+                // Two budgets layer on top of the existing 20-image count cap:
+                //   1. Per-image: enforced inside preparedForContext — an
+                //      image that can't be made compliant comes back nil and
+                //      degrades to a placeholder. There is deliberately NO
+                //      "sent anyway" path anymore: one oversize/mislabelled
+                //      payload used to 413 the whole request, and once it was
+                //      persisted to history it re-failed every later turn.
+                //   2. Per-message: cap cumulative inlined bytes. Once that's
+                //      hit, remaining images fall through to the same text
+                //      placeholder the count cap uses.
                 // (Reaching here implies .image — the non-image guard above
                 // already `continue`d. Kept as an explicit guard for clarity.)
                 if attachment.kind == .image {
                     if inlinedImages < inlineBudget {
-                        let resized = await MainActor.run { Self.resizedImageData(data, maxLongEdge: 2000) } ?? data
-                        let compressed: Data = await MainActor.run {
-                            Self.compressedImageDataUnderBudget(resized, targetMaxBytes: Self.kPerImageMaxBytes).data
-                        }
-                        let stillOversize = compressed.count > Self.kPerImageMaxBytes
-                        let wouldOverflowMessage = (cumulativeImageBytes + compressed.count) > Self.kMessageImageMaxBytes
-                        if wouldOverflowMessage {
-                            // Drop to placeholder rather than risk a 413 on
-                            // the whole message — the user keeps the file on
-                            // disk and can still reference it via shell tools.
+                        let prepared = await MainActor.run { ImagePayloadPrep.preparedForContext(data) }
+                        if let prepared {
+                            let wouldOverflowMessage = (cumulativeImageBytes + prepared.data.count) > Self.kMessageImageMaxBytes
+                            if wouldOverflowMessage {
+                                // Drop to placeholder rather than risk a 413 on
+                                // the whole message — the user keeps the file on
+                                // disk and can still reference it via shell tools.
+                                let placeholder = Self.imagePlaceholderText(data: data, originalPath: linuxPath, snapshotPath: nil)
+                                userParts.append(.text(placeholder))
+                                logger.warning("📎[SEND-ASYNC]   image \(i) dropped to placeholder — cumulative \(cumulativeImageBytes) + this \(prepared.data.count) > \(Self.kMessageImageMaxBytes) message budget")
+                            } else {
+                                userParts.append(.text("[attached image: \(linuxPath)]"))
+                                userParts.append(.imageData(data: prepared.data, mimeType: prepared.mimeType, linuxPath: linuxPath))
+                                inlinedImages += 1
+                                cumulativeImageBytes += prepared.data.count
+                                logger.info("📎[SEND-ASYNC]   image \(inlinedImages)/\(inlineBudget) inlined: orig=\(data.count) final=\(prepared.data.count) cumulative=\(cumulativeImageBytes)/\(Self.kMessageImageMaxBytes) mime=\(prepared.mimeType)")
+                            }
+                        } else {
+                            // Undecodable, or still over the per-image budget at
+                            // the bottom of the compression ladder — degrade to
+                            // a placeholder and tell the model/user via the
+                            // placeholder text instead of sending bytes the
+                            // provider will reject.
                             let placeholder = Self.imagePlaceholderText(data: data, originalPath: linuxPath, snapshotPath: nil)
                             userParts.append(.text(placeholder))
-                            logger.warning("📎[SEND-ASYNC]   image \(i) dropped to placeholder — cumulative \(cumulativeImageBytes) + this \(compressed.count) > \(Self.kMessageImageMaxBytes) message budget")
-                        } else {
-                            let ext = attachment.cacheURL.pathExtension.lowercased()
-                            let mime: String
-                            if compressed.count != data.count {
-                                // We re-encoded (resize or compressor ladder
-                                // ran). Output is always JPEG.
-                                mime = "image/jpeg"
-                            } else {
-                                switch ext {
-                                case "png":  mime = "image/png"
-                                case "gif":  mime = "image/gif"
-                                case "webp": mime = "image/webp"
-                                default:     mime = "image/jpeg"
-                                }
-                            }
-                            userParts.append(.text("[attached image: \(linuxPath)]"))
-                            userParts.append(.imageData(data: compressed, mimeType: mime, linuxPath: linuxPath))
-                            inlinedImages += 1
-                            cumulativeImageBytes += compressed.count
-                            logger.info("📎[SEND-ASYNC]   image \(inlinedImages)/\(inlineBudget) inlined: orig=\(data.count) resized=\(resized.count) final=\(compressed.count) cumulative=\(cumulativeImageBytes)/\(Self.kMessageImageMaxBytes) mime=\(mime) stillOversize=\(stillOversize)")
-                            if stillOversize {
-                                logger.warning("📎[SEND-ASYNC]   image \(i) still over per-image budget after compression ladder — Provider may 413; sent anyway")
-                            }
+                            logger.warning("📎[SEND-ASYNC]   image \(i) degraded to placeholder — could not be prepared within per-image budget \(Self.kPerImageMaxBytes), NOT sent (orig=\(data.count) bytes, file kept at \(linuxPath))")
                         }
                     } else {
                         let placeholder = Self.imagePlaceholderText(data: data, originalPath: linuxPath, snapshotPath: nil)
