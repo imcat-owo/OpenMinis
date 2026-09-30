@@ -10,6 +10,10 @@ final class ThumbnailCache {
     private let queue = DispatchQueue(label: "ThumbnailCache.load", qos: .userInitiated, attributes: .concurrent)
     /// Tracks in-flight loads to avoid duplicate work for the same path.
     private var inFlight = Set<String>()
+    /// Completions waiting on an in-flight load, keyed by cache key. Every
+    /// waiter is called with the load's result when it finishes — however
+    /// long the decode takes.
+    private var waiters: [String: [(UIImage?) -> Void]] = [:]
     private let lock = NSLock()
 
     private init() {
@@ -59,18 +63,12 @@ final class ThumbnailCache {
             return
         }
 
-        // Check if already loading
+        // Check if already loading — register as a waiter instead of polling:
+        // the in-flight load calls every waiter with its result on completion.
         lock.lock()
         if inFlight.contains(key) {
+            waiters[key, default: []].append(completion)
             lock.unlock()
-            // Already loading — schedule a retry after a short delay
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                if let cached = self?.cache.object(forKey: key as NSString) {
-                    completion(cached)
-                } else {
-                    completion(nil)
-                }
-            }
             return
         }
         inFlight.insert(key)
@@ -88,10 +86,12 @@ final class ThumbnailCache {
 
             self.lock.lock()
             self.inFlight.remove(key)
+            let pending = self.waiters.removeValue(forKey: key) ?? []
             self.lock.unlock()
 
             DispatchQueue.main.async {
                 completion(image)
+                for waiter in pending { waiter(image) }
             }
         }
     }
