@@ -9,7 +9,10 @@ enum GeminiModelsAPI {
     private static let defaultBaseURL = "https://generativelanguage.googleapis.com/v1beta/models"
 
     static func fetchModels(apiKey: String, customBaseURL: String? = nil, forceRefresh: Bool = false) async throws -> [LLMModel] {
-        if !forceRefresh, let cached = GeminiModelsCache.load(credential: apiKey) {
+        // Cache key covers the service address too: the same key pointed at
+        // a different base must not receive the old base's model list.
+        let cacheAddress = customBaseURL ?? defaultBaseURL
+        if !forceRefresh, let cached = GeminiModelsCache.load(credential: apiKey, address: cacheAddress) {
             logger.info("Returning \(cached.count) cached models (API key)")
             return cached
         }
@@ -46,12 +49,14 @@ enum GeminiModelsAPI {
         request.httpMethod = "GET"
         logger.info("Fetching Gemini models (API key auth)")
         let models = try await performFetch(request)
-        GeminiModelsCache.save(models, credential: apiKey)
+        GeminiModelsCache.save(models, credential: apiKey, address: cacheAddress)
         return models
     }
 
     static func fetchModels(oauthToken: String, customBaseURL: String? = nil, forceRefresh: Bool = false) async throws -> [LLMModel] {
-        if !forceRefresh, let cached = GeminiModelsCache.load(credential: oauthToken) {
+        // Same address-aware cache key as the API-key path above.
+        let cacheAddress = customBaseURL ?? defaultBaseURL
+        if !forceRefresh, let cached = GeminiModelsCache.load(credential: oauthToken, address: cacheAddress) {
             logger.info("Returning \(cached.count) cached models (OAuth)")
             return cached
         }
@@ -76,7 +81,7 @@ enum GeminiModelsAPI {
         #endif
         do {
             let models = try await performFetch(request)
-            GeminiModelsCache.save(models, credential: oauthToken)
+            GeminiModelsCache.save(models, credential: oauthToken, address: cacheAddress)
             return models
         } catch {
             // Standard API returns 403 for OAuth clients without generative-language scope.
@@ -181,17 +186,19 @@ private enum GeminiModelsCache {
             .appendingPathComponent("com.openminis.clone.gemini-models-cache", isDirectory: true)
     }
 
-    private static func cacheKey(for credential: String) -> String {
-        let digest = SHA256.hash(data: Data(credential.utf8))
+    /// SHA-256 hash of credential + service address — irreversible, and the
+    /// same credential pointed at a different base gets a different entry.
+    private static func cacheKey(credential: String, address: String) -> String {
+        let digest = SHA256.hash(data: Data((credential + "|" + address).utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
-    private static func cacheFile(for credential: String) -> URL {
-        cacheDir.appendingPathComponent(cacheKey(for: credential) + ".json")
+    private static func cacheFile(credential: String, address: String) -> URL {
+        cacheDir.appendingPathComponent(cacheKey(credential: credential, address: address) + ".json")
     }
 
-    static func load(credential: String) -> [LLMModel]? {
-        let file = cacheFile(for: credential)
+    static func load(credential: String, address: String) -> [LLMModel]? {
+        let file = cacheFile(credential: credential, address: address)
         guard let data = try? Data(contentsOf: file),
               let entry = try? JSONDecoder().decode(Entry.self, from: data),
               Date().timeIntervalSince(entry.date) < ttl else {
@@ -200,10 +207,10 @@ private enum GeminiModelsCache {
         return entry.models
     }
 
-    static func save(_ models: [LLMModel], credential: String) {
+    static func save(_ models: [LLMModel], credential: String, address: String) {
         let entry = Entry(models: models, date: Date())
         guard let data = try? JSONEncoder().encode(entry) else { return }
         try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
-        try? data.write(to: cacheFile(for: credential), options: .atomic)
+        try? data.write(to: cacheFile(credential: credential, address: address), options: .atomic)
     }
 }

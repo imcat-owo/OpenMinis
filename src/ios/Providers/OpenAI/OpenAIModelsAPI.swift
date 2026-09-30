@@ -16,7 +16,12 @@ enum OpenAIModelsAPI {
     private static let defaultBaseURL = "https://api.openai.com"
 
     static func fetchModels(apiKey: String, baseURL: String? = nil, appendV1Suffix: Bool = true, forceRefresh: Bool = false, userAgent: String? = nil) async throws -> [LLMModel] {
-        if !forceRefresh, let cached = OpenAIModelsCache.load(credential: apiKey) {
+        // Cache key covers the service address too: the same key pointed at
+        // a different base must not receive the old base's model list.
+        let cacheAddress = appendV1Suffix
+            ? stripV1Suffix(baseURL ?? defaultBaseURL)
+            : (baseURL ?? defaultBaseURL)
+        if !forceRefresh, let cached = OpenAIModelsCache.load(credential: apiKey, address: cacheAddress) {
             logger.info("Returning \(cached.count) cached models (API key)")
             return cached
         }
@@ -33,7 +38,7 @@ enum OpenAIModelsAPI {
         if let ua = userAgent { request.setValue(ua, forHTTPHeaderField: "User-Agent") }
         logger.info("Fetching OpenAI models (API key auth, custom base: \(isCustomBase), appendV1: \(appendV1Suffix))")
         let models = try await performFetch(request, filterOpenAIOnly: !isCustomBase)
-        OpenAIModelsCache.save(models, credential: apiKey)
+        OpenAIModelsCache.save(models, credential: apiKey, address: cacheAddress)
         return models
     }
 
@@ -176,17 +181,19 @@ private enum OpenAIModelsCache {
             .appendingPathComponent("com.openminis.clone.openai-models-cache", isDirectory: true)
     }
 
-    private static func cacheKey(for credential: String) -> String {
-        let digest = SHA256.hash(data: Data(credential.utf8))
+    /// SHA-256 hash of credential + service address — irreversible, and the
+    /// same credential pointed at a different base gets a different entry.
+    private static func cacheKey(credential: String, address: String) -> String {
+        let digest = SHA256.hash(data: Data((credential + "|" + address).utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
-    private static func cacheFile(for credential: String) -> URL {
-        cacheDir.appendingPathComponent(cacheKey(for: credential) + ".json")
+    private static func cacheFile(credential: String, address: String) -> URL {
+        cacheDir.appendingPathComponent(cacheKey(credential: credential, address: address) + ".json")
     }
 
-    static func load(credential: String) -> [LLMModel]? {
-        let file = cacheFile(for: credential)
+    static func load(credential: String, address: String) -> [LLMModel]? {
+        let file = cacheFile(credential: credential, address: address)
         guard let data = try? Data(contentsOf: file),
               let entry = try? JSONDecoder().decode(Entry.self, from: data),
               Date().timeIntervalSince(entry.date) < ttl else {
@@ -195,10 +202,10 @@ private enum OpenAIModelsCache {
         return entry.models
     }
 
-    static func save(_ models: [LLMModel], credential: String) {
+    static func save(_ models: [LLMModel], credential: String, address: String) {
         let entry = Entry(models: models, date: Date())
         guard let data = try? JSONEncoder().encode(entry) else { return }
         try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
-        try? data.write(to: cacheFile(for: credential), options: .atomic)
+        try? data.write(to: cacheFile(credential: credential, address: address), options: .atomic)
     }
 }

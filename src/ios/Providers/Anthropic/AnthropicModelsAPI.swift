@@ -52,7 +52,13 @@ enum AnthropicModelsAPI {
         forceRefresh: Bool,
         applyAuth: (inout URLRequest) -> Void
     ) async throws -> [LLMModel] {
-        if !forceRefresh, let cached = ModelsCache.load(credential: credential) { return cached }
+        // The cache key covers the service address as well as the
+        // credential: the same key pointed at a different base must not
+        // receive the old base's model list (7-day TTL).
+        let cacheAddress = appendV1Suffix
+            ? stripV1Suffix(baseURL ?? "https://api.anthropic.com")
+            : (baseURL ?? "https://api.anthropic.com")
+        if !forceRefresh, let cached = ModelsCache.load(credential: credential, address: cacheAddress) { return cached }
 
         let initialBase = appendV1Suffix
             ? stripV1Suffix(baseURL ?? "https://api.anthropic.com")
@@ -74,7 +80,7 @@ enum AnthropicModelsAPI {
             applyAuth(&request)
             do {
                 let models = try await performFetch(request)
-                ModelsCache.save(models, credential: credential)
+                ModelsCache.save(models, credential: credential, address: cacheAddress)
                 if idx > 0 {
                     logger.info("Models fetched via fallback base: \(base)")
                 }
@@ -150,18 +156,19 @@ private enum ModelsCache {
             .appendingPathComponent("com.openminis.clone.models-cache", isDirectory: true)
     }
 
-    /// SHA-256 hash of the credential — irreversible.
-    private static func cacheKey(for credential: String) -> String {
-        let digest = SHA256.hash(data: Data(credential.utf8))
+    /// SHA-256 hash of credential + service address — irreversible, and the
+    /// same credential pointed at a different base gets a different entry.
+    private static func cacheKey(credential: String, address: String) -> String {
+        let digest = SHA256.hash(data: Data((credential + "|" + address).utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
-    private static func cacheFile(for credential: String) -> URL {
-        cacheDir.appendingPathComponent(cacheKey(for: credential) + ".json")
+    private static func cacheFile(credential: String, address: String) -> URL {
+        cacheDir.appendingPathComponent(cacheKey(credential: credential, address: address) + ".json")
     }
 
-    static func load(credential: String) -> [LLMModel]? {
-        let file = cacheFile(for: credential)
+    static func load(credential: String, address: String) -> [LLMModel]? {
+        let file = cacheFile(credential: credential, address: address)
         guard let data = try? Data(contentsOf: file),
               let entry = try? JSONDecoder().decode(Entry.self, from: data),
               Date().timeIntervalSince(entry.date) < ttl else {
@@ -170,10 +177,10 @@ private enum ModelsCache {
         return entry.models
     }
 
-    static func save(_ models: [LLMModel], credential: String) {
+    static func save(_ models: [LLMModel], credential: String, address: String) {
         let entry = Entry(models: models, date: Date())
         guard let data = try? JSONEncoder().encode(entry) else { return }
         try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
-        try? data.write(to: cacheFile(for: credential), options: .atomic)
+        try? data.write(to: cacheFile(credential: credential, address: address), options: .atomic)
     }
 }
