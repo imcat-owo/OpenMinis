@@ -212,18 +212,29 @@ enum BackupDestinations {
             var results: [DeliveryResult] = []
             for target in targets {
                 guard let root = target.root else {
+                    let message = AppLocalized("This folder isn't available right now.")
+                    await MainActor.run {
+                        BackupTransferStatus.shared.finish(name: target.name, error: message)
+                    }
                     results.append(.init(id: target.id, folderName: target.name,
                                          destination: nil,
-                                         error: AppLocalized("This folder isn't available right now.")))
+                                         error: message))
                     continue
                 }
                 do {
                     let dest = try BackupDelivery.copyToMountedFolder(packageURL, into: root)
                     logger.info("[Backup] delivered to '\(target.name)': \(dest.lastPathComponent)")
+                    await MainActor.run {
+                        BackupTransferStatus.shared.finish(name: target.name, error: nil)
+                    }
                     results.append(.init(id: target.id, folderName: target.name,
                                          destination: dest, error: nil))
                 } catch {
                     logger.error("[Backup] delivery to '\(target.name)' failed: \(error.localizedDescription)")
+                    await MainActor.run {
+                        BackupTransferStatus.shared.finish(name: target.name,
+                                                           error: error.localizedDescription)
+                    }
                     results.append(.init(id: target.id, folderName: target.name,
                                          destination: nil, error: error.localizedDescription))
                 }
