@@ -104,9 +104,16 @@ static CLLocation *get_location_sync(int argc, char **argv) {
 
     // Get current location
     __block NoffWeatherLocationDelegate *delegate = [[NoffWeatherLocationDelegate alloc] init];
+    // The manager must outlive the setup block: CLLocationManager only holds
+    // its delegate weakly, so a block-local manager is released the moment
+    // the block returns and no location callback ever arrives (every call
+    // without --lat/--lng then waits out the full semaphore timeout).
+    // Keeping it in a __block variable of this function — the LocationOffload
+    // pattern — retains it until the wait below completes.
+    __block CLLocationManager *manager = nil;
 
     dispatch_async(dispatch_get_main_queue(), ^{
-        CLLocationManager *manager = [[CLLocationManager alloc] init];
+        manager = [[CLLocationManager alloc] init];
         manager.delegate = delegate;
         manager.desiredAccuracy = kCLLocationAccuracyKilometer;
 
