@@ -440,6 +440,9 @@ final class AgentLiveActivityManager {
         // A fresh task supersedes any lingering completed activity.
         awaitingDismissal = false
         isFinishing = false
+        // This start supersedes any pending start left over from a failed
+        // background request; keeping it would double-start on foreground.
+        pendingStartState = nil
 
         let currentId = (currentActivity as? Activity<AgentActivityAttributes>)?.id ?? "nil"
         let stale = Activity<AgentActivityAttributes>.activities
@@ -1010,6 +1013,10 @@ final class AgentLiveActivityManager {
     private func _endActivity() {
         awaitingDismissal = false
         isFinishing = false
+        // A leftover pending start (from a failed background request)
+        // must die with the activity — otherwise the next foreground
+        // cleanup resurrects a Live Activity for a finished task.
+        pendingStartState = nil
         lastPushedState = nil
         pendingPushWorkItem?.cancel()
         pendingPushWorkItem = nil
