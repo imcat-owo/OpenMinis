@@ -217,12 +217,14 @@ struct ModelsCollection: ConfigCollection {
     private func isHiddenField(for id: String, currentRisk: ConfigRisk) -> ConfigField {
         // Hiding a model the agent currently uses is mildly destructive
         // (it'll fall back to other models); flag it as `.sensitive`.
+        // Un-hiding one is harmless — the caller passes that distinction in
+        // as `currentRisk` (hidden now → .normal, visible now → .sensitive).
         ClosureField(
             path: "models.\(id).isHidden",
             displayName: "Hidden",
             description: "When true, the model is excluded from pickers and agent loop.",
             valueSchema: .bool,
-            risk: .sensitive, revertable: true,
+            risk: currentRisk, revertable: true,
             reader: { [self] in
                 guard let e = entry(id) else { return .null }
                 return .bool(e.isHidden)
