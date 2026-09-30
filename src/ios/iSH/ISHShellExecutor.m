@@ -964,12 +964,37 @@ static BOOL ISHTaskIsDescendantOf(struct task *t, pid_t_ rootPid) {
           (unsigned long)errLen);
 
     // DO NOT set isCompleted yet — let reader threads drain remaining pipe data.
-    // Give readers 200ms to flush, then finalize.
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 200 * NSEC_PER_MSEC),
-                   dispatch_get_main_queue(), ^{
+    // [R3-088] The old code finalized on a fixed 200ms timer regardless of
+    // drain state: a reader still flushing a large tail (4096 bytes per
+    // read, possibly queued behind other work) lost everything it had not
+    // yet appended — including the unterminated final line, which a reader
+    // only flushes into the buffer after it sees EOF. Poll the live-reader
+    // count instead and finalize as soon as the pipes are actually drained
+    // (liveReaders hits zero only after each reader's final flush), with a
+    // hard cap so a wedged reader — e.g. a pipe held open by a backgrounded
+    // grandchild — can't postpone finalization forever.
+    [self finalizeAfterDrain:ctx exitCode:exitCode waitedMsec:0];
+}
+
+/// Finalize once the context's readers have drained, polling every 50ms
+/// and giving up the wait after 5s (finalizeContext still runs then — it
+/// sets isCompleted, which stops the readers at their next poll).
++ (void)finalizeAfterDrain:(ISHShellExecutionContext *)ctx
+                  exitCode:(int)exitCode
+                waitedMsec:(NSUInteger)waitedMsec {
+    if (ctx.liveReaders <= 0 || waitedMsec >= 5000) {
+        if (ctx.liveReaders > 0) {
+            NSLog(@"ISHShellExecutor[exit]: pid=%d readers still active (%d) after %lums drain wait — finalizing anyway",
+                  ctx.guestPid, ctx.liveReaders, (unsigned long)waitedMsec);
+        }
         [self finalizeContext:ctx
                      exitCode:exitCode
                         error:ISHShellExecutorErrorNone];
+        return;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_MSEC),
+                   dispatch_get_main_queue(), ^{
+        [self finalizeAfterDrain:ctx exitCode:exitCode waitedMsec:waitedMsec + 50];
     });
 }
 
