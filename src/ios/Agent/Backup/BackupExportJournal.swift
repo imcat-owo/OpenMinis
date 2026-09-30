@@ -64,6 +64,12 @@ enum BackupExportJournal {
         /// stale staging is discarded rather than silently downgraded to a
         /// plaintext package.
         var encrypted: Bool
+        /// Whether the interrupted run streamed its blobs straight into a
+        /// temporary package instead of staging them. Those blobs are gone
+        /// with the discarded package, so the staging tree alone cannot
+        /// rebuild a complete package — such a run is not resumable.
+        /// Optional so markers written before this field existed still decode.
+        var streamed: Bool?
     }
 
     static func begin(_ marker: Marker) {

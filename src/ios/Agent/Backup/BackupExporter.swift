@@ -172,7 +172,8 @@ actor BackupExporter {
                 categories: options.categories.map(\.rawValue).sorted(),
                 includeCredentials: options.includeCredentials,
                 maxFileBytes: options.maxFileBytes,
-                encrypted: hasPassphrase))
+                encrypted: hasPassphrase,
+                streamed: !hasPassphrase))
         }
         onBackupId?(backupId)
 
@@ -475,6 +476,17 @@ actor BackupExporter {
         guard let marker = BackupExportJournal.interrupted() else { return nil }
         let staging = BackupExportJournal.stagingRoot(backupId: marker.backupId)
         guard FileManager.default.fileExists(atPath: staging.path) else { return nil }
+
+        // A streamed run wrote its blobs into a temporary package that was
+        // discarded with the interruption; staging holds only the indexes.
+        // Resuming would skip the finished categories and ship a package
+        // whose file index references blobs it does not contain, so discard
+        // the stale staging and start fresh instead.
+        if marker.streamed == true {
+            logger.info("[Backup] previous export streamed its blobs — starting fresh")
+            BackupExportJournal.finish(backupId: marker.backupId)
+            return nil
+        }
 
         let wantsEncryption = !(options.passphrase ?? "").isEmpty
         guard marker.categories == options.categories.map(\.rawValue).sorted(),
