@@ -100,7 +100,13 @@ struct MinisApp: App {
     /// presenting `WebAppWebViewScreen`. Cleared when the user dismisses the
     /// immersive WebView (back-edge swipe / programmatic dismiss).
     @State private var pendingWebAppPresentation: WebAppPresentation?
-    @State private var pendingURLWhileLocked: URL?
+    /// URLs that arrived while the app was locked, in arrival order.
+    /// A queue, not a single slot: a second link opening while locked
+    /// must not silently overwrite the first. Drained on unlock.
+    @State private var pendingURLsWhileLocked: [URL] = []
+    /// WebApp deep link that arrived while locked — the same treatment:
+    /// stash it and present on unlock instead of dropping it.
+    @State private var pendingWebAppWhileLocked: WebAppShortcut?
 
     #if DEBUG
     let debugServer = DebugServer()
@@ -205,15 +211,22 @@ struct MinisApp: App {
                 .tint(appearanceStudio.color(.accent))
                 .foregroundStyle(appearanceStudio.color(.primaryText))
                 .onReceive(SessionLockStore.shared.$appIsLocked) { locked in
-                    guard !locked, let url = pendingURLWhileLocked else { return }
-                    pendingURLWhileLocked = nil
-                    if BackupOpenRouter.handle(url) {
-                        // .minisbak → restore flow, not the attachment pipeline.
-                    } else if ExternalFileImporter.canIngest(url) {
-                        ExternalFileImporter.ingest(url, into: shareCoordinator)
-                        return
+                    guard !locked else { return }
+                    let urls = pendingURLsWhileLocked
+                    pendingURLsWhileLocked = []
+                    for url in urls {
+                        if BackupOpenRouter.handle(url) {
+                            // .minisbak → restore flow, not the attachment pipeline.
+                        } else if ExternalFileImporter.canIngest(url) {
+                            ExternalFileImporter.ingest(url, into: shareCoordinator)
+                        } else {
+                            DeepLinkRouter.handle(url: url, shareCoordinator: shareCoordinator)
+                        }
                     }
-                    DeepLinkRouter.handle(url: url, shareCoordinator: shareCoordinator)
+                    if let shortcut = pendingWebAppWhileLocked {
+                        pendingWebAppWhileLocked = nil
+                        Self.presentWebAppDeepLink(shortcut: shortcut, into: $pendingWebAppPresentation)
+                    }
                 }
                 // Force a full ContentView rebuild whenever the user-selected
                 // language changes. Without this, SwiftUI keeps Text/Label
@@ -288,7 +301,7 @@ struct MinisApp: App {
                     shareLog.info("[Share] onOpenURL: \(url.absoluteString)")
                     guard !SessionLockStore.shared.appIsLocked else {
                         shareLog.info("[Share] onOpenURL deferred — app is locked")
-                        pendingURLWhileLocked = url
+                        pendingURLsWhileLocked.append(url)
                         return
                     }
                     if BackupOpenRouter.handle(url) {
@@ -314,8 +327,14 @@ struct MinisApp: App {
                         .statusBar(hidden: true)
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .openWebAppDeepLink)) { note in
-                    guard !SessionLockStore.shared.appIsLocked else { return }
                     guard let shortcut = note.userInfo?["shortcut"] as? WebAppShortcut else { return }
+                    // While locked the presentation would land under the
+                    // lock overlay — stash it and present on unlock rather
+                    // than dropping the link entirely.
+                    guard !SessionLockStore.shared.appIsLocked else {
+                        pendingWebAppWhileLocked = shortcut
+                        return
+                    }
                     Task { @MainActor in
                         Self.presentWebAppDeepLink(shortcut: shortcut, into: $pendingWebAppPresentation)
                     }
