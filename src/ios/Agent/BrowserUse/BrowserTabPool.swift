@@ -387,6 +387,21 @@ final class BrowserTabPool: ObservableObject {
             return 0
         }
         // Otherwise create tab 0, restoring saved URL if available.
+        // Per-pool cap comes first: newTab/openWithConfiguration both
+        // hard-check `tabs.count < Self.maxTabs`, but this path (and
+        // ensureTabForUI below) historically didn't — after tab 0 is closed
+        // and new_tab takes a fresh id ([1,2,3]), recreating tab 0 here
+        // would grow the pool to 4 live WKWebViews. Fall back to the most
+        // recently used tab instead of exceeding the cap.
+        guard tabs.count < Self.maxTabs else {
+            guard let fallback = tabs.indices.max(by: { tabs[$0].lastActivityDate < tabs[$1].lastActivityDate }) else {
+                return 0
+            }
+            tabs[fallback].inUse = true
+            tabs[fallback].lastActivityDate = Date()
+            logger.info("acquireTab: pool at maxTabs (\(Self.maxTabs)) without tab 0 — reusing tab \(tabs[fallback].id)")
+            return tabs[fallback].id
+        }
         // Ask the registry for a global slot — may evict an idle tab in
         // another session's pool. If denied (everyone is busy), we still
         // create the tab: the agent needs *some* surface to act on, and
@@ -404,6 +419,12 @@ final class BrowserTabPool: ObservableObject {
     /// Ensure tab 0 exists for UI display without marking it as agent-busy.
     func ensureTabForUI() {
         if !tabs.contains(where: { $0.id == 0 }) {
+            // Same per-pool cap as acquireTab: with tab 0 closed and the
+            // pool full ([1,2,3]) a UI prefetch must not grow past maxTabs.
+            guard tabs.count < Self.maxTabs else {
+                logger.info("Skipping UI prefetch tab — pool already at maxTabs (\(Self.maxTabs))")
+                return
+            }
             // Pure UI prefetch — if we're at the global cap and can't evict
             // anyone, skip the prefetch. The user can still tap to create
             // it via acquireTab/newTab, which prioritise creation.
