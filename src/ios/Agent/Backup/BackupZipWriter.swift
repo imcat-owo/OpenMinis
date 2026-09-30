@@ -82,7 +82,13 @@ final class BackupZipWriter {
     ]
 
     static func shouldStore(name: String) -> Bool {
-        incompressible.contains((name as NSString).pathExtension.lowercased())
+        // Blob payloads are content-addressed (`blobs/<xx>/<digest>`) and
+        // carry no extension, so the extension check below can never
+        // classify them — yet they are exactly the multi-hundred-MB members
+        // addDeflated must never see (see its comment: deflate is for the
+        // small .jsonl records). Store blobs unconditionally.
+        if name.hasPrefix("blobs/") { return true }
+        return incompressible.contains((name as NSString).pathExtension.lowercased())
     }
 
     // MARK: - Lifecycle
