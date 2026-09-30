@@ -319,6 +319,27 @@ enum SoulIconSource {
 
     // MARK: - http(s)
 
+    /// Redirect interceptor for `download`. URLSession follows redirects
+    /// automatically, so checking only the final URL after the fetch is too
+    /// late — the request to the redirected target (possibly a private
+    /// host) has already been issued. This refuses any hop into a blocked
+    /// host BEFORE following it and records the target for the error.
+    private final class RedirectGuard: NSObject, URLSessionTaskDelegate {
+        private(set) var blockedRedirectHost: String?
+
+        func urlSession(_ session: URLSession, task: URLSessionTask,
+                        willPerformHTTPRedirection response: HTTPURLResponse,
+                        newRequest request: URLRequest,
+                        completionHandler: @escaping (URLRequest?) -> Void) {
+            if let host = request.url?.host, isBlockedHost(host) {
+                blockedRedirectHost = host
+                completionHandler(nil)
+                return
+            }
+            completionHandler(request)
+        }
+    }
+
     /// Fetch an image over http(s) with an allow-list, a deadline and a size
     /// cap. The host checks are anti-SSRF: this runs on behalf of a model, so
     /// a URL it invents must not become a probe of the LAN or of link-local
@@ -343,7 +364,8 @@ enum SoulIconSource {
         cfg.timeoutIntervalForResource = downloadTimeout
         cfg.httpCookieStorage = nil          // no ambient credentials
         cfg.urlCredentialStorage = nil
-        let session = URLSession(configuration: cfg)
+        let redirectGuard = RedirectGuard()
+        let session = URLSession(configuration: cfg, delegate: redirectGuard, delegateQueue: nil)
         defer { session.invalidateAndCancel() }
 
         let data: Data, response: URLResponse
@@ -351,6 +373,9 @@ enum SoulIconSource {
             (data, response) = try await session.data(for: req)
         } catch {
             throw SourceError.network(error.localizedDescription)
+        }
+        if let blocked = redirectGuard.blockedRedirectHost {
+            throw SourceError.blockedHost(blocked)
         }
 
         if let http = response as? HTTPURLResponse {
