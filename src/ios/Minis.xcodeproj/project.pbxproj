@@ -10,6 +10,9 @@
 		21FED4B7BB6F6D9476C9992E /* VoiceProvider+System.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88993FC8E3F0199C6638F664 /* VoiceProvider+System.swift */; };
 		241D530017827D7F0EB604DE /* VoiceProviderFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2941B643B8A2F048A2B154E /* VoiceProviderFactory.swift */; };
 		2A4FD49F872431D703328384 /* VoiceOutputPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 424510790AF3FB2452D3CCE3 /* VoiceOutputPlayer.swift */; };
+		E5TD7B01 /* TTSDiskCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5TD7F01 /* TTSDiskCache.swift */; };
+		E5VN0B01 /* VoiceNowPlaying.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5VN0F01 /* VoiceNowPlaying.swift */; };
+		E5VB5B01 /* VoiceBubblePlaybackState.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5VB5F01 /* VoiceBubblePlaybackState.swift */; };
 		F1T00025 /* TTSServiceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1T00021 /* TTSServiceModels.swift */; };
 		F1T00026 /* TTSProviderBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1T00022 /* TTSProviderBridge.swift */; };
 		F1T00027 /* VoiceServicesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1T00023 /* VoiceServicesView.swift */; };
@@ -643,6 +646,9 @@
 		28E23EA0E199D6D50EBC76F2 /* VoiceLog.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VoiceLog.swift; sourceTree = "<group>"; };
 		2BB45FC87D39AE9AB4495BE9 /* VoiceProvider+Vendors.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "VoiceProvider+Vendors.swift"; sourceTree = "<group>"; };
 		424510790AF3FB2452D3CCE3 /* VoiceOutputPlayer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VoiceOutputPlayer.swift; sourceTree = "<group>"; };
+		E5TD7F01 /* TTSDiskCache.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TTSDiskCache.swift; sourceTree = "<group>"; };
+		E5VN0F01 /* VoiceNowPlaying.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VoiceNowPlaying.swift; sourceTree = "<group>"; };
+		E5VB5F01 /* VoiceBubblePlaybackState.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VoiceBubblePlaybackState.swift; sourceTree = "<group>"; };
 		4D1A2B7331C508B0D3E77D28 /* InlineVoiceInputView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InlineVoiceInputView.swift; sourceTree = "<group>"; };
 		535D58AA5C4B7B563E4C8821 /* VoiceInputModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VoiceInputModels.swift; sourceTree = "<group>"; };
 		5F3D1138DBE516F31D76ABF4 /* VoiceProviderTemplate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VoiceProviderTemplate.swift; sourceTree = "<group>"; };
@@ -1343,6 +1349,9 @@
 				E5VC00011 /* VoiceCorrectionDB.swift */,
 				B7E2CB0D0D63E6D6FDB45568 /* VoiceActivityDetector.swift */,
 				424510790AF3FB2452D3CCE3 /* VoiceOutputPlayer.swift */,
+				E5TD7F01 /* TTSDiskCache.swift */,
+				E5VN0F01 /* VoiceNowPlaying.swift */,
+				E5VB5F01 /* VoiceBubblePlaybackState.swift */,
 				5F3D1138DBE516F31D76ABF4 /* VoiceProviderTemplate.swift */,
 				28E23EA0E199D6D50EBC76F2 /* VoiceLog.swift */,
 				DE154CF628D8699BD99CF9CB /* AudioSessionCoordinator.swift */,
@@ -3235,6 +3244,9 @@
 				489FD1413F4EE806C3F0C713 /* VoiceProviderResolver.swift in Sources */,
 				57E63023C8A9A3C505DF411B /* VoiceActivityDetector.swift in Sources */,
 				2A4FD49F872431D703328384 /* VoiceOutputPlayer.swift in Sources */,
+				E5TD7B01 /* TTSDiskCache.swift in Sources */,
+				E5VN0B01 /* VoiceNowPlaying.swift in Sources */,
+				E5VB5B01 /* VoiceBubblePlaybackState.swift in Sources */,
 				F1T00025 /* TTSServiceModels.swift in Sources */,
 				F1T00026 /* TTSProviderBridge.swift in Sources */,
 				F1T00027 /* VoiceServicesView.swift in Sources */,
