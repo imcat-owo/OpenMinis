@@ -253,15 +253,26 @@ enum ModelsDevAPI {
     /// a relaunch — same invalidation rule as `releaseIndex()`.
     private static func stage2Index(for registry: [String: ModelsDevProvider]) -> [String: DevModelMatch]? {
         cacheLock.lock()
-        if let cached = cachedStage2Index, stage2IndexBuiltFrom == cacheTimestamp {
+        // Snapshot the registry timestamp under the lock: the index below is
+        // built from THIS registry snapshot, so it must never be stamped with
+        // a timestamp read after the (slow, lock-free) build. If a background
+        // refresh lands mid-build, cacheTimestamp will have moved — the index
+        // is still correct for the caller's snapshot, but caching it would let
+        // stale content masquerade as fresh until the next refresh.
+        let builtFromTimestamp = cacheTimestamp
+        if let cached = cachedStage2Index, stage2IndexBuiltFrom == builtFromTimestamp {
             cacheLock.unlock()
             return cached
         }
         cacheLock.unlock()
         let index = buildStage2Index(registry)
         cacheLock.lock()
-        cachedStage2Index = index
-        stage2IndexBuiltFrom = cacheTimestamp
+        if cacheTimestamp == builtFromTimestamp {
+            cachedStage2Index = index
+            stage2IndexBuiltFrom = builtFromTimestamp
+        } else {
+            logger.info("[ModelsDev] stage-2 index build raced a registry refresh — discarding instead of stamping it fresh")
+        }
         cacheLock.unlock()
         logger.info("[ModelsDev] stage-2 index built: \(index.count) normalized keys")
         return index
@@ -446,7 +457,8 @@ enum ModelsDevAPI {
     static func releaseIndex() -> ReleaseIndex? {
         guard let registry = loadRegistry() else { return nil }
         cacheLock.lock()
-        if let cached = cachedReleaseIndex, releaseIndexBuiltFrom == cacheTimestamp {
+        let builtFromTimestamp = cacheTimestamp
+        if let cached = cachedReleaseIndex, releaseIndexBuiltFrom == builtFromTimestamp {
             cacheLock.unlock()
             return cached
         }
@@ -475,8 +487,16 @@ enum ModelsDevAPI {
         }
         let index = ReleaseIndex(byFullId: byFullId, byTail: byTail)
         cacheLock.lock()
-        cachedReleaseIndex = index
-        releaseIndexBuiltFrom = cacheTimestamp
+        // Same race as stage2Index(for:): only memoize when the registry
+        // timestamp hasn't moved since the snapshot was taken; a mid-build
+        // refresh means this index describes the old registry and must not be
+        // stamped with the new timestamp.
+        if cacheTimestamp == builtFromTimestamp {
+            cachedReleaseIndex = index
+            releaseIndexBuiltFrom = builtFromTimestamp
+        } else {
+            logger.info("[ModelRank] release index build raced a registry refresh — discarding instead of stamping it fresh")
+        }
         cacheLock.unlock()
         logger.info("[ModelRank] release index built: full=\(byFullId.count) tail=\(byTail.count)")
         return index
