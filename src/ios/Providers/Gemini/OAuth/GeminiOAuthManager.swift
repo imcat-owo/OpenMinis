@@ -68,6 +68,14 @@ final class GeminiOAuthManager: NSObject, ObservableObject {
     }
 
     func login(instanceId: String) async throws {
+        // Re-entrancy guard (mirrors xAI): SwiftUI button taps + sheet hooks
+        // can fire login twice; without this each call spawns its own
+        // callback server/state and the two race into "state mismatch"
+        // (see T-xai-oauth-double-fire in XAIOAuthManager).
+        guard !isAuthenticating else {
+            logger.warning("Gemini login already in progress — ignoring re-entrant call (instance: \(instanceId))")
+            return
+        }
         logger.info("=== Gemini OAuth login started (instance: \(instanceId)) ===")
         // Defensive cleanup: stop any leftover server from a previous failed attempt
         callbackServer?.stop()

@@ -80,6 +80,14 @@ final class AntigravityOAuthManager: NSObject, ObservableObject {
     }
 
     func login(instanceId: String) async throws {
+        // Re-entrancy guard (mirrors xAI): SwiftUI button taps + sheet hooks
+        // can fire login twice; without this each call spawns its own
+        // callback server/state and the two race into "state mismatch"
+        // (see T-xai-oauth-double-fire in XAIOAuthManager).
+        guard !isAuthenticating else {
+            logger.warning("Antigravity login already in progress — ignoring re-entrant call (instance: \(instanceId))")
+            return
+        }
         logger.info("=== Antigravity OAuth login started (instance: \(instanceId)) ===")
         callbackServer?.stop()
         callbackServer = nil
