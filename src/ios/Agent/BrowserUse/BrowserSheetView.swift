@@ -25,7 +25,7 @@ struct BrowserSheetView: View {
                 if !isFullscreen {
                     // Tab bar
                     tabBar
-                        .allowsHitTesting(!isAgentBusy)
+                        .allowsHitTesting(!(isAgentBusy && !isTakeoverActive))
 
                     // URL bar
                     HStack(spacing: 8) {
@@ -38,7 +38,7 @@ struct BrowserSheetView: View {
                             .keyboardType(.URL)
                             .submitLabel(.go)
                             .focused($addressFocused)
-                            .disabled(isAgentBusy)
+                            .disabled(isAgentBusy && !isTakeoverActive)
                             .onSubmit {
                                 let trimmed = addressText.trimmingCharacters(in: .whitespacesAndNewlines)
                                 guard !trimmed.isEmpty else { return }
@@ -58,7 +58,7 @@ struct BrowserSheetView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .background(Color(UIColor.secondarySystemBackground))
-                    .allowsHitTesting(!isAgentBusy)
+                    .allowsHitTesting(!(isAgentBusy && !isTakeoverActive))
                 }
 
                 // Live webview + agent overlay
@@ -75,11 +75,11 @@ struct BrowserSheetView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
 
-                    if isAgentBusy {
-                        AgentBrowsingOverlay(onTakeover: onTakeover)
-                            .transition(.opacity)
-                    } else if isTakeoverActive {
+                    if isTakeoverActive {
                         TakeoverActiveBanner(onDone: { onTakeoverDone?() })
+                            .transition(.opacity)
+                    } else if isAgentBusy {
+                        AgentBrowsingOverlay(onTakeover: onTakeover)
                             .transition(.opacity)
                     }
 
@@ -122,20 +122,20 @@ struct BrowserSheetView: View {
                             Image(systemName: "chevron.left")
                                 .frame(maxWidth: .infinity)
                         }
-                        .disabled(isAgentBusy || !(manager?.canGoBack ?? false))
+                        .disabled((isAgentBusy && !isTakeoverActive) || !(manager?.canGoBack ?? false))
 
                         Button { pool.touchActivity(); manager?.goForward() } label: {
                             Image(systemName: "chevron.right")
                                 .frame(maxWidth: .infinity)
                         }
-                        .disabled(isAgentBusy || !(manager?.canGoForward ?? false))
+                        .disabled((isAgentBusy && !isTakeoverActive) || !(manager?.canGoForward ?? false))
 
                         if manager?.isLoading ?? false {
                             Button { pool.touchActivity(); manager?.stopLoading() } label: {
                                 Image(systemName: "xmark")
                                     .frame(maxWidth: .infinity)
                             }
-                            .disabled(isAgentBusy)
+                            .disabled(isAgentBusy && !isTakeoverActive)
                             .transition(.identity)
                         } else {
                             Button { pool.touchActivity(); manager?.reload() } label: {
@@ -143,7 +143,7 @@ struct BrowserSheetView: View {
                                     .frame(maxWidth: .infinity)
                             }
                             .transition(.identity)
-                            .disabled(isAgentBusy)
+                            .disabled(isAgentBusy && !isTakeoverActive)
                         }
 
                         Button {
@@ -152,12 +152,12 @@ struct BrowserSheetView: View {
                             Image(systemName: "arrow.up.left.and.arrow.down.right")
                                 .frame(maxWidth: .infinity)
                         }
-                        .disabled(isAgentBusy)
+                        .disabled(isAgentBusy && !isTakeoverActive)
                     }
                     .font(.system(size: 18))
                     .padding(.vertical, 10)
                     .background(Color(UIColor.secondarySystemBackground))
-                    .allowsHitTesting(!isAgentBusy)
+                    .allowsHitTesting(!(isAgentBusy && !isTakeoverActive))
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -182,14 +182,14 @@ struct BrowserSheetView: View {
                         } label: {
                             Image(systemName: "plus")
                         }
-                        .disabled(isAgentBusy || pool.tabs.count >= BrowserTabPool.maxTabs)
+                        .disabled((isAgentBusy && !isTakeoverActive) || pool.tabs.count >= BrowserTabPool.maxTabs)
 
                         Button {
                             showHistory = true
                         } label: {
                             Image(systemName: "clock.arrow.circlepath")
                         }
-                        .disabled(isAgentBusy)
+                        .disabled(isAgentBusy && !isTakeoverActive)
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -279,7 +279,7 @@ struct BrowserSheetView: View {
                     .lineLimit(1)
                     .frame(maxWidth: 120)
 
-                if !isAgentBusy {
+                if !(isAgentBusy && !isTakeoverActive) {
                     Button {
                         _ = pool.closeTab(id: tab.id)
                     } label: {
