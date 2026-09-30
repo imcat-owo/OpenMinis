@@ -552,7 +552,14 @@ final class SyncCore {
                 await ChatStore.shared.clearDirtyRecord(recordName: id.description)
             case .conflict(_, let serverRecord):
                 conflict += 1
-                processInbound(SyncInboundBatch(records: [serverRecord], deletes: [], sourceDeviceId: nil), from: transport, countAsReceived: false)
+                // Bypass the own-echo filter: the id IS in recentlyPushedIds
+                // (stamped at send time above), but this server record is
+                // NOT our echo — CloudKit rejected our write because the
+                // server copy differs, and this is precisely the version
+                // that must be merged in. Without the bypass, the filter
+                // dropped it within the echo TTL and the server version
+                // never landed locally until a later pull happened to win.
+                processInbound(SyncInboundBatch(records: [serverRecord], deletes: [], sourceDeviceId: nil), from: transport, countAsReceived: false, bypassEchoFilter: true)
                 // Note: we deliberately do NOT clear dirty here. The
                 // transport (CloudKit) re-queues the record so the next
                 // send retries with the fresh server etag.
