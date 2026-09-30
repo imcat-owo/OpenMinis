@@ -1843,10 +1843,19 @@ final class BrowserUseManager: NSObject, ObservableObject {
     // MARK: - Set User Agent
 
     @discardableResult
-    func setUserAgent(profile: UserAgentProfile?, customString: String? = nil) -> BrowserActionResult {
+    func setUserAgent(profile: UserAgentProfile?, customString: String? = nil,
+                      viewport: (width: Int, height: Int)? = nil) -> BrowserActionResult {
         let newProfile = profile ?? .mobileSafari
 
         currentProfile = newProfile
+        // A caller that already resolved the new viewport (the pool, on a
+        // profile flip) passes it so UA + viewport land in ONE rebuild.
+        // Rebuilding twice back-to-back loses the page: the first rebuild's
+        // load hasn't committed yet, so the second rebuild reads
+        // webView.url == nil and loads nothing — a blank tab.
+        if let viewport {
+            currentViewport = viewport
+        }
         // Preserve the current viewport across UA switches so a user-set
         // custom viewport survives an agent-driven UA flip.
         let vp = currentViewport

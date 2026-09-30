@@ -1447,9 +1447,11 @@ final class BrowserTabPool: ObservableObject {
         // width — the user-visible "screenshot is cropped" bug.
         let vp = resolvedViewportSize()
         for tab in tabs {
-            tab.manager.setUserAgent(profile: profile, customString: ua)
-            tab.manager.setViewport(width: vp.width, height: vp.height,
-                                    profile: profile, customUA: ua)
+            // ONE rebuild carrying both the new UA and the resolved
+            // viewport — a second immediate setViewport rebuild would read
+            // the not-yet-committed webView.url (nil) and blank the tab.
+            tab.manager.setUserAgent(profile: profile, customString: ua,
+                                     viewport: (width: vp.width, height: vp.height))
         }
     }
 
