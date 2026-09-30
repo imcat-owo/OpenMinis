@@ -171,6 +171,13 @@ final class ConfigConfirmationGate: ObservableObject {
         timeoutTasks.removeValue(forKey: id)
         notifiedIds.remove(id)
         cont.resume(returning: outcome)
+        // A queued (not yet surfaced) request can resolve too — its
+        // timeout starts at enqueue, so it may fire while it still waits
+        // behind `pending`. It must leave the queue here: if it stayed,
+        // it would later surface as `pending` with its awaiter already
+        // removed, every further resolve for it would early-return on
+        // the guard above, and the queue would wedge permanently.
+        queue.removeAll { $0.0.id == id }
         // Advance queue.
         if pending?.id == id {
             if let next = queue.first {
