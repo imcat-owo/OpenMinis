@@ -1038,6 +1038,17 @@ final class ProviderConfigStore: ObservableObject {
         // which also deleted a user's intentionally-empty group (newly created,
         // or temporarily cleared) and propagated that deletion via tombstone.
         config.modelGroups.removeAll { removedGroupIds.contains($0.id) }
+        // Clear group pointers that referenced the just-deleted groups, same
+        // set removeGroup clears — otherwise dangling ids are written back to
+        // the DB and the corresponding selections silently stop resolving.
+        if !removedGroupIds.isEmpty {
+            if let p = config.defaultPrimaryGroupId, removedGroupIds.contains(p) { config.defaultPrimaryGroupId = nil }
+            if let p = config.defaultSubGroupId, removedGroupIds.contains(p) { config.defaultSubGroupId = nil }
+            if let p = config.voiceInputGroupId, removedGroupIds.contains(p) { config.voiceInputGroupId = nil }
+            if let p = config.voiceOutputGroupId, removedGroupIds.contains(p) { config.voiceOutputGroupId = nil }
+            if let p = config.visionGroupId, removedGroupIds.contains(p) { config.visionGroupId = nil }
+            config.agentLoopGroupIds.removeAll { removedGroupIds.contains($0) }
+        }
         // Remove from agent loop list
         config.agentLoopModelEntryIds.removeAll { removedEntryIds.contains($0) }
         // Stamp tombstones so iCloud sync can propagate the delete instead
@@ -1875,6 +1886,8 @@ final class ProviderConfigStore: ObservableObject {
         // describer behind it. (The resolver also guards, but the tool-exposure
         // gate reads the pointer directly.)
         if config.visionGroupId == groupId { config.visionGroupId = nil }
+        if config.voiceInputGroupId == groupId { config.voiceInputGroupId = nil }
+        if config.voiceOutputGroupId == groupId { config.voiceOutputGroupId = nil }
         config.agentLoopGroupIds.removeAll { $0 == groupId }
         Self.recordTombstone(in: &config.deletedModelGroups, ids: [groupId])
         save()
