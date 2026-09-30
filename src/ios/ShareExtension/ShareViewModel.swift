@@ -61,6 +61,19 @@ final class ShareViewModel {
 
     // MARK: - Processors
 
+    /// Register an attachment only if its file really landed on disk.
+    /// Every write below is `try?` (a failed write must not abort the whole
+    /// share), but registering unconditionally used to report success for a
+    /// file that was never written — the main app then silently skipped the
+    /// missing attachment and the user's share vanished without a trace.
+    private func appendAttachmentIfWritten(_ fileName: String, at fileURL: URL) {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            NSLog("[ShareExt] attachment write did not land, not registering: %@", fileName)
+            return
+        }
+        pendingItems.append(.init(kind: .attachment, value: fileName))
+    }
+
     private func processURL(_ provider: NSItemProvider) async {
         guard let item = try? await provider.loadItem(forTypeIdentifier: UTType.url.identifier),
               let url = item as? URL else { return }
@@ -89,7 +102,7 @@ final class ShareViewModel {
                let jpegData = image.jpegData(compressionQuality: 0.85) {
                 let fileURL = dir.appendingPathComponent(fileName)
                 try? jpegData.write(to: fileURL)
-                pendingItems.append(.init(kind: .attachment, value: fileName))
+                appendAttachmentIfWritten(fileName, at: fileURL)
             }
             return
         }
@@ -99,7 +112,7 @@ final class ShareViewModel {
         if let dir = SharedContainerStore.sharedFileDirectory {
             let destURL = dir.appendingPathComponent(fileName)
             try? FileManager.default.copyItem(at: url, to: destURL)
-            pendingItems.append(.init(kind: .attachment, value: fileName))
+            appendAttachmentIfWritten(fileName, at: destURL)
         }
     }
 
@@ -114,7 +127,7 @@ final class ShareViewModel {
             if let dir = SharedContainerStore.sharedFileDirectory {
                 let fileURL = dir.appendingPathComponent(fileName)
                 try? text.write(to: fileURL, atomically: true, encoding: .utf8)
-                pendingItems.append(.init(kind: .attachment, value: fileName))
+                appendAttachmentIfWritten(fileName, at: fileURL)
             }
         }
     }
@@ -136,7 +149,7 @@ final class ShareViewModel {
                    let jpegData = image.jpegData(compressionQuality: 0.85) {
                     let fileURL = dir.appendingPathComponent(fileName)
                     try? jpegData.write(to: fileURL)
-                    pendingItems.append(.init(kind: .attachment, value: fileName))
+                    appendAttachmentIfWritten(fileName, at: fileURL)
                 }
             }
         }
@@ -155,7 +168,7 @@ final class ShareViewModel {
         if let dir = SharedContainerStore.sharedFileDirectory {
             let destURL = dir.appendingPathComponent(fileName)
             try? FileManager.default.copyItem(at: url, to: destURL)
-            pendingItems.append(.init(kind: .attachment, value: fileName))
+            appendAttachmentIfWritten(fileName, at: destURL)
         }
     }
 
@@ -170,7 +183,7 @@ final class ShareViewModel {
         if let dir = SharedContainerStore.sharedFileDirectory {
             let destURL = dir.appendingPathComponent(fileName)
             try? FileManager.default.copyItem(at: url, to: destURL)
-            pendingItems.append(.init(kind: .attachment, value: fileName))
+            appendAttachmentIfWritten(fileName, at: destURL)
         }
     }
 }
