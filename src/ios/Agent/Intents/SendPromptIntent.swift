@@ -147,6 +147,16 @@ struct SendPromptIntent: AppIntent {
             }
         }
 
+        // If the session is mid-run, let it settle before sending (mirrors
+        // AskMinisIntent / FollowUpSessionIntent). Without this, send() is
+        // silently swallowed by the view model's !isProcessing guard, and
+        // the wait loops below then finish with the PREVIOUS run — the
+        // shortcut reports "Task Completed" with the old reply while the
+        // new prompt never ran at all.
+        if vm.isProcessing {
+            for await processing in vm.$isProcessing.values where !processing { break }
+        }
+
         // Send the prompt
         vm.inputText = prompt
         vm.send()
