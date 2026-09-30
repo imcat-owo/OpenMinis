@@ -150,8 +150,8 @@ final class KimiOAuthManager: ObservableObject {
                     "device_code": deviceCode,
                     "client_id": clientID,
                 ])
-            } catch is CancellationError {
-                throw error
+            } catch let cancellationError as CancellationError {
+                throw cancellationError
             } catch {
                 // Transport-level failure (no HTTP response to classify) —
                 // one network blip shouldn't kill a login that may poll for
