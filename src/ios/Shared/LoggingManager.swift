@@ -39,6 +39,11 @@ final class LoggingManager: ObservableObject {
     // main thread (root cause of the writev hang in v1.4.0-dev).
     private let writerQueue = DispatchQueue(label: "LoggingManager.writer", qos: .utility)
     private var writeCount = 0
+    /// Partial-line carry between chunks, owned by `writerQueue`. read()
+    /// delivers fixed-size blocks that can split a line — or a multibyte
+    /// UTF-8 character — at any byte; the tail after the last newline is
+    /// held here and prepended to the next chunk.
+    private var lineCarry = Data()
 
     // [T-logging-writer-alloc-abort] Backpressure for the writer queue. The
     // reader thread hands every 4KB pipe chunk to `writerQueue.async` with no
@@ -149,6 +154,12 @@ final class LoggingManager: ObservableObject {
 
         // Drain any in-flight writes before closing the file handle.
         writerQueue.sync {
+            // Flush a trailing partial line (never newline-terminated) raw so
+            // stopping capture doesn't silently drop the stream's last bytes.
+            if !self.lineCarry.isEmpty {
+                _ = self.safeWrite(self.lineCarry)
+                self.lineCarry = Data()
+            }
             self.logFileHandle?.closeFile()
             self.logFileHandle = nil
         }
@@ -243,22 +254,39 @@ final class LoggingManager: ObservableObject {
         // that tipped `swift_allocObject` into `swift_abortAllocationFailure`.
         // safeWrite still wraps writeData: in ObjC @try/@catch so a closed pipe /
         // invalidated fd can't raise an NSException Swift can't catch.
-        if let text = String(data: data, encoding: .utf8) {
-            let timestamp = timeDateFormatter.string(from: capturedAt)
-            let prefixBytes = Array("[\(timestamp)] ".utf8)
-            var out = Data()
-            out.reserveCapacity(data.count + prefixBytes.count * 4 + 16)
-            let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-                .dropLast(text.hasSuffix("\n") ? 1 : 0)
-            for line in lines {
-                out.append(contentsOf: prefixBytes)
-                out.append(contentsOf: line.utf8)
-                out.append(0x0A) // "\n"
+        //
+        // Chunks arrive as raw 4096-byte read() blocks, NOT whole lines: only
+        // the part up to the last newline byte is processed now; the tail is
+        // carried into the next chunk. Splitting on the newline BYTE is safe
+        // for UTF-8 (0x0A never appears inside a multibyte sequence), so a
+        // character straddling the cut stays whole in the carry instead of
+        // failing the whole block's decode and losing its timestamps.
+        lineCarry.append(data)
+        if let lastNewline = lineCarry.lastIndex(of: 0x0A) {
+            let complete = lineCarry.subdata(in: 0...lastNewline)
+            lineCarry = lineCarry.subdata(in: (lastNewline + 1)..<lineCarry.count)
+            if let text = String(data: complete, encoding: .utf8) {
+                let timestamp = timeDateFormatter.string(from: capturedAt)
+                let prefixBytes = Array("[\(timestamp)] ".utf8)
+                var out = Data()
+                out.reserveCapacity(complete.count + prefixBytes.count * 4 + 16)
+                let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+                    .dropLast(text.hasSuffix("\n") ? 1 : 0)
+                for line in lines {
+                    out.append(contentsOf: prefixBytes)
+                    out.append(contentsOf: line.utf8)
+                    out.append(0x0A) // "\n"
+                }
+                if !out.isEmpty { _ = safeWrite(out) }
+            } else {
+                // Binary data — write raw
+                _ = safeWrite(complete)
             }
-            if !out.isEmpty { _ = safeWrite(out) }
-        } else {
-            // Binary data — write raw
-            _ = safeWrite(data)
+        } else if lineCarry.count > 1_048_576 {
+            // Over 1 MB without a single newline is not line-oriented text;
+            // flush it raw rather than buffering without bound.
+            _ = safeWrite(lineCarry)
+            lineCarry = Data()
         }
 
         // Periodically check file size (~every 4 MB of writes)
