@@ -34,6 +34,19 @@ final class BackupJSONLWriter {
         self.directory = directory
         self.baseName = baseName
         self.maxShardBytes = maxShardBytes
+        // A category whose export is re-run (resume without a done marker,
+        // or a fresh export reusing a staging tree) starts from scratch by
+        // design — but nothing removed the previous attempt's shards.
+        // Rollover only ever reopens shard 1; shards 2+ survive untouched,
+        // and the importer reads every shard matching the prefix, so
+        // records from the interrupted attempt (a session deleted since,
+        // say) would silently come back into the new package. Start clean.
+        let fm = FileManager.default
+        for name in (try? fm.contentsOfDirectory(atPath: directory.path)) ?? []
+        where name == "\(baseName).jsonl"
+            || (name.hasPrefix("\(baseName)-") && name.hasSuffix(".jsonl")) {
+            try? fm.removeItem(at: directory.appendingPathComponent(name))
+        }
     }
 
     func write<T: Codable>(_ envelope: BackupRecordEnvelope<T>) throws {
