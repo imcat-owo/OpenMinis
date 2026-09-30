@@ -16,7 +16,10 @@ func normalizeMarkdownListSyntax(_ markdown: String) -> String {
     for raw in lines {
         var line = String(raw)
         let trimmed = line.trimmingCharacters(in: .whitespaces)
-        if trimmed.hasPrefix("```") {
+        // Both fence spellings — the other passes in this file (protectBlocks,
+        // repairTruncatedCodeBlock, …) all recognize ~~~ as well; this one
+        // only knew ```, so list-looking lines inside ~~~ blocks got rewritten.
+        if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
             inCodeFence.toggle()
             normalized.append(line)
             continue
