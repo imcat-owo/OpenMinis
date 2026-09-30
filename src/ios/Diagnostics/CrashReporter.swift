@@ -718,6 +718,13 @@ final class CrashReporter: NSObject, MXMetricManagerSubscriber {
 
     func didReceive(_ payloads: [MXDiagnosticPayload]) {
         for payload in payloads {
+            // MetricKit delivers payloads long after the fact (up to ~24h);
+            // stamp reports with the payload's own end time, in the format
+            // writeReport parses for lastPhaseAt, instead of "now" — the
+            // delivery moment — which also fed the report filename.
+            let payloadTimeFmt = DateFormatter()
+            payloadTimeFmt.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZ"
+            let payloadTime = payloadTimeFmt.string(from: payload.timeStampEnd)
             if let crashDiags = payload.crashDiagnostics, !crashDiags.isEmpty {
                 for diag in crashDiags {
                     let exceptionType = diag.exceptionType?.description ?? "unknown"
@@ -754,7 +761,7 @@ final class CrashReporter: NSObject, MXMetricManagerSubscriber {
                         if let dur = entry.duration { d["duration"] = dur }
                         return d
                     }
-                    writeReport(type: type, callStack: stack, savedShellCommands: savedCmds)
+                    writeReport(type: type, callStack: stack, savedShellCommands: savedCmds, lastPhaseAt: payloadTime)
                 }
             }
 
@@ -776,7 +783,7 @@ final class CrashReporter: NSObject, MXMetricManagerSubscriber {
                         }
                         stack = lines.joined(separator: "\n")
                     }
-                    writeReport(type: type, callStack: stack, savedShellCommands: [])
+                    writeReport(type: type, callStack: stack, savedShellCommands: [], lastPhaseAt: payloadTime)
                     logger.warning("[MetricKit] Hang diagnostic: \(type)")
                 }
             }
@@ -852,8 +859,17 @@ final class CrashReporter: NSObject, MXMetricManagerSubscriber {
             crashDate = now
         }
 
-        df.dateFormat = "yyyyMMdd-HHmmss"
-        let filename = "crash-\(df.string(from: crashDate)).log"
+        df.dateFormat = "yyyyMMdd-HHmmss-SSS"
+        var filename = "crash-\(df.string(from: crashDate)).log"
+        // One MetricKit delivery can carry several diagnostics for the
+        // same moment. A second-precision name made them overwrite each
+        // other and silently drop reports; even milliseconds can collide
+        // in a burst, so de-collide against what's already on disk.
+        var collision = 2
+        while fm.fileExists(atPath: dir.appendingPathComponent(filename).path) {
+            filename = "crash-\(df.string(from: crashDate))-\(collision).log"
+            collision += 1
+        }
 
         let info = Bundle.main.infoDictionary
         let version = (info?["CFBundleShortVersionString"] as? String) ?? "?"
