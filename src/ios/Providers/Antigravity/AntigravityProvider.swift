@@ -425,7 +425,12 @@ final class AntigravityProvider: LLMProvider {
 
         for part in parts {
             if let text = part["text"] as? String, !text.isEmpty {
-                events.append(.textDelta(text))
+                // Requests ask for thoughts (includeThoughts), and the wire
+                // marks those parts with `thought: true` — route them to the
+                // thinking channel like GeminiProvider's parser does, or the
+                // reasoning text lands in the visible reply body.
+                let isThought = part["thought"] as? Bool ?? false
+                events.append(isThought ? .thinkingDelta(text) : .textDelta(text))
             }
             if let fc = part["functionCall"] as? [String: Any],
                let name = fc["name"] as? String {
