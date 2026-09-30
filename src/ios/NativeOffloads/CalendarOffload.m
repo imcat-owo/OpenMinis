@@ -520,6 +520,14 @@ static int cmd_freebusy(int argc, char **argv, int stdout_fd, BOOL compact, BOOL
         return NOFF_EXIT_INVALID_ARGS;
     }
 
+    // EKEventStore throws NSException if start > end (same guard as cmd_list:
+    // a lone future --start leaves end defaulted to now, i.e. start > end).
+    if ([start compare:end] == NSOrderedDescending) {
+        NSDate *tmp = start;
+        start = end;
+        end = tmp;
+    }
+
     NSPredicate *pred = [eventStore() predicateForEventsWithStartDate:start
                                                               endDate:end
                                                             calendars:nil];
