@@ -33,7 +33,16 @@ extension BackupImporter {
                 out.append(e)
             }
         }
-        return out
+        // A resumed export re-runs an interrupted category from scratch
+        // while the index writer appends, so files indexed before the
+        // interruption appear twice. Keep only the last row per
+        // (category, path) — the re-run's row — so restore neither
+        // writes nor counts the same file twice.
+        var lastIndex: [String: Int] = [:]
+        for (i, e) in out.enumerated() {
+            lastIndex["\(e.category)\u{0}\(e.path)"] = i
+        }
+        return out.enumerated().filter { lastIndex["\($0.element.category)\u{0}\($0.element.path)"] == $0.offset }.map(\.element)
     }
 
     // MARK: - Rollback
