@@ -969,6 +969,9 @@ final class ProviderConfigStore: ObservableObject {
     func removeInstance(_ instanceId: String) {
         // Collect entry UUIDs to remove from groups before deleting entries
         let removedEntryIds = Set(config.modelEntries.filter { $0.providerInstanceId == instanceId }.map(\.id))
+        // V3 entry records are keyed by uuid (see emitV3MarkDirty upserts);
+        // the delete marks below must use this key space, not the composite ids.
+        let removedEntryUuids = Set(config.modelEntries.filter { $0.providerInstanceId == instanceId }.map(\.uuid))
         // Capture groups that go empty as a side effect of this removal so we
         // can tombstone them too — otherwise the other device's snapshot of
         // those groups would resurrect them post-merge with no members.
@@ -1018,7 +1021,7 @@ final class ProviderConfigStore: ObservableObject {
         // emitV3MarkDirty no longer diff-infers deletions, so the instance, its
         // cascaded entries, and any groups emptied by the removal must each
         // emit their own delete record here.
-        let entryIds = removedEntryIds
+        let entryIds = removedEntryUuids
         let groupIds = removedGroupIds
         Task {
             await ChatStore.shared.markDirty(recordType: "ProviderInstanceV3", recordId: instanceId, operation: "delete")
@@ -1506,6 +1509,9 @@ final class ProviderConfigStore: ObservableObject {
     }
 
     func removeEntry(_ entryId: String) {
+        // V3 entry records are keyed by uuid (see emitV3MarkDirty upserts);
+        // resolve it before removal so the delete targets the same record.
+        let removedUuid = config.modelEntries.first { $0.id == entryId || $0.uuid == entryId }?.uuid ?? entryId
         config.modelEntries.removeAll { $0.id == entryId }
         // Also remove from groups — stamp a member-removal tombstone on each
         // group so the removal survives the inbound union-merge on peers.
@@ -1522,7 +1528,7 @@ final class ProviderConfigStore: ObservableObject {
         // [T-icloud-provider-sync-consistency] emitV3MarkDirty no longer
         // infers deletes from the snapshot diff, so an explicit removal must
         // emit its own V3 delete tombstone here.
-        Task { await ChatStore.shared.markDirty(recordType: "ProviderModelEntryV3", recordId: entryId, operation: "delete") }
+        Task { await ChatStore.shared.markDirty(recordType: "ProviderModelEntryV3", recordId: removedUuid, operation: "delete") }
     }
 
     /// Replace model entries for an instance with fresh ones (e.g. after API fetch).
