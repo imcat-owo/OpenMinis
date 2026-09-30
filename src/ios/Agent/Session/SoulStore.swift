@@ -397,8 +397,9 @@ enum SoulIconSource {
         let h = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
         if h == "localhost" || h.hasSuffix(".localhost") || h.hasSuffix(".local") { return true }
         if h == "::1" || h == "0:0:0:0:0:0:0:1" { return true }
-        // IPv6 unique-local / link-local
-        if h.hasPrefix("fc") || h.hasPrefix("fd") || h.hasPrefix("fe80:") { return true }
+        // IPv6 unique-local / link-local (literal IPv6 only — a hostname
+        // like fc.example.com must not be mistaken for an fc00::/8 address)
+        if h.contains(":"), h.hasPrefix("fc") || h.hasPrefix("fd") || h.hasPrefix("fe80:") { return true }
 
         let parts = h.split(separator: ".", omittingEmptySubsequences: false)
         guard parts.count == 4, let a = Int(parts[0]), let b = Int(parts[1]),
