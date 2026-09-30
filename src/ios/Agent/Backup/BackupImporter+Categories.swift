@@ -194,7 +194,8 @@ extension BackupImporter {
                 // straight from the package; nil for older packages.
                 modelId: msg.modelId, modelDisplayName: msg.modelDisplayName,
                 providerType: msg.providerType,
-                providerInstanceId: msg.providerInstanceId)
+                providerInstanceId: msg.providerInstanceId,
+                errorInfo: msg.errorInfo)
             switch outcome {
             case .inserted: report.imported += 1
             case .updated: report.updated += 1

@@ -7337,7 +7337,8 @@ extension ChatStore {
                         // restore so a restored package keeps its attribution.
                         // nil for packages written before the fields existed.
                         modelId: String? = nil, modelDisplayName: String? = nil,
-                        providerType: String? = nil, providerInstanceId: String? = nil) -> RestoreOutcome {
+                        providerType: String? = nil, providerInstanceId: String? = nil,
+                        errorInfo: String? = nil) -> RestoreOutcome {
         var exists = false
         var stmt: OpaquePointer?
         if sqlite3_prepare_v2(db, "SELECT id FROM sessions WHERE id = ?", -1, &stmt, nil) == SQLITE_OK {
@@ -7367,8 +7368,8 @@ extension ChatStore {
             INSERT OR REPLACE INTO messages
               (id, session_id, role, parts_json, created_at, token_usage, sort_order,
                reasoning_content, stream_interrupt_count, updated_at, part_flags,
-               model_id, model_display_name, provider_type, provider_instance_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, \(Self.partFlagsSQLExpr("?4")), ?, ?, ?, ?)
+               model_id, model_display_name, provider_type, provider_instance_id, error_info)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, \(Self.partFlagsSQLExpr("?4")), ?, ?, ?, ?, ?)
             """
         var ins: OpaquePointer?
         var outcome: RestoreOutcome = localUpdated == nil ? .inserted : .updated
@@ -7387,6 +7388,7 @@ extension ChatStore {
             bindText(ins, 12, modelDisplayName)
             bindText(ins, 13, providerType)
             bindText(ins, 14, providerInstanceId)
+            bindText(ins, 15, errorInfo)
             if sqlite3_step(ins) != SQLITE_DONE {
                 logger.warning("[Restore] message insert failed id=\(id.prefix(8)): \(String(cString: sqlite3_errmsg(db)))")
                 outcome = .skippedNoParent
