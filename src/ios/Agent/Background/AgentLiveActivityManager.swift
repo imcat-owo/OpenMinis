@@ -728,6 +728,16 @@ final class AgentLiveActivityManager {
                     self.pendingPushWorkItem = nil
                     guard let pending = self.pendingState as? AgentActivityAttributes.ContentState else { return }
                     self.pendingState = nil
+                    // The activity this push was queued for may have been
+                    // superseded while the throttle delay ran (renew ends the
+                    // old card and starts a new one). Pushing the stale state
+                    // anyway would write it to the dead card AND stamp
+                    // lastPushedState/lastPushDate with it, corrupting the
+                    // dedup record the new card's pushes compare against.
+                    guard (self.currentActivity as? Activity<AgentActivityAttributes>) === activity else {
+                        logger.info("[LiveActivity][update] deferred push dropped — its activity was superseded")
+                        return
+                    }
                     self.pushState(pending, activity: activity)
                 }
                 pendingPushWorkItem = work
@@ -860,6 +870,14 @@ final class AgentLiveActivityManager {
         // generation captured here is re-checked by the restart Task below.
         activityGeneration += 1
         let renewGeneration = activityGeneration
+        // A throttled push queued for the OLD activity must not fire after
+        // this renew: it would push a pre-renew state and stamp it into
+        // lastPushedState, overwriting the renew's own record below. Every
+        // other lifecycle transition (_start/_finish/_end, immediate push)
+        // cancels it; renew was the one that didn't.
+        pendingPushWorkItem?.cancel()
+        pendingPushWorkItem = nil
+        pendingState = nil
         currentActivity = nil
         let finalContent = ActivityContent(state: state, staleDate: nil)
 
