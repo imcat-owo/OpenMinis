@@ -60,6 +60,12 @@ extension AIChatViewModel {
     /// Queue the current input text as a prompt to be injected into the running agent loop.
     /// The message immediately appears in the chat with a dashed border (isQueued=true).
     func enqueuePrompt() {
+        // [T-ios-photo-pick-placeholder] Drop any non-ready attachments before
+        // snapshotting: a still-loading placeholder's bytes would be discarded
+        // once it leaves `attachments` (finalize*Placeholder only looks there)
+        // and a failed chip has no file at all, so only fully-loaded files may
+        // enter the queue. Mirrors the pruning send() applies at entry.
+        attachments.removeAll { $0.loadState != .ready }
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !attachments.isEmpty, isProcessing else { return }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()

@@ -4720,7 +4720,11 @@ struct AIChatView: View {
     }
 
     private var canEnqueue: Bool {
-        vm.isProcessing && !vm.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        // [T-ios-photo-pick-placeholder] Same attachment gate as canSend: while
+        // any picked photo/video is still loading, enqueueing would snapshot
+        // its /dev/null placeholder and silently drop the real bytes.
+        vm.isProcessing && !vm.hasLoadingAttachments
+            && !vm.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// Whether the composer actually holds something worth moving to another
