@@ -325,8 +325,21 @@ final class DoubaoVoiceProvider: VoiceProvider {
         guard let url = URL(string: urlStr) else {
             throw VoiceProviderError.parseError("Invalid URL: \(urlStr)")
         }
-        let raw = request.model ?? request.voice ?? defaultVoiceOutputVoice()
-        let speaker = raw.hasPrefix("seed-tts-") ? defaultVoiceOutputVoice() : raw
+        // Speaker resolution: the service layer carries the user's chosen
+        // voice in `voice` and a RESOURCE id ("seed-tts-2.0") in `model`,
+        // while the model-group path carries the speaker id itself in
+        // `model` with `voice` empty. Taking `model` first meant the
+        // service path's seed-tts-* placeholder always won, the prefix
+        // check then substituted the default voice, and the user's voice
+        // never reached the request.
+        let speaker: String
+        if let voice = request.voice, !voice.isEmpty {
+            speaker = voice
+        } else if let model = request.model, !model.isEmpty, !model.hasPrefix("seed-tts-") {
+            speaker = model
+        } else {
+            speaker = defaultVoiceOutputVoice()
+        }
         let resourceId: String
         if speaker.contains("_uranus_") || speaker.hasPrefix("saturn_") {
             resourceId = "seed-tts-2.0"
