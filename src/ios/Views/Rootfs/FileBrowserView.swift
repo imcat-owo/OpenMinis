@@ -1042,11 +1042,6 @@ class FileBrowserViewModel: ObservableObject {
     func deleteItem(_ item: FileItem) {
         let fm = FileManager.default
         do {
-            // For symlinks, also try removing the resolved target
-            if item.isSymlink {
-                let resolved = item.url.resolvingSymlinksInPath()
-                try? MountedFolderCoordinator.remove(at: resolved)
-            }
             // Remove the item (or symlink) at the logical path.
             // Use the path relative to currentPath to ensure we hit the right file
             // in case the URL was resolved differently.
