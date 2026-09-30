@@ -601,7 +601,15 @@ extension AppearanceStudio {
     }
 
     func categoryImage(for key: String) -> UIImage? {
-        UIImage(contentsOfFile: categoryImageURL(key).path)
+        // [PIC-1] Memory-cached read; the key already embeds size+mtime,
+        // so replacing the file invalidates without an explicit clear —
+        // the explicit clear in setCategoryImage covers the same-tick
+        // re-read before the filesystem settles.
+        let path = categoryImageURL(key).path
+        if let hit = ThumbnailCache.shared.cachedThumbnail(for: path) { return hit }
+        guard let image = UIImage(contentsOfFile: path) else { return nil }
+        ThumbnailCache.shared.store(image, for: path)
+        return image
     }
 
     func setCategoryImage(_ image: UIImage, for key: String) {
@@ -674,6 +682,7 @@ extension AppearanceStudio {
         }
         if let data = rendered.jpegData(compressionQuality: 0.86) {
             try? data.write(to: categoryImageURL(key), options: .atomic)
+            ThumbnailCache.shared.removeThumbnail(for: categoryImageURL(key).path)
         }
     }
 
@@ -682,7 +691,12 @@ extension AppearanceStudio {
     }
 
     func thinkingCardImage() -> UIImage? {
-        UIImage(contentsOfFile: thinkingCardURL().path)
+        // [PIC-1] Same cached-read pattern as categoryImage above.
+        let path = thinkingCardURL().path
+        if let hit = ThumbnailCache.shared.cachedThumbnail(for: path) { return hit }
+        guard let image = UIImage(contentsOfFile: path) else { return nil }
+        ThumbnailCache.shared.store(image, for: path)
+        return image
     }
 
     func hasThinkingCardImage() -> Bool {
@@ -702,6 +716,7 @@ extension AppearanceStudio {
         }
         if let data = rendered.jpegData(compressionQuality: 0.82) {
             try? data.write(to: thinkingCardURL(), options: .atomic)
+            ThumbnailCache.shared.removeThumbnail(for: thinkingCardURL().path)
         }
         var pack = currentThemePack()
         pack.thinkingCardJPEGBase64 = nil
@@ -710,6 +725,7 @@ extension AppearanceStudio {
 
     func removeThinkingCardImage() {
         try? FileManager.default.removeItem(at: thinkingCardURL())
+        ThumbnailCache.shared.removeThumbnail(for: thinkingCardURL().path)
         var pack = currentThemePack()
         pack.thinkingCardJPEGBase64 = nil
         persistPack(pack)
@@ -726,7 +742,12 @@ extension AppearanceStudio {
     }
 
     func inputBarImage() -> UIImage? {
-        UIImage(contentsOfFile: inputBarImageURL().path)
+        // [PIC-1] Same cached-read pattern as categoryImage above.
+        let path = inputBarImageURL().path
+        if let hit = ThumbnailCache.shared.cachedThumbnail(for: path) { return hit }
+        guard let image = UIImage(contentsOfFile: path) else { return nil }
+        ThumbnailCache.shared.store(image, for: path)
+        return image
     }
 
     func hasInputBarImage() -> Bool {
@@ -746,6 +767,7 @@ extension AppearanceStudio {
         }
         if let data = rendered.jpegData(compressionQuality: 0.82) {
             try? data.write(to: inputBarImageURL(), options: .atomic)
+            ThumbnailCache.shared.removeThumbnail(for: inputBarImageURL().path)
         }
         var pack = currentThemePack()
         pack.inputBarJPEGBase64 = nil
@@ -754,6 +776,7 @@ extension AppearanceStudio {
 
     func removeInputBarImage() {
         try? FileManager.default.removeItem(at: inputBarImageURL())
+        ThumbnailCache.shared.removeThumbnail(for: inputBarImageURL().path)
         var pack = currentThemePack()
         pack.inputBarJPEGBase64 = nil
         persistPack(pack)

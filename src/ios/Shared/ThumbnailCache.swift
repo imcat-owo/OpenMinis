@@ -14,6 +14,9 @@ final class ThumbnailCache {
     /// waiter is called with the load's result when it finishes — however
     /// long the decode takes.
     private var waiters: [String: [(UIImage?) -> Void]] = [:]
+    /// [PIC-1] path → live cache keys, so `removeThumbnail(for:)` can drop
+    /// every maxSize variant of one file when it is replaced or deleted.
+    private var pathIndex: [String: Set<String>] = [:]
     private let lock = NSLock()
 
     private init() {
@@ -80,8 +83,7 @@ final class ThumbnailCache {
             let image = Self.loadAndDownsample(path: path, maxSize: maxSize)
 
             if let image {
-                let cost = Int(image.size.width * image.size.height * 4)
-                self.cache.setObject(image, forKey: key as NSString, cost: cost)
+                self.store(image, for: path, maxSize: maxSize)
             }
 
             self.lock.lock()
@@ -133,7 +135,30 @@ final class ThumbnailCache {
     // MARK: - Eviction
 
     func removeAll() {
+        lock.lock()
+        pathIndex.removeAll()
+        lock.unlock()
         cache.removeAllObjects()
+    }
+
+    /// [PIC-1] Synchronously store a decoded image (e.g. a settings
+    /// surface that already decoded the file on its own path).
+    func store(_ image: UIImage, for path: String, maxSize: CGFloat = 400) {
+        let key = cacheKey(path: path, maxSize: maxSize)
+        let cost = Int(image.size.width * image.size.height * 4)
+        cache.setObject(image, forKey: key as NSString, cost: cost)
+        lock.lock()
+        pathIndex[path, default: []].insert(key)
+        lock.unlock()
+    }
+
+    /// [PIC-1] Drop every cached variant of `path` — call when the file is
+    /// replaced or deleted so the old image is never served again.
+    func removeThumbnail(for path: String) {
+        lock.lock()
+        let keys = pathIndex.removeValue(forKey: path) ?? []
+        lock.unlock()
+        for key in keys { cache.removeObject(forKey: key as NSString) }
     }
 
     // MARK: - Private

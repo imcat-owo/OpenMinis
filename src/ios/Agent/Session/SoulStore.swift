@@ -72,10 +72,25 @@ enum SoulIconImage {
     /// so callers fall back to the default presentation.
     static func decode(_ value: String) -> UIImage? {
         guard isDataURI(value) else { return nil }
+        // [PIC-1] Decoded-image cache: every chat bubble header, settings
+        // preview and icon picker row decodes the same data URI on each
+        // render — base64 + full decode per frame. Cache per value (keyed
+        // by the process-stable hash; a new avatar is a new value, so
+        // replacing the icon can never serve the old image).
+        let key = "soulavatar:\(value.hashValue)" as NSString
+        if let hit = avatarCache.object(forKey: key) { return hit }
         let b64 = String(value.dropFirst(prefix.count))
-        guard let data = Data(base64Encoded: b64) else { return nil }
-        return UIImage(data: data)
+        guard let data = Data(base64Encoded: b64),
+              let image = UIImage(data: data) else { return nil }
+        avatarCache.setObject(image, forKey: key)
+        return image
     }
+
+    private static let avatarCache: NSCache<NSString, UIImage> = {
+        let c = NSCache<NSString, UIImage>()
+        c.countLimit = 32
+        return c
+    }()
 
     /// Centre-crop to 1:1, keeping the shorter edge.
     private static func squareCropped(_ image: UIImage) -> UIImage {
