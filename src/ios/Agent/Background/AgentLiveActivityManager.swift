@@ -50,6 +50,10 @@ final class AgentLiveActivityManager {
     /// Cleared by start/end so a fresh task never inherits a stale "finished" flag.
     private var awaitingDismissal = false
     private var isFinishing = false
+    /// Stamps each _finishActivity run (and each start/end that force-clears
+    /// `isFinishing`) so a finishing run's deferred flag-clear only lands if
+    /// no newer lifecycle owner has taken the flag over in the meantime.
+    private var finishGeneration = 0
 
     private static let isActivityKitAvailable: Bool = {
         #if targetEnvironment(macCatalyst)
@@ -447,6 +451,7 @@ final class AgentLiveActivityManager {
         // A fresh task supersedes any lingering completed activity.
         awaitingDismissal = false
         isFinishing = false
+        finishGeneration += 1
         // This start supersedes any pending start left over from a failed
         // background request; keeping it would double-start on foreground.
         pendingStartState = nil
@@ -964,7 +969,15 @@ final class AgentLiveActivityManager {
             return
         }
         isFinishing = true
-        defer { isFinishing = false }
+        finishGeneration += 1
+        let myFinishGeneration = finishGeneration
+        defer {
+            // Only clear the flag if it is still OURS: _startActivity may
+            // have force-cleared it and a second finish may already be
+            // running — an unconditional clear would strip the new run's
+            // mutual exclusion.
+            if finishGeneration == myFinishGeneration { isFinishing = false }
+        }
 
         guard let activity = currentActivity as? Activity<AgentActivityAttributes> else {
             logger.info("[LiveActivity][finish] no current activity — falling back to end")
@@ -1028,9 +1041,14 @@ final class AgentLiveActivityManager {
         // widget can show the static total run time in the resting state.
         finishedRaw.finishedAt = Date()
         let finished = withAudioState(finishedRaw)
+        // Identity, not just existence: while the getSession awaits above
+        // were suspended, a NEW task may have started its own activity
+        // (which also re-set awaitingDismissal). Pushing this run's
+        // "finished" state would then land on the captured OLD activity
+        // while stamping the NEW activity's lastPushedState record.
         guard self.awaitingDismissal,
-              self.currentActivity as? Activity<AgentActivityAttributes> != nil else {
-            logger.info("[LiveActivity][finish] dropped completed push — activity already dismissed")
+              (self.currentActivity as? Activity<AgentActivityAttributes>) === activity else {
+            logger.info("[LiveActivity][finish] dropped completed push — activity already dismissed or superseded")
             return
         }
         let content = ActivityContent(state: finished, staleDate: nil)
@@ -1062,6 +1080,7 @@ final class AgentLiveActivityManager {
     private func _endActivity() {
         awaitingDismissal = false
         isFinishing = false
+        finishGeneration += 1
         // A leftover pending start (from a failed background request)
         // must die with the activity — otherwise the next foreground
         // cleanup resurrects a Live Activity for a finished task.
