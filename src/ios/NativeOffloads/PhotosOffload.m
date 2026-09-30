@@ -851,7 +851,10 @@ static NSString *create_user_album_sync(NSString *name, NSError **outError) {
         if (!success) changeErr = error;
         dispatch_semaphore_signal(sem);
     }];
-    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+    if (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC)) != 0 && !changeErr) {
+        changeErr = [NSError errorWithDomain:@"PhotosOffload" code:-1
+                                    userInfo:@{NSLocalizedDescriptionKey: @"Timed out waiting for the photo library change to complete."}];
+    }
 
     if (changeErr) {
         if (outError) *outError = changeErr;
@@ -965,7 +968,10 @@ static int cmd_import(int argc, char **argv, int stdout_fd, int stderr_fd,
         if (!success) changeErr = error;
         dispatch_semaphore_signal(sem);
     }];
-    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC));
+    if (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) != 0 && !changeErr) {
+        changeErr = [NSError errorWithDomain:@"PhotosOffload" code:-1
+                                    userInfo:@{NSLocalizedDescriptionKey: @"Timed out waiting for the photo library change to complete."}];
+    }
 
     if (changeErr) {
         NSDictionary *err = noff_json_error(TOOL_NAME, action,
@@ -1024,7 +1030,10 @@ static int cmd_create_album(int argc, char **argv, int stdout_fd, int stderr_fd,
         if (!success) changeErr = error;
         dispatch_semaphore_signal(sem);
     }];
-    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+    if (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC)) != 0 && !changeErr) {
+        changeErr = [NSError errorWithDomain:@"PhotosOffload" code:-1
+                                    userInfo:@{NSLocalizedDescriptionKey: @"Timed out waiting for the photo library change to complete."}];
+    }
 
     if (changeErr) {
         NSDictionary *err = noff_json_error(TOOL_NAME, @"create-album",
@@ -1188,7 +1197,10 @@ static int cmd_add_to_album(int argc, char **argv, int stdout_fd, int stderr_fd,
         dispatch_semaphore_signal(sem);
     }];
     // Importing files from disk can take time; allow 60s like cmd_import.
-    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC));
+    if (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) != 0 && !changeErr) {
+        changeErr = [NSError errorWithDomain:@"PhotosOffload" code:-1
+                                    userInfo:@{NSLocalizedDescriptionKey: @"Timed out waiting for the photo library change to complete."}];
+    }
 
     if (changeErr) {
         NSDictionary *err = noff_json_error(TOOL_NAME, @"add-to-album",
@@ -1253,7 +1265,10 @@ static int cmd_favorite(int argc, char **argv, int stdout_fd, int stderr_fd, BOO
         if (!success) changeErr = error;
         dispatch_semaphore_signal(sem);
     }];
-    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+    if (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC)) != 0 && !changeErr) {
+        changeErr = [NSError errorWithDomain:@"PhotosOffload" code:-1
+                                    userInfo:@{NSLocalizedDescriptionKey: @"Timed out waiting for the photo library change to complete."}];
+    }
 
     if (changeErr) {
         NSDictionary *err = noff_json_error(TOOL_NAME, @"favorite",
@@ -1325,7 +1340,10 @@ static int cmd_delete(int argc, char **argv, int stdout_fd, int stderr_fd, BOOL 
         }
         dispatch_semaphore_signal(sem);
     }];
-    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+    if (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC)) != 0 && !changeErr) {
+        changeErr = [NSError errorWithDomain:@"PhotosOffload" code:-1
+                                    userInfo:@{NSLocalizedDescriptionKey: @"Timed out waiting for the photo library change to complete."}];
+    }
 
     if (changeErr) {
         NSDictionary *err = noff_json_error(TOOL_NAME, @"delete",
