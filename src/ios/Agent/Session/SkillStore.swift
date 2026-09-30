@@ -929,6 +929,21 @@ thinking 填/描/强调不必手写。贴包后跟 `colorsLight.accent` / 聊天
         // stale pre-update one.
         let refreshed = try importSkill(content: preflight.content, source: .url(urlString))
 
+        // A rename means the import landed under a NEW id while the old
+        // skill is still fully installed: two copies of the same skill,
+        // and only the new one will ever update again. The sync import
+        // path already treats "same skill, different id" as replace, not
+        // keep-both (see importSkillFromSync) — do the same here. Carry
+        // the enabled state over first: importSkill defaulted the unknown
+        // new id to enabled, which would silently re-enable a skill the
+        // user had deliberately turned off.
+        if refreshed.id != skillId {
+            if refreshed.isEnabled != skill.isEnabled {
+                setEnabled(refreshed.id, enabled: skill.isEnabled)
+            }
+            deleteSkill(skillId)
+        }
+
         // Now re-run sibling download synchronously (the user is looking at
         // a spinner) so we can return the partial-success state directly.
         guard let ghInfo = Self.parseGitHubURL(urlString) else { return .success }
