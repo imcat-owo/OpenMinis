@@ -2564,6 +2564,11 @@ extension SkillStore {
             let commentLen = Int(readU16(data, at: pos + 32))
             let localOffset = Int(readU32(data, at: pos + 42))
 
+            // nameLen comes from the (untrusted) ZIP — a crafted value used
+            // to make the slice below run past the buffer and trap. Bail on
+            // the central directory instead of crashing.
+            guard pos + 46 + nameLen <= data.count else { break }
+
             let nameData = data[pos+46 ..< pos+46+nameLen]
             let name = String(data: nameData, encoding: .utf8) ?? ""
 
