@@ -2992,9 +2992,28 @@ extension CloudSyncEngine: CKSyncEngineDelegate {
                 }
 
                 // Process deletes
+                var transientDeleteIDs: [CKRecord.ID] = []
+                var deleteIDsToRemove: [CKRecord.ID] = []
                 for (recordID, deleteError) in sentChanges.failedRecordDeletes {
                     logger.warning("[CloudSync] Failed to delete: \(recordID.recordName) — \(deleteError)")
-                    recordNamesToClean.append(recordID.recordName)
+                    if Self.isTransientCKError(deleteError)
+                        || deleteError.code == .serverRecordChanged {
+                        // Transient failure (or the record changed on the
+                        // server): the cloud copy still exists, so the
+                        // tombstone must survive and the delete must be
+                        // retried — mirroring the transient save branch
+                        // above. This loop used to clear the dirty mark for
+                        // EVERY failed delete, which stranded the cloud copy
+                        // forever and let it be fetched back as a resurrection.
+                        transientDeleteIDs.append(recordID)
+                    } else {
+                        // unknownItem means the record is already gone —
+                        // the delete's goal is met. Any other permanent
+                        // error is dropped like a permanent save failure so
+                        // it doesn't retry forever.
+                        recordNamesToClean.append(recordID.recordName)
+                        deleteIDsToRemove.append(recordID)
+                    }
                 }
                 for deletedID in sentChanges.deletedRecordIDs {
                     recordNamesToClean.append(deletedID.recordName)
@@ -3068,6 +3087,16 @@ extension CloudSyncEngine: CKSyncEngineDelegate {
                     if !transientRetryIDs.isEmpty {
                         self.syncEngine?.state.add(pendingRecordZoneChanges: transientRetryIDs.map { .saveRecord($0) })
                         logger.info("[CloudSync] re-queued \(transientRetryIDs.count) records after transient save error")
+                    }
+                    // Re-queue transiently failed deletes (their dirty
+                    // tombstones were kept above) so the cloud copy is
+                    // actually deleted on a later pass.
+                    if !transientDeleteIDs.isEmpty {
+                        self.syncEngine?.state.add(pendingRecordZoneChanges: transientDeleteIDs.map { .deleteRecord($0) })
+                        logger.info("[CloudSync] re-queued \(transientDeleteIDs.count) deletes after transient delete error")
+                    }
+                    if !deleteIDsToRemove.isEmpty {
+                        self.syncEngine?.state.remove(pendingRecordZoneChanges: deleteIDsToRemove.map { .deleteRecord($0) })
                     }
                     // Remove non-recoverable failures from pending queue
                     if !recordIDsToRemove.isEmpty {
