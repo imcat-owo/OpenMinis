@@ -557,7 +557,7 @@ struct BackupRestoreView: View {
                 if prov.credentialsRestored > 0 {
                     // Credentials now always travel with Providers, so this is
                     // the normal outcome rather than a bonus.
-                    Text("API keys were restored for \(prov.credentialsRestored) provider(s) along with their settings. Existing keys on this device were kept. OAuth logins may still need to be renewed if their tokens have expired.")
+                    Text("API keys were restored for \(prov.credentialsRestored) credential(s) along with their settings. Existing keys on this device were kept. OAuth logins may still need to be renewed if their tokens have expired.")
                 } else if prov.credentialsKept > 0 {
                     // [T-backup-credentials-message-inverted] Nothing was
                     // WRITTEN, but only because every key in the package is

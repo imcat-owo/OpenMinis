@@ -433,7 +433,12 @@ extension BackupImporter {
         // §3.3: credentials belong to this category and restore with it.
         // Absent for a "share copy" package, which is why nil is not an error.
         if let creds = await MainActor.run(body: { BackupSecretsImporter.restore(from: root) }) {
-            report.credentialsRestored = creds.providersRestored
+            // All three credential kinds count as restored: env vars and
+            // MCP OAuth written back here were previously dropped from the
+            // report, which under-counted "API keys restored" and could
+            // drop the restore footer into its "created without API keys"
+            // branch even though credentials had just been written.
+            report.credentialsRestored = creds.total
             report.credentialsKept = creds.providersSkippedExisting
                 + creds.envVarsSkippedExisting + creds.mcpOAuthSkippedExisting
         }
