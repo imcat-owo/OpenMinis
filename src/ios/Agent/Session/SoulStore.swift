@@ -582,7 +582,7 @@ enum SoulMDParser {
             var value = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
             // Strip optional surrounding double quotes; otherwise take raw.
             if value.hasPrefix("\""), value.hasSuffix("\""), value.count >= 2 {
-                value = String(value.dropFirst().dropLast())
+                value = Self.unescape(String(value.dropFirst().dropLast()))
             }
             switch key {
             case "name":  if !value.isEmpty { meta.name = value }
@@ -637,6 +637,29 @@ enum SoulMDParser {
     private static func escape(_ s: String) -> String {
         s.replacingOccurrences(of: "\\", with: "\\\\")
          .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
+    /// Inverse of `escape`. Only `\\` and `\"` are escape sequences
+    /// `escape` can produce; any other backslash is left untouched so
+    /// hand-written values keep their literal meaning.
+    private static func unescape(_ s: String) -> String {
+        var out = ""
+        out.reserveCapacity(s.count)
+        var i = s.startIndex
+        while i < s.endIndex {
+            let c = s[i]
+            if c == "\\" {
+                let next = s.index(after: i)
+                if next < s.endIndex, s[next] == "\\" || s[next] == "\"" {
+                    out.append(s[next])
+                    i = s.index(after: next)
+                    continue
+                }
+            }
+            out.append(c)
+            i = s.index(after: i)
+        }
+        return out
     }
 }
 
