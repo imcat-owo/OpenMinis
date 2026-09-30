@@ -399,7 +399,13 @@ enum SwiftMathRenderer {
             ("\\displaystyle", ""), ("\\left", ""), ("\\right", ""),
             ("\\big", ""), ("\\Big", ""), ("\\bigg", ""), ("\\Bigg", ""),
         ]
-        for (cmd, repl) in replacements {
+        // Apply longest-first: several commands are prefixes of longer ones
+        // (\cdot of \cdots, \big of \bigg, \Big of \Bigg), and plain
+        // sequential replacement let the shorter one consume the longer
+        // command's head, leaving debris (\cdots → "·s", \bigg → "g").
+        // Equal-length commands can never prefix each other, so ordering
+        // among them is irrelevant.
+        for (cmd, repl) in replacements.sorted(by: { $0.0.count > $1.0.count }) {
             s = s.replacingOccurrences(of: cmd, with: repl)
         }
 
