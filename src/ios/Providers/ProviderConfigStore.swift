@@ -177,6 +177,26 @@ final class ProviderConfigStore: ObservableObject {
     /// but we'd rather degrade to JSON-only than crash).
     private(set) var db: ProviderConfigDB?
 
+    /// [R3-107] Tail of the serial chain for ALL whole-config SQLite
+    /// writes (save(), applyMergedConfigFromSync, adoptDB prune). The DB
+    /// actor serializes individual bulkReplace calls but NOT their arrival
+    /// order, and the three writers used to fire independent detached
+    /// tasks — an older snapshot's replace could land after a newer one,
+    /// and since the DB is authoritative at next launch, the last edits
+    /// were silently rolled back on restart. Every bulk write now goes
+    /// through `enqueueDBWrite`, which appends to this chain on the main
+    /// actor, so writes execute strictly in enqueue order.
+    private var dbWriteTail: Task<Void, Never>?
+
+    /// Append a whole-config DB write to the serial chain (see dbWriteTail).
+    private func enqueueDBWrite(_ work: @escaping @Sendable () async -> Void) {
+        let prior = dbWriteTail
+        dbWriteTail = Task.detached {
+            await prior?.value
+            await work()
+        }
+    }
+
     /// Snapshot of the config the last time `save()` ran, used to diff
     /// against the current `config` for per-record v3 markDirty emission.
     /// `nil` until the first save() runs after init.
@@ -328,9 +348,14 @@ final class ProviderConfigStore: ObservableObject {
                 self.ensureVoiceTemplateModels()
                 self.objectWillChange.send()
                 if !prunedAtLoad.isEmpty {
-                    let snapshot = deduped
+                    // [R3-107] Through the serial chain (see dbWriteTail), and
+                    // snapshot the CURRENT config rather than `deduped`: this
+                    // block runs after the normalizeReferences save() above,
+                    // so under the chain the pre-normalization snapshot would
+                    // deterministically overwrite that save's normalized refs.
+                    let snapshot = self.config
                     let toDelete = prunedAtLoad
-                    Task.detached {
+                    enqueueDBWrite {
                         await db.bulkReplace(from: snapshot)
                         for eid in toDelete { await db.deleteEntryRow(id: eid) }
                     }
@@ -629,7 +654,8 @@ final class ProviderConfigStore: ObservableObject {
         let prior = lastSavedSnapshot
         lastSavedSnapshot = snapshot
         if let db {
-            Task.detached {
+            // [R3-107] Through the serial chain — see dbWriteTail.
+            enqueueDBWrite {
                 await db.bulkReplace(from: snapshot)
                 await Self.emitV3MarkDirty(prior: prior, current: snapshot)
             }
@@ -2147,16 +2173,13 @@ final class ProviderConfigStore: ObservableObject {
         // a fire-and-forget snapshot write with no ordering dependency; a later
         // apply simply overwrites it atomically. The SQLite mirror below is
         // likewise already off-main.
+        // [R3-107] The disk mirror and the SQLite mirror below now run as
+        // ONE unit on the serial DB-write chain (see dbWriteTail): they
+        // used to be two independent detached tasks that could land in
+        // either order relative to a concurrent save(), leaving the
+        // authoritative DB holding an older snapshot than the last merge.
         let snapshotForDisk = config
         let diskURL = fileURL
-        Task.detached(priority: .utility) {
-            do {
-                let data = try JSONEncoder().encode(snapshotForDisk)
-                try data.write(to: diskURL, options: .atomic)
-            } catch {
-                AppLogger(category: "ProviderConfigStore").error("Failed to persist merged provider config: \(error)")
-            }
-        }
         // Mirror the merged config into SQLite too — but suppress v3
         // markDirty emission since this update originated INBOUND from
         // sync (re-emitting it would round-trip the same payload back
@@ -2164,10 +2187,17 @@ final class ProviderConfigStore: ObservableObject {
         // The lastSavedSnapshot is also updated so the next mutate's
         // diff is correctly anchored against the freshly-merged state.
         lastSavedSnapshot = config
-        if let db {
-            let snapshot = config
-            let toDelete = prunedEntryIds
-            Task.detached {
+        let snapshot = config
+        let toDelete = prunedEntryIds
+        let dbForWrite = db
+        enqueueDBWrite {
+            do {
+                let data = try JSONEncoder().encode(snapshotForDisk)
+                try data.write(to: diskURL, options: .atomic)
+            } catch {
+                AppLogger(category: "ProviderConfigStore").error("Failed to persist merged provider config: \(error)")
+            }
+            if let dbForWrite {
                 // [T-icloud-agentloop-wipe] INBOUND path — turn on the
                 // local-only preserve guard. agentLoopModelEntryIds is
                 // per-device state that a peer's config knows nothing about, so
@@ -2176,11 +2206,11 @@ final class ProviderConfigStore: ObservableObject {
                 // selection on every merge (OpenMinis#98 defect 2). The
                 // user-initiated save() path deliberately does NOT set this —
                 // there, an empty list really does mean "clear it".
-                await db.bulkReplace(from: snapshot, preserveLocalOnlyStateIfEmpty: true)
+                await dbForWrite.bulkReplace(from: snapshot, preserveLocalOnlyStateIfEmpty: true)
                 // Physically remove the pruned duplicate entry rows so they
                 // don't reappear from the DB, and tombstone them so the
                 // deletion propagates instead of resurrecting from a peer.
-                for eid in toDelete { await db.deleteEntryRow(id: eid) }
+                for eid in toDelete { await dbForWrite.deleteEntryRow(id: eid) }
             }
         }
         if !prunedEntryIds.isEmpty {
