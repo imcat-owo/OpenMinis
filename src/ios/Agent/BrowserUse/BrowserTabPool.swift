@@ -636,15 +636,31 @@ final class BrowserTabPool: ObservableObject {
         }
 
         // Wait for the predecessor, but no longer than serialWaitTimeout.
-        let waited = await withTaskGroup(of: Bool.self) { group -> Bool in
-            group.addTask { await predecessor.value; return true }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(Self.serialWaitTimeout * 1_000_000_000))
-                return false
+        // NOT withTaskGroup: the predecessor is a Task<Void, Never> that
+        // only completes on release() and never responds to cancellation,
+        // so a task group would be forced to wait for it even after the
+        // timeout child fired — the 60s cap never actually fired. Race the
+        // two with a continuation instead; whichever finishes first wins,
+        // and the loser is simply ignored when it eventually lands.
+        final class WaitRaceBox: @unchecked Sendable {
+            private var lock = os_unfair_lock()
+            private var continuation: CheckedContinuation<Bool, Never>?
+            init(_ cont: CheckedContinuation<Bool, Never>) { continuation = cont }
+            func finish(_ value: Bool) {
+                os_unfair_lock_lock(&lock)
+                let cont = continuation
+                continuation = nil
+                os_unfair_lock_unlock(&lock)
+                cont?.resume(returning: value)
             }
-            let first = await group.next() ?? false
-            group.cancelAll()
-            return first
+        }
+        let waited = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            let race = WaitRaceBox(cont)
+            Task { await predecessor.value; race.finish(true) }
+            Task {
+                try? await Task.sleep(nanoseconds: UInt64(Self.serialWaitTimeout * 1_000_000_000))
+                race.finish(false)
+            }
         }
 
         if waited {
