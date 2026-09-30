@@ -2352,6 +2352,16 @@ extension SkillStore {
             let localBundled = collectRelativePaths(in: skillDir).filter { $0 != "SKILL.md" }
             var prunedCount = 0
             for rel in localBundled where !zipPaths.contains(rel) {
+                // The sender deliberately leaves excluded dirs (node_modules,
+                // .venv, vendor, …) OUT of the ZIP — their absence from the
+                // package is not a deletion. Pruning them here used to wipe
+                // the receiver's local copies on every sync import.
+                let goesThroughExcludedDir = rel.split(separator: "/")
+                    .contains { Self.isExcludedDir(String($0)) }
+                guard !goesThroughExcludedDir else {
+                    syncLogger.info("[IMPORT] '\(skillId)' kept excluded dir file: \(rel)")
+                    continue
+                }
                 let libFile = skillDir.appendingPathComponent(rel)
                 try? fm.removeItem(at: libFile)
                 let rootfsFile = rootfsDir.appendingPathComponent(rel)
