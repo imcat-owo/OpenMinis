@@ -306,6 +306,35 @@ final class CloudSyncEngine: ObservableObject {
     /// Allows importing own-zone records from iCloud to restore data.
     private var isRestoringFromCloud = false
 
+    /// Processing tasks spawned for `.fetchedRecordZoneChanges` batches.
+    /// Registered synchronously inside the nonisolated delegate callback
+    /// (CKSyncEngine delivers events serially, so a cycle's record batches
+    /// are always registered before its `.didFetchChanges` arrives), and
+    /// drained by the did-fetch handler, which must wait for the actual
+    /// processing to finish before clearing `isRestoringFromCloud`:
+    /// processing runs detached and yields on every record, so event order
+    /// is not processing order — clearing the flag early makes the own-zone
+    /// gate in `processRemoteRecord` drop the back half of a fresh-install
+    /// restore as echoes, and the fetch cursor has already advanced past
+    /// those records, so they are never redelivered.
+    private let fetchProcessingLock = NSLock()
+    nonisolated(unsafe) private var fetchProcessingTasks: [Task<Void, Never>] = []
+
+    nonisolated private func registerFetchProcessing(_ task: Task<Void, Never>) {
+        fetchProcessingLock.lock()
+        fetchProcessingTasks.append(task)
+        fetchProcessingLock.unlock()
+    }
+
+    /// Wait for every fetch-processing task registered so far to finish.
+    private func awaitFetchProcessing() async {
+        fetchProcessingLock.lock()
+        let tasks = fetchProcessingTasks
+        fetchProcessingTasks = []
+        fetchProcessingLock.unlock()
+        for task in tasks { await task.value }
+    }
+
     /// Thread-safe storage for pre-computed records, accessible from nonisolated delegate callbacks.
     private let pendingChanges = PendingRecordChanges()
     /// Guard against concurrent sendChanges() calls — CKSyncEngine asserts if re-entered.
@@ -2763,7 +2792,7 @@ extension CloudSyncEngine: CKSyncEngineDelegate {
             }
 
         case .fetchedRecordZoneChanges(let zoneChanges):
-            Task.detached { [weak self] in
+            let fetchProcessingTask = Task.detached { [weak self] in
                 guard let self else { return }
                 let ownDeviceId = await MainActor.run { DeviceIdentity.deviceId }
                 // Only count changes from OTHER devices (not our own zone echoed back).
@@ -2830,6 +2859,7 @@ extension CloudSyncEngine: CKSyncEngineDelegate {
                 }
                 await MainActor.run { [weak self] in self?.lastSyncDate = Date() }
             }
+            registerFetchProcessing(fetchProcessingTask)
 
         case .sentRecordZoneChanges(let sentChanges):
             // Process results off the main thread to avoid blocking UI.
@@ -3092,6 +3122,13 @@ extension CloudSyncEngine: CKSyncEngineDelegate {
         case .didFetchChanges:
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                // The delegate event only means the engine finished
+                // FETCHING — the detached per-record processing registered
+                // above may still be mid-batch. Wait for it before leaving
+                // restore mode (and before reading fetchHadRemoteChanges,
+                // which that processing sets), or the back half of a
+                // fresh-install restore is skipped as own-zone echoes.
+                await self.awaitFetchProcessing()
                 if self.isRestoringFromCloud {
                     logger.info("[CloudSync] Cloud restore complete — resuming normal sync mode")
                     self.isRestoringFromCloud = false
