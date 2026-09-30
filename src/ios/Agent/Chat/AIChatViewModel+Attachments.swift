@@ -406,10 +406,14 @@ extension AIChatViewModel {
                     let resized = Self.resizedImageData(data, maxLongEdge: 2000) ?? data
                     let ext = attachment.cacheURL.pathExtension.lowercased()
                     let mime: String
+                    // resizedImageData re-encodes to JPEG whenever it returns
+                    // data, so a resized payload must be labelled image/jpeg
+                    // for every source type — same rule the normal send path
+                    // applies (AIChatViewModel.swift).
                     switch ext {
                     case "png": mime = resized.count == data.count ? "image/png" : "image/jpeg"
-                    case "gif": mime = "image/gif"
-                    case "webp": mime = "image/webp"
+                    case "gif": mime = resized.count == data.count ? "image/gif" : "image/jpeg"
+                    case "webp": mime = resized.count == data.count ? "image/webp" : "image/jpeg"
                     default: mime = "image/jpeg"
                     }
                     parts.append(.text("[attached image: \(linuxPath)]"))
