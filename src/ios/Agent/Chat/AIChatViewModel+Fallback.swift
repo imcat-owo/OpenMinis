@@ -54,7 +54,8 @@ extension AIChatViewModel {
                 // Show the network error on the message during countdown
                 if let lastError {
                     let desc = (lastError as? LocalizedError)?.errorDescription ?? String(describing: lastError)
-                    chatMessage?.error = desc
+                    // [API-10] Same plain-language triage as the final error.
+                    chatMessage?.error = Self.friendlyErrorMessage(desc)
                 }
                 for remaining in stride(from: delay, through: 1, by: -1) {
                     self.autoRetryCountdown = remaining

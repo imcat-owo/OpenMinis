@@ -104116,6 +104116,166 @@
           }
         }
       }
+    },
+    "The provider's safety filter blocked this content. Try rephrasing it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "内容被供应商的安全过滤拦下了。换个说法再试试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "內容被供應商的安全過濾攔下了。換個說法再試試。"
+          }
+        }
+      }
+    },
+    "The provider rejected the API key — it may be invalid or expired. Check the key for this provider in Settings, or switch to another model." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "供应商把密钥拒了，可能失效或填错了。去设置里检查这个供应商的 key，或者换个模型再试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "供應商把金鑰拒了，可能失效或填錯了。去設定裡檢查這個供應商的 key，或者換個模型再試。"
+          }
+        }
+      }
+    },
+    "This looks like a balance or quota problem. Check your balance with the provider, or switch to another model." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "像是余额或额度用完了。去供应商那边看看余额，或者换个模型再试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "像是餘額或額度用完了。去供應商那邊看看餘額，或者換個模型再試。"
+          }
+        }
+      }
+    },
+    "The provider says this model doesn't exist. Check the model name in Settings, or pick a different model." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "供应商那边找不到这个模型。去设置里看看模型名写对没有，或者换个模型。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "供應商那邊找不到這個模型。去設定裡看看模型名寫對沒有，或者換個模型。"
+          }
+        }
+      }
+    },
+    "The conversation is too long for this model. Start a new session, or remove some earlier content and resend." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "对话太长，超出这个模型一次能读的上限了。开个新会话，或者删掉前面一些内容再发。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "對話太長，超出這個模型一次能讀的上限了。開個新會話，或者刪掉前面一些內容再發。"
+          }
+        }
+      }
+    },
+    "The request was too large for the provider. Remove an attachment or shorten the conversation, then resend." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这次发的内容太大了，供应商收不下。去掉一个附件，或者开个新会话再发。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這次發的內容太大了，供應商收不下。去掉一個附件，或者開個新會話再發。"
+          }
+        }
+      }
+    },
+    "Too many requests — the provider is rate limiting. Wait a bit and resend, or switch to another model." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请求太频繁，被供应商限流了。等一会儿再发，或者换个模型。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請求太頻繁，被供應商限流了。等一會兒再發，或者換個模型。"
+          }
+        }
+      }
+    },
+    "The provider's server is having trouble right now. Wait a bit and retry, or switch to another model." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "供应商服务器暂时不稳定。等一会儿重试，或者换个模型。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "供應商伺服器暫時不穩定。等一會兒重試，或者換個模型。"
+          }
+        }
+      }
+    },
+    "The provider doesn't recognize a parameter in the request (often a thinking parameter). Turn thinking off and resend, or switch models." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "供应商不认识请求里的某个参数，多半是思考参数。把思考关掉再发一次，或者换个模型试试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "供應商不認識請求裡的某個參數，多半是思考參數。把思考關掉再發一次，或者換個模型試試。"
+          }
+        }
+      }
+    },
+    "The network connection failed. Check your network or proxy, then resend." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "网络没连上。检查一下网络或代理，连上后再发。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "網路沒連上。檢查一下網路或代理，連上後再發。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
