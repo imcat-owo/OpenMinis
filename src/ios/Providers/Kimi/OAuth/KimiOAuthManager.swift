@@ -142,7 +142,7 @@ final class KimiOAuthManager: ObservableObject {
         let deadline = Date().addingTimeInterval(expiresIn)
         while Date() < deadline {
             try await Task.sleep(nanoseconds: UInt64(currentInterval * 1_000_000_000))
-            let (json, httpOK) = try await postToken(params: [
+            let (json, httpOK, _, _) = try await postToken(params: [
                 "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
                 "device_code": deviceCode,
                 "client_id": clientID,
@@ -218,14 +218,16 @@ final class KimiOAuthManager: ObservableObject {
     }
 
     private func performRefresh(refreshToken: String, deviceId: String) async throws -> KimiTokenStorage {
-        let (json, httpOK) = try await postToken(params: [
+        let (json, httpOK, statusCode, body) = try await postToken(params: [
             "grant_type": "refresh_token",
             "refresh_token": refreshToken,
             "client_id": clientID,
         ])
         guard httpOK, let access = json["access_token"] as? String else {
-            let err = (json["error"] as? String) ?? "unknown"
-            throw LLMError.providerError(message: "Kimi token refresh failed: \(err)")
+            // Preserve the real HTTP status + full body structurally so
+            // KimiOAuthRefreshCoordinator classifies like every other provider
+            // (see OAuthRefreshErrorClassifier.makeErrorMessage).
+            throw LLMError.providerError(message: "Kimi token refresh failed: " + OAuthRefreshErrorClassifier.makeErrorMessage(status: statusCode, body: body))
         }
         return KimiTokenStorage(
             accessToken: access,
@@ -236,19 +238,24 @@ final class KimiOAuthManager: ObservableObject {
         )
     }
 
-    /// POST to the token endpoint; returns (json, isHTTP2xx).
+    /// POST to the token endpoint; returns (json, isHTTP2xx, statusCode, body).
+    /// The status code and raw body are carried structurally so refresh
+    /// failures can be classified by status + parsed error code rather than
+    /// scraped substrings (the status used to be dropped here).
     /// Form-urlencoded like the device-authorization request — a JSON body makes
     /// the server reject the grant with "unsupported_grant_type" (it can't read
     /// `grant_type` out of JSON). Verified against the live endpoint 2026-07-23.
-    private func postToken(params: [String: String]) async throws -> ([String: Any], Bool) {
+    private func postToken(params: [String: String]) async throws -> ([String: Any], Bool, Int, String) {
         let url = URL(string: KimiDeviceFlow.authHost + KimiDeviceFlow.tokenPath)!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.httpBody = Self.formEncode(params)
         let (data, response) = try await URLSession.shared.data(for: request)
-        let httpOK = (200..<300).contains((response as? HTTPURLResponse)?.statusCode ?? -1)
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+        let httpOK = (200..<300).contains(statusCode)
         let json = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
-        return (json, httpOK)
+        let body = String(data: data, encoding: .utf8) ?? ""
+        return (json, httpOK, statusCode, body)
     }
 }

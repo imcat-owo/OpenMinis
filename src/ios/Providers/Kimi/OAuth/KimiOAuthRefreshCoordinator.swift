@@ -37,12 +37,19 @@ enum KimiOAuthRefreshCoordinator {
     /// reused / expired → clear credentials) vs transient (network → keep).
     /// Pure + in the test target so both the coordinator and its tests share
     /// one classification.
+    ///
+    /// Delegates to the shared structured classifier (real HTTP status via the
+    /// `oauth_http_status=` marker + parsed JSON `error` code + whole-token
+    /// fallback) — the old substring match ("400" anywhere, bare
+    /// "refresh_token") both missed genuine failures that carry only
+    /// `error_description` / `invalid_client` / no `error` field and could
+    /// false-fire on unrelated numbers in the body.
     static func isRefreshTokenInvalid(_ error: LLMError) -> Bool {
-        guard case .providerError(let message) = error else { return false }
-        let msg = message.lowercased()
-        return msg.contains("400") || msg.contains("401") || msg.contains("403")
-            || msg.contains("invalid_grant") || msg.contains("refresh_token_reused")
-            || msg.contains("refresh_token")
+        OAuthRefreshErrorClassifier.isTokenInvalid(
+            error,
+            fatalErrorCodes: ["invalid_grant", "invalid_token", "invalid_request",
+                              "unauthorized_client", "refresh_token_reused", "invalid_client"]
+        )
     }
 
     /// Decide what storage to use (or whether to clear credentials) after a
