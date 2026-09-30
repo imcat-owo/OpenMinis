@@ -27,10 +27,25 @@ enum ModelGroupRouter {
             return available.first
 
         case .loadBalance:
-            let index = abs(sessionId.hashValue) % available.count
+            let index = stableIndex(for: sessionId, count: available.count)
             logger.info("🔀ROUTE resolve loadBalance index=\(index) → \(available[index])")
             return available[index]
         }
+    }
+
+    /// Stable FNV-1a hash of the session id, reduced modulo `count`.
+    /// `String.hashValue` is randomised per process launch, so a session
+    /// would be re-pinned to a different member after every restart despite
+    /// the documented "deterministic" contract; `abs(hashValue)` also traps
+    /// when hashValue == Int.min. Same algorithm as the sync layer's
+    /// stableContentHash (ChatStoreSyncHydrators).
+    private static func stableIndex(for sessionId: String, count: Int) -> Int {
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in sessionId.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x100000001b3
+        }
+        return Int(hash % UInt64(count))
     }
 
     /// Get the next fallback entry after the current one failed.
