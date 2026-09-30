@@ -734,6 +734,11 @@ static BOOL ensureServicesDiscovered(BLEHelper *ble, CBPeripheral *peripheral, N
 }
 
 static CBCharacteristic *findCharacteristic(CBPeripheral *peripheral, NSString *serviceUUID, NSString *charUUID) {
+    // --service / --characteristic come straight from the tool caller;
+    // CBUUID throws on malformed strings, so validate first — the scan
+    // path learned this in the R3 round, this lookup path did not.
+    // Callers already turn a nil result into a "not found" error.
+    if (!isValidCBUUIDString(serviceUUID) || !isValidCBUUIDString(charUUID)) return nil;
     CBUUID *sUUID = [CBUUID UUIDWithString:serviceUUID];
     CBUUID *cUUID = [CBUUID UUIDWithString:charUUID];
     for (CBService *s in peripheral.services) {

@@ -185,6 +185,20 @@ static uint8_t hexByte(NSString *hex) {
     return (uint8_t)val;
 }
 
+/// Strict variant for user-supplied APDU fields: exactly two hex digits or
+/// the parse fails. `hexByte` alone silently maps garbage like "zz" to 0,
+/// which would send a wrong-but-plausible APDU to the card.
+static BOOL parseHexByte(NSString *hex, uint8_t *out) {
+    if (hex.length != 2) return NO;
+    NSCharacterSet *hexDigits =
+        [NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF"];
+    if ([hex rangeOfCharacterFromSet:[hexDigits invertedSet]].location != NSNotFound) return NO;
+    unsigned int val = 0;
+    if (![[NSScanner scannerWithString:hex] scanHexInt:&val]) return NO;
+    if (out) *out = (uint8_t)val;
+    return YES;
+}
+
 // MARK: - BER-TLV Parser (EMV Profile)
 
 // Parse one TLV at *cursor. On success advances *cursor and fills out params.
@@ -1451,10 +1465,17 @@ static int cmd_apdu(int argc, char **argv, int stdout_fd, BOOL compact, BOOL qui
                     compact, quiet);
                 return NOFF_EXIT_INVALID_ARGS;
             }
-            uint8_t cla = hexByte(noff_find_arg(argc, argv, "--cla") ?: @"00");
-            uint8_t ins = hexByte(insStr);
-            uint8_t p1 = hexByte(noff_find_arg(argc, argv, "--p1") ?: @"00");
-            uint8_t p2 = hexByte(noff_find_arg(argc, argv, "--p2") ?: @"00");
+            uint8_t cla = 0, ins = 0, p1 = 0, p2 = 0;
+            if (!parseHexByte(noff_find_arg(argc, argv, "--cla") ?: @"00", &cla)
+                || !parseHexByte(insStr, &ins)
+                || !parseHexByte(noff_find_arg(argc, argv, "--p1") ?: @"00", &p1)
+                || !parseHexByte(noff_find_arg(argc, argv, "--p2") ?: @"00", &p2)) {
+                noff_emit_json(stdout_fd,
+                    noff_json_error(TOOL_NAME, @"apdu", NOFF_ERR_INVALID_ARGS,
+                        @"--cla/--ins/--p1/--p2 must each be exactly two hex digits (e.g. --ins B0)."),
+                    compact, quiet);
+                return NOFF_EXIT_INVALID_ARGS;
+            }
             NSString *dataHex = noff_find_arg(argc, argv, "--data");
             NSData *cmdData = dataHex ? dataFromHex(dataHex) : [NSData data];
             if (dataHex && !cmdData) {
