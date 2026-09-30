@@ -201,7 +201,13 @@ actor ISHExecutionCoordinator {
             }
             if linuxPath.hasPrefix(prefix + "/") {
                 let sub = String(linuxPath.dropFirst(prefix.count + 1))
-                return hostBase.appendingPathComponent(sub)
+                let resolved = hostBase.appendingPathComponent(sub).standardized
+                let basePath = hostBase.standardized.path
+                // The caller controls `sub`: a "../" in it would walk out
+                // of the mount into the rest of the app sandbox. Confine
+                // the standardized result to the mount root.
+                guard resolved.path == basePath || resolved.path.hasPrefix(basePath + "/") else { return nil }
+                return resolved
             }
         }
         if let sid = sessionId ?? mountedSessionId,

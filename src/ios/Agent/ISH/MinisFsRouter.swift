@@ -104,10 +104,17 @@ final class MinisFsRouter: @unchecked Sendable {
                 continue
             }
             let tail = String(guestPath[prefixEnd...])
-            return minisBaseURL
+            let bucketPath = minisBaseURL
                 .appendingPathComponent(sid, isDirectory: true)
                 .appendingPathComponent(bucket.hostSubdir, isDirectory: true)
-                .path + tail
+                .path
+            // The guest controls the tail: appended raw, a "/../../" tail
+            // walks straight out of the bucket into the rest of the app
+            // sandbox. Standardize lexically (string-only, safe for this
+            // hot path) and confine the result to the bucket directory.
+            let resolved = (bucketPath + tail as NSString).standardizingPath
+            guard resolved == bucketPath || resolved.hasPrefix(bucketPath + "/") else { return nil }
+            return resolved
         }
         return nil
     }
