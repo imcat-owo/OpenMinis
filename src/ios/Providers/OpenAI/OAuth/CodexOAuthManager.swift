@@ -169,7 +169,7 @@ final class CodexOAuthManager: NSObject, ObservableObject {
             return try await refreshSingleFlight.run(instanceId: instanceId) { [weak self] in
                 guard let self else { throw LLMError.providerError(message: "OAuth manager deallocated") }
                 logger.info("Refreshing Codex token on-demand (instance: \(instanceId))...")
-                let refreshed = try await self.performRefresh(refreshToken: staleRefreshToken)
+                let refreshed = try await self.performRefresh(refreshToken: staleRefreshToken, existingStorage: existingStorage)
                 ProviderKeychainHelper.saveOAuthToken(refreshed, instanceId: instanceId)
                 return refreshed
             }
@@ -248,7 +248,7 @@ final class CodexOAuthManager: NSObject, ObservableObject {
         return try await postTokenRequest(body: body, context: "Token exchange")
     }
 
-    private func performRefresh(refreshToken: String) async throws -> CodexTokenStorage {
+    private func performRefresh(refreshToken: String, existingStorage: CodexTokenStorage) async throws -> CodexTokenStorage {
         let body: [String: String] = [
             "grant_type": "refresh_token",
             "client_id": clientID,
@@ -259,15 +259,18 @@ final class CodexOAuthManager: NSObject, ObservableObject {
         var storage = try await postTokenRequest(body: body, context: "Token refresh")
         // OpenAI may not return a new refresh token on every refresh;
         // preserve the existing one so subsequent refreshes keep working.
-        if storage.refreshToken == nil {
+        // Same for accountId/planType: the refresh response's id_token may not
+        // carry the nested auth claims, and dropping them would permanently
+        // lose the Chatgpt-Account-Id header.
+        if storage.refreshToken == nil || storage.accountId == nil || storage.planType == nil {
             storage = CodexTokenStorage(
                 accessToken: storage.accessToken,
-                refreshToken: refreshToken,
+                refreshToken: storage.refreshToken ?? refreshToken,
                 idToken: storage.idToken,
                 expireDate: storage.expireDate,
                 lastRefresh: storage.lastRefresh,
-                accountId: storage.accountId,
-                planType: storage.planType
+                accountId: storage.accountId ?? existingStorage.accountId,
+                planType: storage.planType ?? existingStorage.planType
             )
         }
         return storage
@@ -316,13 +319,17 @@ final class CodexOAuthManager: NSObject, ObservableObject {
         let expireDate = expiresIn.map { Date().addingTimeInterval($0) }
         let idToken = json["id_token"] as? String
 
-        // Parse JWT id_token to extract account info
+        // Parse JWT id_token to extract account info. ChatGPT id_tokens nest
+        // the account claims under the "https://api.openai.com/auth"
+        // namespace (same path the Android importer uses); fall back to the
+        // top level for tokens that carry them flat.
         var extractedAccountId: String?
         var extractedPlanType: String?
         if let idToken {
             let claims = Self.decodeJWTPayload(idToken)
-            extractedAccountId = claims?["chatgpt_account_id"] as? String
-            extractedPlanType = claims?["chatgpt_plan_type"] as? String
+            let auth = claims?["https://api.openai.com/auth"] as? [String: Any]
+            extractedAccountId = (auth?["chatgpt_account_id"] ?? claims?["chatgpt_account_id"]) as? String
+            extractedPlanType = (auth?["chatgpt_plan_type"] ?? claims?["chatgpt_plan_type"]) as? String
             if let aid = extractedAccountId {
                 logger.info("Extracted accountId: \(aid)")
             }
