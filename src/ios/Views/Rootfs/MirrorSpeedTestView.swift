@@ -353,6 +353,14 @@ final class MirrorSpeedTestViewModel: ObservableObject {
     func selectMirror(_ mirror: MirrorEntry) {
         selectedMirrorId[mirror.category] = mirror.id
         persistSelection(for: mirror.category)
+        // If this category's mirror is already enabled, the pick must take
+        // effect now — persisting the selection alone left the old mirror
+        // in the on-disk config until the toggle was flipped off and on
+        // (only setUseCustom(true) and the first-run auto-detect ever
+        // called applyMirror).
+        if useCustomMirror[mirror.category] == true {
+            applyMirror(for: mirror.category)
+        }
     }
 
     func setUseCustom(_ enabled: Bool, for category: MirrorCategory) {
