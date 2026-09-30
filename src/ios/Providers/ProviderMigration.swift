@@ -283,9 +283,22 @@ enum ProviderMigration {
             // Filter to just entries matching the legacy primary model IDs.
             // Entry ids are now "\(instanceId)/\(modelId)" ("/" separator);
             // the legacy ":" suffix could never match them.
-            let matchedEntries = firstGroupEntryIds.filter { entryId in
-                primaryIds.contains(where: { entryId.hasSuffix("/\($0)") })
+            // Iterate the legacy ID list (the user's original order) rather
+            // than the catalog-ordered entry list: group order decides the
+            // fallback primary, so the user's first pick must stay first.
+            let entriesInLegacyOrder: ([String]) -> [String] = { legacyIds in
+                var seen = Set<String>()
+                var ordered: [String] = []
+                for legacyId in legacyIds {
+                    for entryId in firstGroupEntryIds where entryId.hasSuffix("/\(legacyId)") {
+                        if seen.insert(entryId).inserted {
+                            ordered.append(entryId)
+                        }
+                    }
+                }
+                return ordered
             }
+            let matchedEntries = entriesInLegacyOrder(primaryIds)
 
             let groupMembers = matchedEntries.isEmpty ? firstGroupEntryIds : matchedEntries
 
@@ -300,9 +313,7 @@ enum ProviderMigration {
             // Sub-model group from legacy settings
             let subIds = legacySettings.subModelIds.isEmpty ? legacySettings.primaryModelIds : legacySettings.subModelIds
             if subIds != primaryIds {
-                let subEntries = firstGroupEntryIds.filter { entryId in
-                    subIds.contains(where: { entryId.hasSuffix("/\($0)") })
-                }
+                let subEntries = entriesInLegacyOrder(subIds)
                 if !subEntries.isEmpty {
                     let subGroup = ModelGroup(
                         name: "Sub Tasks",
