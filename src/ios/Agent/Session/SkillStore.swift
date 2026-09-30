@@ -670,6 +670,10 @@ thinking 填/描/强调不必手写。贴包后跟 `colorsLight.accent` / 聊天
         }
 
         let id = Self.slugify(parsed.name)
+        // A name with no slug-able characters (all symbols/emoji) would
+        // produce an empty id, making the skill's directory the skills root
+        // itself — refuse the import instead.
+        guard !id.isEmpty else { throw SkillError.invalidContent }
         let now = Date()
 
         // Preserve enabled state if skill already exists
@@ -757,7 +761,7 @@ thinking 填/描/强调不必手写。贴包后跟 `colorsLight.accent` / 聊天
         // If a local skill exists with the same slugified name but a different ID,
         // remove the old one to prevent duplicates.
         let slugId = Self.slugify(parsed.name)
-        if slugId != skillId, let oldIdx = skills.firstIndex(where: { $0.id == slugId }) {
+        if !slugId.isEmpty, slugId != skillId, let oldIdx = skills.firstIndex(where: { $0.id == slugId }) {
             let oldId = skills[oldIdx].id
             skills.remove(at: oldIdx)
             dbDeleteSkill(id: oldId)
@@ -1210,6 +1214,9 @@ thinking 填/描/强调不必手写。贴包后跟 `colorsLight.accent` / 聊天
     }
 
     func deleteSkill(_ skillId: String) {
+        // Never let an empty id reach the path arithmetic below: it would
+        // resolve to the skills root and remove every skill.
+        guard !skillId.isEmpty else { return }
         skills.removeAll { $0.id == skillId }
         dbDeleteSkill(id: skillId)
 
