@@ -253,7 +253,9 @@ final class ANSIParser {
     private func processCSIParam(_ byte: UInt8, action: (ParsedAction) -> Void) {
         switch byte {
         case 0x30...0x39: // 0-9
-            currentParam = currentParam * 10 + Int(byte - 0x30)
+            // Saturating accumulate: an unterminated run of digits from
+            // arbitrary process output must not overflow Int and trap.
+            currentParam = min(currentParam * 10 + Int(byte - 0x30), 65535)
             hasParam = true
         case 0x3B: // ;
             csiParams.append(hasParam ? currentParam : 0)
@@ -315,7 +317,8 @@ final class ANSIParser {
     private func processOSCParam(_ byte: UInt8, action: (ParsedAction) -> Void) {
         switch byte {
         case 0x30...0x39: // 0-9
-            oscCommand = oscCommand * 10 + Int(byte - 0x30)
+            // Saturating accumulate (same overflow trap as CSI params).
+            oscCommand = min(oscCommand * 10 + Int(byte - 0x30), 65535)
             oscHasCommand = true
         case 0x3B: // ;
             state = .oscString
