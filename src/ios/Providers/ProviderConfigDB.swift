@@ -614,6 +614,12 @@ actor ProviderConfigDB {
         }
         var preservedEntryExtras: [String: String] = [:]
         var priorEntryStamps: [String: (fingerprint: String, updatedAt: Double)] = [:]
+        // [R3-105] Full-row snapshots of entries dumpProviderConfig cannot
+        // decode (unparseable base_model_json). dump skips them "preserved
+        // in DB", but this wipe would physically delete them on the next
+        // save()/merge. They are re-inserted verbatim after the write loop
+        // below (ids present in `config` excluded — config wins there).
+        var preservedBadEntryRows: [String: [String: Any]] = [:]
         for row in loadAllEntryRows() {
             if let id = row["id"] as? String, let extras = row["extras_json"] as? String {
                 preservedEntryExtras[id] = extras
@@ -629,9 +635,21 @@ actor ProviderConfigDB {
                     Self.stampComponent(row["sort_order"] as? Int),
                 ].joined(separator: "\u{1}"), priorTs)
             }
+            // Same fail test as dumpProviderConfig's entry guard.
+            if let id = row["id"] as? String,
+               let baseJSON = row["base_model_json"] as? String,
+               (row["provider_instance_id"] as? String) == nil
+                || (try? JSONDecoder().decode(LLMModel.self, from: Data(baseJSON.utf8))) == nil {
+                preservedBadEntryRows[id] = row
+            }
         }
         var preservedGroupExtras: [String: String] = [:]
         var priorGroupStamps: [String: (fingerprint: String, updatedAt: Double)] = [:]
+        // [R3-105] Same verbatim preservation for groups dumpProviderConfig
+        // cannot decode (unknown strategy/fallback raw value or unparseable
+        // member list) — instances already survive via .unsupported, entries
+        // and groups had no equivalent until now.
+        var preservedBadGroupRows: [String: [String: Any]] = [:]
         for row in loadAllGroupRows() {
             if let id = row["id"] as? String, let extras = row["extras_json"] as? String {
                 preservedGroupExtras[id] = extras
@@ -649,6 +667,16 @@ actor ProviderConfigDB {
                     Self.stampComponent(row["removed_members_json"] as? String),
                     Self.stampComponent(row["added_members_json"] as? String),
                 ].joined(separator: "\u{1}"), priorTs)
+            }
+            // Same fail test as dumpProviderConfig's group guard.
+            if let id = row["id"] as? String {
+                let stratOK = (row["strategy"] as? String).flatMap { RoutingStrategy(rawValue: $0) } != nil
+                let fbOK = (row["fallback_strategy"] as? String).flatMap { FallbackStrategy(rawValue: $0) } != nil
+                let membersOK = (row["member_entry_ids_json"] as? String)
+                    .flatMap { (try? JSONDecoder().decode([String].self, from: Data($0.utf8))) } != nil
+                if (row["name"] as? String) == nil || !stratOK || !fbOK || !membersOK {
+                    preservedBadGroupRows[id] = row
+                }
             }
         }
         Self.exec(db: db, "DELETE FROM provider_model_groups")
@@ -779,6 +807,26 @@ actor ProviderConfigDB {
             )
         }
 
+        // [R3-105] Re-insert undecodable entry rows verbatim so the wipe
+        // above does not physically delete data this build merely cannot
+        // read yet (e.g. a newer build's model JSON). Ids that ARE in
+        // `config` were rewritten from memory above and win.
+        let configEntryIds = Set(config.modelEntries.map { $0.uuid })
+        for (id, row) in preservedBadEntryRows where !configEntryIds.contains(id) {
+            upsertEntryRow(
+                id: id,
+                providerInstanceId: row["provider_instance_id"] as? String ?? "",
+                baseModelJson: row["base_model_json"] as? String ?? "",
+                overridesJson: row["overrides_json"] as? String,
+                isCustom: row["is_custom"] as? Bool ?? false,
+                isHidden: row["is_hidden"] as? Bool ?? false,
+                userModifiedAt: row["user_modified_at"] as? Double,
+                sortOrder: row["sort_order"] as? Int ?? 0,
+                updatedAt: row["updated_at"] as? Double ?? now,
+                extrasJson: row["extras_json"] as? String
+            )
+        }
+
         // Groups. memberEntryIds → JSON array column.
         for (idx, group) in config.modelGroups.enumerated() {
             let memberJSON = (try? Self.jsonString(group.memberEntryIds)) ?? "[]"
@@ -815,6 +863,27 @@ actor ProviderConfigDB {
                 extrasJson: preservedGroupExtras[group.id],
                 removedMembersJson: removedMembersJson,
                 addedMembersJson: addedMembersJson
+            )
+        }
+
+        // [R3-105] Re-insert undecodable group rows verbatim, same as the
+        // entry preservation above.
+        let configGroupIds = Set(config.modelGroups.map { $0.id })
+        for (id, row) in preservedBadGroupRows where !configGroupIds.contains(id) {
+            upsertGroupRow(
+                id: id,
+                name: row["name"] as? String ?? "",
+                strategy: row["strategy"] as? String ?? "",
+                fallbackStrategy: row["fallback_strategy"] as? String ?? "",
+                defaultThinkingLevel: row["default_thinking_level"] as? String,
+                contextLimitTokens: row["context_limit_tokens"] as? Int,
+                contextLimitRemembered: row["context_limit_remembered"] as? Int,
+                memberEntryIdsJson: row["member_entry_ids_json"] as? String ?? "[]",
+                sortOrder: row["sort_order"] as? Int ?? 0,
+                updatedAt: row["updated_at"] as? Double ?? now,
+                extrasJson: row["extras_json"] as? String,
+                removedMembersJson: row["removed_members_json"] as? String ?? "{}",
+                addedMembersJson: row["added_members_json"] as? String ?? "{}"
             )
         }
 
