@@ -1290,6 +1290,9 @@ struct ModelEntryDetailSheet: View {
     @State private var showQuickTest: Bool = false
     @State private var showForceThinkingAlert: Bool = false
     @State private var showResetAlert: Bool = false
+    /// Set when a save is refused because the edited model ID now belongs
+    /// to another entry — mirrors AddCustomModelSheet's duplicateError.
+    @State private var duplicateError: String? = nil
 
     var body: some View {
         NavigationStack {
@@ -1309,12 +1312,19 @@ struct ModelEntryDetailSheet: View {
                                 .multilineTextAlignment(.trailing)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
+                                .onChange(of: modelId) { _ in duplicateError = nil }
                         } else {
                             Text(entry.model.id)
                                 .font(.system(.body, design: .monospaced))
                                 .foregroundStyle(.secondary)
                                 .textSelection(.enabled)
                         }
+                    }
+
+                    if let duplicateError {
+                        Text(duplicateError)
+                            .font(.footnote)
+                            .foregroundColor(.red)
                     }
 
                     HStack {
@@ -1707,8 +1717,15 @@ struct ModelEntryDetailSheet: View {
             isHidden: isHidden,
             userModifiedAt: newOverrides.isEmpty && !isHidden ? nil : Date()
         )
-        store.updateEntry(updatedEntry)
-        dismiss()
+        if store.updateEntry(updatedEntry) {
+            dismiss()
+        } else {
+            // The edited ID now belongs to another entry under this
+            // provider — saving would overwrite it. Stay on the sheet and
+            // say so, like AddCustomModelSheet does, instead of closing
+            // as though the edit had landed.
+            duplicateError = AppLocalized("Model ID \"\(finalId)\" already exists.")
+        }
     }
 }
 

@@ -1534,8 +1534,21 @@ final class ProviderConfigStore: ObservableObject {
         return true
     }
 
-    func updateEntry(_ entry: ModelEntry) {
-        guard let idx = config.modelEntries.firstIndex(where: { $0.id == entry.id }) else { return }
+    @discardableResult
+    func updateEntry(_ entry: ModelEntry) -> Bool {
+        // Locate by uuid, the entry's stable identity — NOT by `id`. The id
+        // is the composite "providerInstanceId/baseModel.id", and editing a
+        // custom model's ID changes it: looking up by the NEW id either
+        // found nothing (the whole edit silently vanished) or found the
+        // OTHER entry that already owned that id and overwrote it. The
+        // uuid is preserved across the rename by every caller.
+        guard let idx = config.modelEntries.firstIndex(where: { $0.uuid == entry.uuid }) else { return false }
+        // A rename onto another entry's id must be refused, not resolved
+        // by overwriting that entry or by leaving two entries sharing
+        // one composite id.
+        if config.modelEntries.contains(where: { $0.uuid != entry.uuid && $0.id == entry.id }) {
+            return false
+        }
         // Stamp userModifiedAt on every UI-driven edit so iCloud merge can resolve
         // same-field conflicts by last-write-wins. This is the single funnel for
         // override edits from ProviderInstanceDetailView.
@@ -1543,6 +1556,7 @@ final class ProviderConfigStore: ObservableObject {
         stamped.userModifiedAt = Date()
         config.modelEntries[idx] = stamped
         save()
+        return true
     }
 
     func removeEntry(_ entryId: String) {
