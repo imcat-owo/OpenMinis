@@ -621,7 +621,10 @@ extension BackupImporter {
         // The store caches servers in memory; scanExternalChanges reloads from
         // disk, stamps updatedAt and marks each changed server dirty.
         await MainActor.run { MCPStore.shared.scanExternalChanges() }
-        report.imported = 1
+        // Count the servers in the file, not the file itself — reporting 1
+        // for any number of servers under-states the restore total. Same
+        // lenient count the exporter uses for its manifest stat.
+        report.imported = BackupExporter.mcpServerCount(at: src) ?? 1
         return report
     }
 
