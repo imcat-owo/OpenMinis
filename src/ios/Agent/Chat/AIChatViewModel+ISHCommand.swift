@@ -65,8 +65,10 @@ extension AIChatViewModel {
     }
 
     /// Sentinel exit code the bash wrapper returns when bash is missing at run
-    /// time (distinguishes "bash gone" from a script that legitimately exits
-    /// 127). 119 is otherwise unused by our commands.
+    /// time. Note it is NOT a reserved value: a script may legitimately
+    /// `exit 119` itself, so a 119 result is only ever treated as *suspect* —
+    /// runViaBash re-probes `command -v bash` directly before concluding bash
+    /// vanished (see below). Never trust this code alone.
     private static let bashMissingSentinel = 119
 
     /// Run `script` under bash by self-writing it in the guest (M3): base64 →
@@ -96,6 +98,14 @@ extension AIChatViewModel {
         // wait(2)-encoded status (119 << 8 = 30464), so accept both.
         if result.exitCode == Self.bashMissingSentinel
             || result.exitCode == (Self.bashMissingSentinel << 8) {
+            // 119 is ambiguous: the script itself may have exited 119 on
+            // purpose. Disambiguate with a direct probe (raw executor, no
+            // bash wrapper involved) before touching any bash state — a
+            // false "bash missing" here used to trigger a reinstall and run
+            // the same script up to two more times for nothing.
+            let bashStillThere = await ishExecutor(sessionId: sid)
+                .run("command -v bash >/dev/null 2>&1", 15) == 0
+            guard !bashStillThere else { return result }
             await OnDemandBash.shared.markDisappeared()
             if allowReinstall {
                 let outcome = await OnDemandBash.shared.ensureBash(executor: ishExecutor(sessionId: sid))
