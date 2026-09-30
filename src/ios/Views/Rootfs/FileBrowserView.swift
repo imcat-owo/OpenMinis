@@ -1328,9 +1328,16 @@ class FileBrowserViewModel: ObservableObject {
             guard url.startAccessingSecurityScopedResource() else { failCount += 1; continue }
             defer { url.stopAccessingSecurityScopedResource() }
             let destURL = destDir.appendingPathComponent(url.lastPathComponent)
+            // [R3-034] Preserve the file being replaced until the new copy
+            // is safely in place. The old flow deleted the original first,
+            // so a failed copy (full disk, source vanished mid-import)
+            // destroyed BOTH the original and the import.
+            var stashURL: URL?
             do {
                 if fm.fileExists(atPath: destURL.path) {
-                    try MountedFolderCoordinator.remove(at: destURL)
+                    let stash = destDir.appendingPathComponent(".minis-import-stash-\(UUID().uuidString)")
+                    try MountedFolderCoordinator.move(from: destURL, to: stash)
+                    stashURL = stash
                     if let destLinux = linuxPath(for: destURL) {
                         RootfsManager.shared.removeFakefsPath(destLinux)
                     }
@@ -1338,8 +1345,22 @@ class FileBrowserViewModel: ObservableObject {
                 try MountedFolderCoordinator.copy(from: url, to: destURL)
                 RootfsManager.shared.registerSubtreeInMetaDB(hostRoot: destURL)
                 Self.tracePotentialFPWrite(op: "import", destURL: destURL, srcURL: url)
+                if let stashURL {
+                    try? MountedFolderCoordinator.remove(at: stashURL)
+                }
             } catch {
                 failCount += 1
+                // Roll back: drop any partial copy, then put the original back.
+                if let stashURL {
+                    if fm.fileExists(atPath: destURL.path) {
+                        try? MountedFolderCoordinator.remove(at: destURL)
+                        if let destLinux = linuxPath(for: destURL) {
+                            RootfsManager.shared.removeFakefsPath(destLinux)
+                        }
+                    }
+                    try? MountedFolderCoordinator.move(from: stashURL, to: destURL)
+                    RootfsManager.shared.registerSubtreeInMetaDB(hostRoot: destURL)
+                }
             }
         }
         if failCount > 0 {
