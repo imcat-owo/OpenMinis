@@ -151,9 +151,15 @@ final class XAIVoiceProvider: VoiceProvider {
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         applyVoiceAuth(&urlRequest)
+        // Model-group requests carry the chosen voice id in `model` with
+        // `voice` empty — fall back to it before the vendor default, or the
+        // picked voice never reaches the request on that path.
+        let voiceId = (request.voice?.isEmpty == false) ? request.voice!
+            : (request.model?.isEmpty == false) ? request.model!
+            : defaultVoiceOutputVoice()
         let body: [String: Any] = [
             "text":      request.input,
-            "voice_id":  request.voice ?? defaultVoiceOutputVoice(),
+            "voice_id":  voiceId,
             "language":  request.extra("language") ?? "auto"
         ]
         urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -486,7 +492,10 @@ final class XunfeiVoiceProvider: VoiceProvider {
         ws.resume()
         defer { ws.cancel(with: .normalClosure, reason: nil) }
 
-        let voice = (request.voice?.isEmpty == false) ? request.voice! : Self.defaultTTSVoice
+        // Same model-group fallback as xAI/Azure: voice id rides in `model`.
+        let voice = (request.voice?.isEmpty == false) ? request.voice!
+            : (request.model?.isEmpty == false) ? request.model!
+            : Self.defaultTTSVoice
         let textB64 = Data(request.input.utf8).base64EncodedString()
         // [T-tts-vendor-fix 09-13] Speed knob → business.spte (string, "0.5"–"2.0");
         // kelivo-era docs use spte for the v2 TTS voice speed. Absent = omit
@@ -875,7 +884,10 @@ final class AzureTTSVoiceProvider: VoiceProvider {
         guard let url = URL(string: urlStr) else {
             throw VoiceProviderError.parseError("Invalid URL: \(urlStr)")
         }
-        let voice = request.voice ?? defaultVoiceOutputVoice()
+        // Same model-group fallback as xAI/讯飞: voice id rides in `model`.
+        let voice = (request.voice?.isEmpty == false) ? request.voice!
+            : (request.model?.isEmpty == false) ? request.model!
+            : defaultVoiceOutputVoice()
         // [T-tts-services 09-11] The service layer can override the language
         // tag; otherwise it is derived from the voice id ("zh-CN-XiaoxiaoNeural"
         // → "zh-CN"), which is what the legacy path always did.
