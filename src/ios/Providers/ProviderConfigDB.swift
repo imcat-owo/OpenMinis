@@ -549,6 +549,13 @@ actor ProviderConfigDB {
         let now = Date().timeIntervalSince1970
 
         Self.exec(db: db, "BEGIN IMMEDIATE")
+        // `legacyUuidMap` lives in provider_local_kv but is LOCAL-ONLY state
+        // (deferred uuid→composite normalization) — it is not part of
+        // ProviderConfig, so the wipe below would drop it on every replace and
+        // it could never be rewritten from `config`. Capture it now and
+        // restore it after the per-device keys are rewritten (same
+        // anti-wipe idea as the agent-loop guard below).
+        let existingLegacyUuidMap = localKV("legacyUuidMap")
         Self.exec(db: db, "DELETE FROM provider_model_groups")
         Self.exec(db: db, "DELETE FROM provider_model_entries")
         Self.exec(db: db, "DELETE FROM provider_instances")
@@ -678,6 +685,10 @@ actor ProviderConfigDB {
         // Vision group selector — per-device, same as the voice group ids.
         if let v = config.visionGroupId {
             setLocalKVRow("visionGroupId", value: v)
+        }
+        // Restore the local-only legacy uuid map captured before the wipe.
+        if let existingLegacyUuidMap {
+            setLocalKVRow("legacyUuidMap", value: existingLegacyUuidMap)
         }
         for (sid, binding) in config.sessionBindings {
             if let json = try? Self.jsonString(binding) {
