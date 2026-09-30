@@ -142,8 +142,8 @@ final class AppearanceStudio: ObservableObject {
         // under the appearance directory; the in-memory dictionary is kept
         // as the read cache and `customIcon(for:)`'s data-URI contract is
         // unchanged.
-        migrateCustomIconsFromUserDefaults()
-        customIcons = loadCustomIconsFromDisk()
+        Self.migrateCustomIconsFromUserDefaults()
+        customIcons = Self.loadCustomIconsFromDisk()
         let storedOpacity = UserDefaults.standard.object(forKey: Keys.surfaceOpacity) as? Double
         let storedShade = UserDefaults.standard.object(forKey: Keys.wallpaperShade) as? Double
         surfaceOpacity = storedOpacity ?? 0.88
@@ -266,7 +266,12 @@ final class AppearanceStudio: ObservableObject {
 
     // MARK: Wallpaper
 
-    var appearanceDirectory: URL {
+    var appearanceDirectory: URL { Self.appearanceDirectoryURL }
+
+    /// Static twin of `appearanceDirectory`: init-time helpers that run
+    /// before all stored properties are initialized (the PIC-6 icon
+    /// migration/load) resolve the same directory without touching `self`.
+    private static var appearanceDirectoryURL: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory,
                                             in: .userDomainMask).first!
         let dir = base.appendingPathComponent("AppearanceStudio", isDirectory: true)
@@ -429,19 +434,27 @@ final class AppearanceStudio: ObservableObject {
 
     // MARK: - [PIC-6] Custom icons on disk
 
-    private var customIconsDirectory: URL {
-        appearanceDirectory.appendingPathComponent("icons", isDirectory: true)
+    private var customIconsDirectory: URL { Self.customIconsDirectoryURL }
+
+    private static var customIconsDirectoryURL: URL {
+        appearanceDirectoryURL.appendingPathComponent("icons", isDirectory: true)
     }
 
     private func customIconURL(for id: String) -> URL {
-        customIconsDirectory.appendingPathComponent("\(id).png")
+        Self.customIconFileURL(for: id)
+    }
+
+    private static func customIconFileURL(for id: String) -> URL {
+        customIconsDirectoryURL.appendingPathComponent("\(id).png")
     }
 
     private static let customIconsMigratedKey = "appearanceStudio.customIconsMigrated.v1"
 
     /// One-time migration: UserDefaults JSON blob → one PNG file per slot.
     /// Runs once; the UserDefaults key is removed afterwards.
-    private func migrateCustomIconsFromUserDefaults() {
+    /// Static because init calls it before all stored properties are
+    /// initialized; it only touches UserDefaults and the icons directory.
+    private static func migrateCustomIconsFromUserDefaults() {
         guard !UserDefaults.standard.bool(forKey: Self.customIconsMigratedKey) else { return }
         defer {
             UserDefaults.standard.removeObject(forKey: Keys.icons)
@@ -450,18 +463,18 @@ final class AppearanceStudio: ObservableObject {
         guard let data = UserDefaults.standard.data(forKey: Keys.icons),
               let value = try? JSONDecoder().decode([String: String].self, from: data),
               !value.isEmpty else { return }
-        try? FileManager.default.createDirectory(at: customIconsDirectory,
+        try? FileManager.default.createDirectory(at: customIconsDirectoryURL,
                                                  withIntermediateDirectories: true)
         for (id, uri) in value {
             guard let png = SoulIconImage.pngData(from: uri) else { continue }
-            try? png.write(to: customIconURL(for: id), options: .atomic)
+            try? png.write(to: customIconFileURL(for: id), options: .atomic)
         }
     }
 
-    private func loadCustomIconsFromDisk() -> [String: String] {
+    private static func loadCustomIconsFromDisk() -> [String: String] {
         var loaded: [String: String] = [:]
         guard let files = try? FileManager.default.contentsOfDirectory(
-            at: customIconsDirectory,
+            at: customIconsDirectoryURL,
             includingPropertiesForKeys: nil) else { return loaded }
         for url in files where url.pathExtension.lowercased() == "png" {
             let id = url.deletingPathExtension().lastPathComponent
