@@ -530,6 +530,26 @@ struct MCPFormSheet: View {
             let trimmedTimeout = startupTimeoutText.trimmingCharacters(in: .whitespaces)
             config.startupTimeoutSeconds = trimmedTimeout.isEmpty ? nil : Int(trimmedTimeout)
         }
+
+        // A stored server can legitimately carry BOTH transports (JSON
+        // import and the CLI read url+command from the same object). The
+        // form only loads and edits the side matching the selected
+        // transport, so carry the hidden side over from the stored
+        // server — store.add replaces the record wholesale, and without
+        // this a plain open + Save would permanently wipe the other half.
+        if let server {
+            switch transport {
+            case .http, .sse:
+                config.command = server.command
+                config.args = server.args
+                config.env = server.env
+                config.startupTimeoutSeconds = server.startupTimeoutSeconds
+            case .stdio:
+                config.url = server.url
+                config.headers = server.headers
+                config.oauth = server.oauth
+            }
+        }
         return config
     }
 
