@@ -2711,7 +2711,9 @@ struct ContentView: View {
                     modelId: realSession.modelId,
                     createdAt: realSession.createdAt,
                     updatedAt: realSession.updatedAt,
-                    lastMessage: realSession.lastMessage
+                    lastMessage: realSession.lastMessage,
+                    pinnedAt: realSession.pinnedAt,
+                    folderId: realSession.folderId
                 )
                 // Replace the real session with the proxy so there's no duplicate
                 return [proxy] + base.filter { $0.id != realId }
