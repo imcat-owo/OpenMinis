@@ -66,7 +66,15 @@ struct BrowserSheetView: View {
                     if let manager {
                         BrowserWebView(manager: manager)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .id(pool.selectedTabId)
+                            // [R3-091] Identity must track the manager's CURRENT
+                            // WKWebView, not just the tab. A UA / viewport rebuild
+                            // swaps manager.webView in place (same manager, same
+                            // tab id); with a tab-only id SwiftUI kept the existing
+                            // representable — and the OLD webView it vends — alive,
+                            // so the panel kept showing the discarded page while
+                            // the agent drove the new one. Keying on the webView's
+                            // identity forces a re-make that vends the new view.
+                            .id("\(pool.selectedTabId)-\(ObjectIdentifier(manager.webView))")
                         // [T-ios-webview-error-ui] Safari-style error overlay for
                         // agent/manual navigation failures (blank page otherwise).
                         BrowserLoadErrorOverlay(manager: manager)
