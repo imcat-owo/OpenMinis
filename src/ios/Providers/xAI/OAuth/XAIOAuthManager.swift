@@ -196,12 +196,11 @@ final class XAIOAuthManager: NSObject, ObservableObject {
     /// never wipes a token another caller just rotated. Mirrors ClaudeOAuthManager.
     private func refreshTokenGuarded(instanceId: String, existingStorage: XAITokenStorage) async throws -> XAITokenStorage {
         let staleRefreshToken = existingStorage.refreshToken!
-        let cachedEndpoint = existingStorage.tokenEndpoint
         do {
             return try await refreshSingleFlight.run(instanceId: instanceId) { [weak self] in
                 guard let self else { throw LLMError.providerError(message: "OAuth manager deallocated") }
                 logger.info("Refreshing xAI token on-demand (instance: \(instanceId))...")
-                let refreshed = try await self.performRefresh(refreshToken: staleRefreshToken, cachedEndpoint: cachedEndpoint)
+                let refreshed = try await self.performRefresh(refreshToken: staleRefreshToken, existingStorage: existingStorage)
                 ProviderKeychainHelper.saveOAuthToken(refreshed, instanceId: instanceId)
                 return refreshed
             }
@@ -292,14 +291,14 @@ final class XAIOAuthManager: NSObject, ObservableObject {
         return try await postTokenRequest(
             body: body,
             endpoint: tokenEndpoint,
-            previousRefreshToken: nil,
+            previousStorage: nil,
             context: "Token exchange"
         )
     }
 
-    private func performRefresh(refreshToken: String, cachedEndpoint: String?) async throws -> XAITokenStorage {
+    private func performRefresh(refreshToken: String, existingStorage: XAITokenStorage) async throws -> XAITokenStorage {
         let endpoint: String
-        if let cached = cachedEndpoint {
+        if let cached = existingStorage.tokenEndpoint {
             endpoint = cached
         } else {
             endpoint = try await fetchDiscovery().tokenEndpoint
@@ -312,7 +311,7 @@ final class XAIOAuthManager: NSObject, ObservableObject {
         return try await postTokenRequest(
             body: body,
             endpoint: endpoint,
-            previousRefreshToken: refreshToken,
+            previousStorage: existingStorage,
             context: "Token refresh"
         )
     }
@@ -320,7 +319,7 @@ final class XAIOAuthManager: NSObject, ObservableObject {
     private func postTokenRequest(
         body: [String: String],
         endpoint: String,
-        previousRefreshToken: String?,
+        previousStorage: XAITokenStorage?,
         context: String
     ) async throws -> XAITokenStorage {
         var request = URLRequest(url: URL(string: endpoint)!)
@@ -352,7 +351,7 @@ final class XAIOAuthManager: NSObject, ObservableObject {
             // [T-oauth-refresh-race-classify] Embed real HTTP status structurally.
             throw LLMError.providerError(message: "\(context) failed: " + OAuthRefreshErrorClassifier.makeErrorMessage(status: statusCode, body: responseBody))
         }
-        return try parseTokenResponse(data, tokenEndpoint: endpoint, previousRefreshToken: previousRefreshToken)
+        return try parseTokenResponse(data, tokenEndpoint: endpoint, previousStorage: previousStorage)
     }
 
     private func urlEncode(_ s: String) -> String {
@@ -364,7 +363,7 @@ final class XAIOAuthManager: NSObject, ObservableObject {
     private func parseTokenResponse(
         _ data: Data,
         tokenEndpoint: String,
-        previousRefreshToken: String?
+        previousStorage: XAITokenStorage?
     ) throws -> XAITokenStorage {
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
 
@@ -372,19 +371,21 @@ final class XAIOAuthManager: NSObject, ObservableObject {
             throw LLMError.decodingError(underlying: NSError(domain: "XAIOAuth", code: -1,
                 userInfo: [NSLocalizedDescriptionKey: "Missing access_token"]))
         }
-        let refreshToken = (json["refresh_token"] as? String) ?? previousRefreshToken
+        let refreshToken = (json["refresh_token"] as? String) ?? previousStorage?.refreshToken
         let expiresIn = json["expires_in"] as? TimeInterval
         let expireDate = expiresIn.map { Date().addingTimeInterval($0) }
-        let idToken = json["id_token"] as? String
+        // OIDC doesn't guarantee an id_token on refresh responses; when it's
+        // absent, keep the previous token's identity instead of wiping it.
+        let idToken = (json["id_token"] as? String) ?? previousStorage?.idToken
 
-        var email: String?
-        var displayName: String?
-        var accountId: String?
+        var email: String? = previousStorage?.email
+        var displayName: String? = previousStorage?.displayName
+        var accountId: String? = previousStorage?.accountId
         if let idToken {
             let claims = Self.decodeJWTPayload(idToken)
-            email = claims?["email"] as? String
-            displayName = (claims?["name"] as? String) ?? (claims?["preferred_username"] as? String)
-            accountId = (claims?["sub"] as? String) ?? (claims?["account_id"] as? String)
+            email = (claims?["email"] as? String) ?? email
+            displayName = (claims?["name"] as? String) ?? (claims?["preferred_username"] as? String) ?? displayName
+            accountId = (claims?["sub"] as? String) ?? (claims?["account_id"] as? String) ?? accountId
             if let e = email { logger.info("Extracted email: \(e)") }
             if let aid = accountId { logger.info("Extracted accountId: \(aid)") }
         }
