@@ -238,6 +238,12 @@ struct SystemVoiceEditorView: View {
 final class SystemVoicePreviewPlayer: NSObject, AVSpeechSynthesizerDelegate {
     static let shared = SystemVoicePreviewPlayer()
     private let synthesizer = AVSpeechSynthesizer()
+    /// The utterance the current `.replyTTS` intent belongs to. Delegate
+    /// callbacks hop through a Task, so a stale didCancel/didFinish for a
+    /// replaced utterance can land after a new preview has begun; only the
+    /// current utterance's callback may release the intent (same identity
+    /// guard as TTSPreviewPlayer).
+    private var currentUtterance: AVSpeechUtterance?
     private override init() {
         super.init()
         synthesizer.delegate = self
@@ -245,6 +251,7 @@ final class SystemVoicePreviewPlayer: NSObject, AVSpeechSynthesizerDelegate {
 
     func speak(_ utterance: AVSpeechUtterance) {
         AudioSessionCoordinator.shared.begin(.replyTTS)
+        currentUtterance = utterance
         synthesizer.stopSpeaking(at: .immediate)
         synthesizer.speak(utterance)
     }
@@ -252,6 +259,17 @@ final class SystemVoicePreviewPlayer: NSObject, AVSpeechSynthesizerDelegate {
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
                                        didFinish utterance: AVSpeechUtterance) {
         Task { @MainActor in
+            guard self.currentUtterance === utterance else { return }
+            self.currentUtterance = nil
+            AudioSessionCoordinator.shared.end(.replyTTS)
+        }
+    }
+
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
+                                       didCancel utterance: AVSpeechUtterance) {
+        Task { @MainActor in
+            guard self.currentUtterance === utterance else { return }
+            self.currentUtterance = nil
             AudioSessionCoordinator.shared.end(.replyTTS)
         }
     }
