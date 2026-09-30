@@ -491,7 +491,13 @@ actor BackupExporter {
         // Resuming would skip the finished categories and ship a package
         // whose file index references blobs it does not contain, so discard
         // the stale staging and start fresh instead.
-        if marker.streamed == true {
+        //
+        // Markers written before the `streamed` field existed decode it as
+        // nil. Those builds streamed exactly the unencrypted runs — the
+        // same `streamed: !hasPassphrase` relationship begin() writes
+        // today — so nil + plaintext means the run streamed too, and only
+        // nil + encrypted (staged) markers may resume.
+        if marker.streamed == true || (marker.streamed == nil && !marker.encrypted) {
             logger.info("[Backup] previous export streamed its blobs — starting fresh")
             BackupExportJournal.finish(backupId: marker.backupId)
             return nil
