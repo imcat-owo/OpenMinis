@@ -195,6 +195,7 @@ final class OpenAIAgentProvider: AgentProvider {
             let task = Task {
                 var emittedTextStart = false
                 var hasToolCalls = false
+                var emittedDone = false
                 // Track parallel tool calls by index: [index: (id, name, accumulatedJSON)]
                 var toolCallAccum: [Int: (id: String, name: String, json: String)] = [:]
                 // Accumulate reasoning_content from thinking models (Kimi, DeepSeek, QwQ, etc.)
@@ -257,8 +258,11 @@ final class OpenAIAgentProvider: AgentProvider {
                             if sawReasoningFieldEver || !reasoningContent.isEmpty {
                                 continuation.yield(.reasoningContent(reasoningContent))
                             }
-                            let reason: AgentStopReason = hasToolCalls ? .toolUse : .endTurn
-                            continuation.yield(.done(stopReason: reason))
+                            if !emittedDone {
+                                emittedDone = true
+                                let reason: AgentStopReason = hasToolCalls ? .toolUse : .endTurn
+                                continuation.yield(.done(stopReason: reason))
+                            }
                             break
                         }
 
@@ -418,7 +422,10 @@ final class OpenAIAgentProvider: AgentProvider {
                                 reason = .refusal
                             default: reason = hasToolCalls ? .toolUse : .endTurn
                             }
-                            continuation.yield(.done(stopReason: reason))
+                            if !emittedDone {
+                                emittedDone = true
+                                continuation.yield(.done(stopReason: reason))
+                            }
                         }
                     }
                     // Empty-stream diagnostic. The "no content, no stop reason"

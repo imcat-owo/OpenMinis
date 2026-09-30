@@ -43,6 +43,7 @@ final class GeminiAgentProvider: AgentProvider {
             let task = Task {
                 var emittedTextStart = false
                 var hasToolCalls = false
+                var emittedDone = false
 
                 do {
                     for try await event in stream {
@@ -83,10 +84,16 @@ final class GeminiAgentProvider: AgentProvider {
                                 default: .endTurn
                                 }
                             }
-                            continuation.yield(.done(stopReason: mapped))
+                            if !emittedDone {
+                                emittedDone = true
+                                continuation.yield(.done(stopReason: mapped))
+                            }
 
                         case .done:
-                            continuation.yield(.done(stopReason: hasToolCalls ? .toolUse : .endTurn))
+                            if !emittedDone {
+                                emittedDone = true
+                                continuation.yield(.done(stopReason: hasToolCalls ? .toolUse : .endTurn))
+                            }
                         }
                     }
                     continuation.finish()
