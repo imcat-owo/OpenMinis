@@ -10,7 +10,9 @@ private let logger = AppLogger(category: "CacheKeepAlive")
 /// context. This manager sends a `max_tokens:1` warmup request ~4 minutes after
 /// the last API call to refresh the TTL. It fires at most 2 times per idle
 /// period (total ~13 minutes of idle coverage). Skips when enhanced cache (1h
-/// TTL) is enabled or the agent is currently processing.
+/// TTL) is enabled or the agent is currently processing. Failed warmups are
+/// refunded and retried on the next cycle, but 3 consecutive failures suspend
+/// the chain (with a notice to the user) until the next real request resets it.
 @MainActor
 final class CacheKeepAliveManager {
     static let shared = CacheKeepAliveManager()
@@ -18,12 +20,15 @@ final class CacheKeepAliveManager {
     private struct SessionState {
         var lastRequestTime: Date
         var keepAliveCount: Int = 0
+        var consecutiveFailures: Int = 0
+        var suspended: Bool = false
         var timer: Timer?
         weak var vm: AIChatViewModel?
     }
 
     private var sessions: [String: SessionState] = [:]
     private let maxKeepAlives = 2
+    private let maxConsecutiveFailures = 3
     private let keepAliveDelay: TimeInterval = 4 * 60  // 4 minutes
 
     private init() {}
@@ -36,6 +41,9 @@ final class CacheKeepAliveManager {
         let hadTimer = sessions[sessionId]?.timer != nil
         sessions[sessionId]?.timer?.invalidate()
 
+        // Fresh state: this also clears the consecutive-failure count and
+        // any suspension, so a real request after the user fixes a bad key
+        // resumes keep-alive automatically.
         var state = SessionState(lastRequestTime: Date(), vm: vm)
         state.timer = scheduleTimer(sessionId: sessionId)
         sessions[sessionId] = state
@@ -77,6 +85,10 @@ final class CacheKeepAliveManager {
             logger.info("🔥 cache keep-alive: max count reached (\(state.keepAliveCount)/\(self.maxKeepAlives)) session=\(sessionId.prefix(8)) elapsed=\(elapsedStr) — no more warmups")
             return
         }
+        guard !state.suspended else {
+            logger.info("🔥 cache keep-alive: suspended after repeated failures session=\(sessionId.prefix(8)) elapsed=\(elapsedStr) — waiting for next real request")
+            return
+        }
         guard let vm = state.vm else {
             logger.warning("🔥 cache keep-alive: vm deallocated session=\(sessionId.prefix(8)) elapsed=\(elapsedStr)")
             sessions.removeValue(forKey: sessionId)
@@ -106,19 +118,19 @@ final class CacheKeepAliveManager {
     // MARK: - Warmup Request
 
     private func sendWarmup(sessionId: String, vm: AIChatViewModel) async {
+        // Identifies the chain this attempt belongs to. If a newer real
+        // request replaces the session state mid-flight, this attempt's
+        // failure must not count against (or suspend) the new chain —
+        // handleFailure checks this.
+        let chainLastRequestTime = sessions[sessionId]?.lastRequestTime
+
         guard let provider = vm.makeAnthropicProviderForWarmup() else {
             logger.warning("🔥 cache keep-alive: failed to create Anthropic provider session=\(sessionId.prefix(8))")
-            // A failed warmup must not end the chain (AE C-5): give the
-            // count back (the fire-time guard and the reschedule helper
-            // both re-check the cap, so this can't exceed maxKeepAlives)
-            // and try again next cycle instead of going silent until the
-            // next real request — which would refresh the cache itself,
-            // making the lost warmups unrecoverable for this idle period.
-            if var state = sessions[sessionId] {
-                state.keepAliveCount = max(0, state.keepAliveCount - 1)
-                sessions[sessionId] = state
-            }
-            rescheduleAfterFailure(sessionId: sessionId)
+            // A single failed warmup must not end the chain (AE C-5):
+            // the attempt is refunded and retried next cycle. Repeated
+            // failures suspend the chain with a user-visible notice
+            // instead — see handleFailure.
+            handleFailure(sessionId: sessionId, vm: vm, chainLastRequestTime: chainLastRequestTime)
             return
         }
 
@@ -145,6 +157,12 @@ final class CacheKeepAliveManager {
                 logger.warning("🔥 cache keep-alive: LOW cache hit — cache_create(\(cacheCreate)) >= cache_read(\(cacheRead)). The prefix may have changed or cache already expired.")
             }
 
+            // A successful warmup clears the consecutive-failure count.
+            if var state = sessions[sessionId], state.consecutiveFailures != 0 {
+                state.consecutiveFailures = 0
+                sessions[sessionId] = state
+            }
+
             // Reschedule if we haven't hit the max
             if var state = sessions[sessionId], state.keepAliveCount < maxKeepAlives {
                 state.timer?.invalidate()
@@ -160,22 +178,52 @@ final class CacheKeepAliveManager {
         } catch {
             let durationMs = Int((CFAbsoluteTimeGetCurrent() - startTime) * 1000)
             logger.error("🔥 cache keep-alive: warmup FAILED session=\(sessionId.prefix(8)) duration=\(durationMs)ms error=\(error.localizedDescription)")
-            // Same chain-preservation as the provider-failure branch above
-            // (AE C-5): refund the attempt and reschedule, or the remaining
-            // keep-alive budget for this idle period is silently lost.
-            if var state = sessions[sessionId] {
-                state.keepAliveCount = max(0, state.keepAliveCount - 1)
-                sessions[sessionId] = state
-            }
+            // Same failure path as the provider-failure branch above:
+            // refund + retry next cycle, suspending with a notice after
+            // repeated failures — see handleFailure.
+            handleFailure(sessionId: sessionId, vm: vm, chainLastRequestTime: chainLastRequestTime)
+        }
+    }
+
+    /// Central failure path for both warmup failure branches. The attempt
+    /// is refunded (AE C-5) and the next cycle rescheduled — but only below
+    /// the consecutive-failure cap: after `maxConsecutiveFailures` failures
+    /// in a row the chain is suspended instead, so a persistent failure
+    /// (e.g. an invalidated API key) cannot retry every 4 minutes for the
+    /// rest of the idle period. A failure whose chain has already been
+    /// replaced by a newer real request is ignored.
+    private func handleFailure(sessionId: String, vm: AIChatViewModel, chainLastRequestTime: Date?) {
+        guard var state = sessions[sessionId],
+              state.lastRequestTime == chainLastRequestTime else { return }
+        state.keepAliveCount = max(0, state.keepAliveCount - 1)
+        state.consecutiveFailures += 1
+        sessions[sessionId] = state
+
+        if state.consecutiveFailures >= maxConsecutiveFailures {
+            suspendAfterRepeatedFailures(sessionId: sessionId, vm: vm)
+        } else {
             rescheduleAfterFailure(sessionId: sessionId)
         }
     }
 
+    /// Stop the keep-alive chain until the next real request (recordRequest
+    /// installs a fresh state, clearing the suspension) and surface why
+    /// through the session's existing transient notice — never silently.
+    private func suspendAfterRepeatedFailures(sessionId: String, vm: AIChatViewModel) {
+        guard var state = sessions[sessionId], !state.suspended else { return }
+        state.suspended = true
+        state.timer?.invalidate()
+        state.timer = nil
+        sessions[sessionId] = state
+        logger.warning("🔥 cache keep-alive: SUSPENDED after \(self.maxConsecutiveFailures) consecutive failures session=\(sessionId.prefix(8)) — resumes on next real request")
+        vm.transientNotice = AppLocalized("Cache keep-alive paused: \(maxConsecutiveFailures) warmup requests failed in a row — your API key may be invalid. Fix the key and send any message to resume.")
+    }
+
     /// Reschedule the next warmup after a failed attempt, mirroring the
     /// success branch's reschedule. The count was already refunded by the
-    /// caller; the cap is re-checked here and again at fire time, so a
-    /// failure loop can never exceed maxKeepAlives warmups per idle period
-    /// (AE C-5).
+    /// caller; the cap is re-checked here and again at fire time. Only
+    /// called below the consecutive-failure cap — at the cap the caller
+    /// suspends the chain instead (see handleFailure).
     private func rescheduleAfterFailure(sessionId: String) {
         guard var state = sessions[sessionId], state.keepAliveCount < maxKeepAlives else {
             let count = sessions[sessionId]?.keepAliveCount ?? 0
