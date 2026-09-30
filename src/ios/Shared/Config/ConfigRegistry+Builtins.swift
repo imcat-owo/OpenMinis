@@ -883,6 +883,16 @@ extension ConfigRegistry {
                         // Goes through setEnabled so the engine start/stop side
                         // effects fire exactly as they do from the Settings toggle.
                         SyncV2Bootstrap.setEnabled(on)
+                        // This field is the master switch, so the v1 key must
+                        // agree: disabling v2 flips `syncV2Live()` false, after
+                        // which the reader (and next launch's v1 engine) fall
+                        // back to `cloudSync.enabled`. Leaving it stale-true
+                        // made the switch impossible to turn off — reads kept
+                        // reporting ON and v1 really started next launch.
+                        // Written directly, not via CloudSyncEngine.isEnabled:
+                        // while v2 is live the v1 engine is paused, and its
+                        // didSet start/stop side effects must not fire.
+                        UserDefaults.standard.set(on, forKey: "cloudSync.enabled")
                     } else {
                         // v1 is the live engine (v2 off, or its migration failed).
                         // The property's didSet persists cloudSync.enabled.
