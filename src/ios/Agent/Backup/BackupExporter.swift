@@ -345,6 +345,15 @@ actor BackupExporter {
         // step zips this whole directory.
         BackupExportJournal.clearDoneMarkers(in: staging)
 
+        // On a resume where chats already finished in the interrupted
+        // attempt, exportChats never ran this time, so rescueSessions is
+        // empty even though the staged data holds every session. Rebuild
+        // the summaries from the staged JSONL — the package's own record
+        // of what it contains — rather than shipping an empty rescue index.
+        if rescueSessions.isEmpty, resumed != nil {
+            rescueSessions = rebuildRescueSessions(dataDir: dataDir)
+        }
+
         // Rescue index (plaintext, never encrypted — see BackupRescueIndex).
         // Written before the manifest so the manifest's `integrity` map can
         // carry its hash: that makes tampering detectable without making the
@@ -615,6 +624,44 @@ actor BackupExporter {
             entries: messageCount + fileCount,
             bytes: sessions.totalBytes + messages.totalBytes + markers.totalBytes + fileBytes,
             encrypted: false, messages: messageCount, files: fileCount)
+    }
+
+    /// Rebuild rescue session summaries from the staged `data/` JSONL.
+    ///
+    /// Used only on a resume where chats was already complete: the staged
+    /// sessions/messages files are what the package will actually contain,
+    /// so they — not the live store, which may have moved on since the
+    /// snapshot — are the authority for the rescue index.
+    private func rebuildRescueSessions(dataDir: URL) -> [BackupRescueIndex.SessionSummary] {
+        func shardNames(_ base: String) -> [String] {
+            ((try? FileManager.default.contentsOfDirectory(atPath: dataDir.path)) ?? [])
+                .filter { $0 == "\(base).jsonl" || ($0.hasPrefix("\(base)-") && $0.hasSuffix(".jsonl")) }
+                .sorted()
+        }
+        func lines<T: Codable>(_ base: String, as type: T.Type) -> [T] {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            var out: [T] = []
+            for name in shardNames(base) {
+                guard let data = try? Data(contentsOf: dataDir.appendingPathComponent(name)) else { continue }
+                for line in data.split(separator: 0x0A) where !line.isEmpty {
+                    if let env = try? decoder.decode(BackupRecordEnvelope<T>.self, from: Data(line)) {
+                        out.append(env.d)
+                    }
+                }
+            }
+            return out
+        }
+        let records = lines("sessions", as: SessionRecord.self)
+        guard !records.isEmpty else { return [] }
+        var counts: [String: Int] = [:]
+        for msg in lines("messages", as: RawMessage.self) {
+            counts[msg.sessionId, default: 0] += 1
+        }
+        return records.map {
+            .init(id: $0.session.id, title: $0.session.title,
+                  messageCount: counts[$0.session.id] ?? 0)
+        }
     }
 
     /// Session row + the two extras the sync layer keeps outside `ChatSession`,
