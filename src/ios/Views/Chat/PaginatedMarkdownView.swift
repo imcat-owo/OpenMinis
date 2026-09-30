@@ -119,6 +119,12 @@ struct PaginatedMarkdownView: View {
     static let segmentTargetSize: Int = 10_000
 
     @State private var segments: [Segment]? = nil
+    /// The document `segments` was split from. The same preview instance
+    /// is reused when the underlying file is rewritten in place (the
+    /// caller re-reads by fingerprint), so segments from a previous
+    /// document must never render — or be landed by a slow split —
+    /// against the new one.
+    @State private var segmentsMarkdown: String? = nil
 
     var body: some View {
         Group {
@@ -130,7 +136,7 @@ struct PaginatedMarkdownView: View {
                     SelectableMarkdownView(markdown: markdown)
                         .padding()
                 }
-            } else if let segments {
+            } else if let segments, segmentsMarkdown == markdown {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(segments) { segment in
@@ -171,8 +177,17 @@ struct PaginatedMarkdownView: View {
                     .enumerated()
                     .map { Segment(index: $0.offset, text: $0.element) }
             }.value
+            // The detached split is not cooperatively cancelled when the
+            // document changes underneath us (.task(id:) restarts, but a
+            // slow split of the OLD document still finishes). Never land
+            // a result whose document is no longer the current one —
+            // it would permanently cover the new document's content.
+            guard !Task.isCancelled else { return }
+            let requestedMarkdown = markdown
             await MainActor.run {
+                guard self.markdown == requestedMarkdown else { return }
                 self.segments = split
+                self.segmentsMarkdown = requestedMarkdown
             }
         }
     }
