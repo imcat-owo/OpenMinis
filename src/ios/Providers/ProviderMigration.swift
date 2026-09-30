@@ -228,9 +228,11 @@ enum ProviderMigration {
             let legacySettings = Self.loadLegacyAgentModelSettings()
             let primaryIds = legacySettings.primaryModelIds
 
-            // Filter to just entries matching the legacy primary model IDs
+            // Filter to just entries matching the legacy primary model IDs.
+            // Entry ids are now "\(instanceId)/\(modelId)" ("/" separator);
+            // the legacy ":" suffix could never match them.
             let matchedEntries = firstGroupEntryIds.filter { entryId in
-                primaryIds.contains(where: { entryId.hasSuffix(":\($0)") })
+                primaryIds.contains(where: { entryId.hasSuffix("/\($0)") })
             }
 
             let groupMembers = matchedEntries.isEmpty ? firstGroupEntryIds : matchedEntries
@@ -247,7 +249,7 @@ enum ProviderMigration {
             let subIds = legacySettings.subModelIds.isEmpty ? legacySettings.primaryModelIds : legacySettings.subModelIds
             if subIds != primaryIds {
                 let subEntries = firstGroupEntryIds.filter { entryId in
-                    subIds.contains(where: { entryId.hasSuffix(":\($0)") })
+                    subIds.contains(where: { entryId.hasSuffix("/\($0)") })
                 }
                 if !subEntries.isEmpty {
                     let subGroup = ModelGroup(
