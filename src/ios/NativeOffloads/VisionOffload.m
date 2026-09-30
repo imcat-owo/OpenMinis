@@ -373,6 +373,10 @@ static NSDictionary *find_overlap_info(CGImageRef imageA, CGImageRef imageB,
                                         NSInteger widthB, NSInteger heightB,
                                         float threshold,
                                         NSInteger skipTop, NSInteger skipBottom) {
+    // Negative skips would push row offsets outside the pixel buffers below.
+    skipTop = MAX(0, skipTop);
+    skipBottom = MAX(0, skipBottom);
+
     // Step 1: Vision translational registration for coarse estimate
     VNTranslationalImageRegistrationRequest *regRequest =
         [[VNTranslationalImageRegistrationRequest alloc] initWithTargetedCGImage:imageB options:@{}];
