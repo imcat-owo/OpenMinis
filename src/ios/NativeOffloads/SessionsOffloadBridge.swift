@@ -364,7 +364,7 @@ private let logger = AppLogger(category: "SessionsOffload")
             }
 
             // Attachments.
-            _ = stageAttachments(paths: attachmentPaths, on: vm)
+            let stagedCount = stageAttachments(paths: attachmentPaths, on: vm)
 
             // Send.
             vm.inputText = prompt
@@ -387,6 +387,12 @@ private let logger = AppLogger(category: "SessionsOffload")
                 "prompt": prompt,
                 "response_text": "",
             ]
+            if !attachmentPaths.isEmpty {
+                output["attachments_attached"] = stagedCount
+                if stagedCount < attachmentPaths.count {
+                    output["attachments_failed"] = attachmentPaths.count - stagedCount
+                }
+            }
             sem.signal()
         }
         sem.wait()
