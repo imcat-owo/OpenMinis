@@ -1696,11 +1696,19 @@ thinking 填/描/强调不必手写。贴包后跟 `colorsLight.accent` / 聊天
                         dbUpdateSkillMeta(id: id, name: resolvedName, description: resolvedDesc, version: version, updatedAt: updatedAt)
                     }
                 } else {
-                    // SKILL.md missing from Library — check rootfs as well
+                    // SKILL.md unreadable from Library — check rootfs as well
                     let rootfsFile = rootfsSkillsDir.appendingPathComponent(id).appendingPathComponent("SKILL.md")
                     if let rootfsContent = try? String(contentsOf: rootfsFile, encoding: .utf8) {
                         let parsed = Self.parse(skillMD: rootfsContent)
                         body = parsed.body
+                    } else if fm.fileExists(atPath: skillFile.path) || fm.fileExists(atPath: rootfsFile.path) {
+                        // A SKILL.md EXISTS but doesn't decode as UTF-8.
+                        // That is not "the skill was deleted": keep the DB
+                        // record (enabled state, use count, install date)
+                        // and load with an empty body. Falling through to
+                        // the delete here destroyed the whole record over
+                        // an encoding problem.
+                        body = ""
                     } else {
                         // Skill files deleted from both locations — remove from DB
                         dbDeleteSkill(id: id)
