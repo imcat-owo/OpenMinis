@@ -178,7 +178,13 @@ struct SessionMemoryView: View {
     // MARK: - Tool memories
 
     struct ToolMemoryItem: Identifiable {
-        let id = UUID()
+        // Identity comes from the source AssistantBlock, whose id is
+        // stable for the block's lifetime. A fresh UUID() here would
+        // change on every recompute of `toolMemories` (it is a computed
+        // property rebuilt on each body evaluation), so any background
+        // message change would swap every row's identity and tear down
+        // a pushed detail view along with its editing state.
+        let id: UUID
         let title: String
         let detail: String
         /// The tool result output (what the tool returned to the agent).
@@ -231,6 +237,7 @@ struct SessionMemoryView: View {
                 }
 
                 items.append(ToolMemoryItem(
+                    id: block.id,
                     title: summary,
                     detail: detail,
                     content: block.content,
