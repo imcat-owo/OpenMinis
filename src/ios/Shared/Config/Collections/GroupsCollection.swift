@@ -68,11 +68,17 @@ struct GroupsCollection: ConfigCollection {
             throw ConfigError.invalidValue("Unknown model entry uuid: \(member)")
         }
         var strategy: RoutingStrategy = .fallback
-        if case .string(let s)? = dict["strategy"], let parsed = RoutingStrategy(rawValue: s) {
+        if case .string(let s)? = dict["strategy"] {
+            guard let parsed = RoutingStrategy(rawValue: s) else {
+                throw ConfigError.invalidValue("Unknown strategy")
+            }
             strategy = parsed
         }
         var fallbackStrategy: FallbackStrategy = .limited
-        if case .string(let s)? = dict["fallback_strategy"], let parsed = FallbackStrategy(rawValue: s) {
+        if case .string(let s)? = dict["fallback_strategy"] {
+            guard let parsed = FallbackStrategy(rawValue: s) else {
+                throw ConfigError.invalidValue("Unknown fallback strategy")
+            }
             fallbackStrategy = parsed
         }
         var defaultThinking: ThinkingLevel? = nil
