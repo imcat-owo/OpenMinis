@@ -1185,8 +1185,13 @@ final class BackgroundKeepAliveManager: NSObject, ObservableObject, CLLocationMa
         } else if shouldPlay && silentAudioActive {
             // Already playing AND should keep playing — a transient foreground
             // blip that flipped back before its debounce fired. Make sure no
-            // stale stop is still queued.
+            // stale stop is still queued, AND cancel any idle grace armed
+            // while the last task was ending: work is back, so the grace's
+            // unconditional stop must not fire mid-task. (This is the branch
+            // that actually runs for "work returned during the grace window,
+            // audio still playing" — the grace design's main case.)
             cancelPendingSilentAudioStop(reason: "still shouldPlay")
+            cancelIdleGrace(reason: "shouldPlay=true")
         } else if !shouldPlay && silentAudioActive {
             // [T-ios-bg-idle-grace] Split the single "should stop" branch by WHY.
             // Only the pure-idle transition (isActive went false while every other
@@ -1208,11 +1213,6 @@ final class BackgroundKeepAliveManager: NSObject, ObservableObject, CLLocationMa
                 cancelIdleGrace(reason: "explicit stop (\(reason))")
                 requestStopSilentAudio(transientForeground: !appIsInBackground)
             }
-        } else if shouldPlay {
-            // Work is back (or never left) — a queued idle grace is now moot.
-            // Covers both shouldPlay branches above; cancelIdleGrace is a no-op
-            // when nothing is pending.
-            cancelIdleGrace(reason: "shouldPlay=true")
         }
     }
 
