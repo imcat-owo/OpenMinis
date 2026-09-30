@@ -210,6 +210,12 @@ enum ModelsDevAPI {
     ///
     /// Keyed by `normalizedModelKey`; the value is the same `DevModelMatch` the
     /// old inline scan produced, so callers cannot tell the difference.
+    /// Guards every static cache below (registry / stage-2 / release index /
+    /// refresh flag). These are read and written from caller threads and a
+    /// detached background refresh with no other synchronization; the lock is
+    /// only ever held for the cache check/store itself — never across network
+    /// or disk work, and never while calling another locking function.
+    private static let cacheLock = NSLock()
     private static var cachedStage2Index: [String: DevModelMatch]?
     private static var stage2IndexBuiltFrom: Date?
 
@@ -217,12 +223,17 @@ enum ModelsDevAPI {
     /// timestamp moves, so a background models.dev refresh is picked up without
     /// a relaunch — same invalidation rule as `releaseIndex()`.
     private static func stage2Index(for registry: [String: ModelsDevProvider]) -> [String: DevModelMatch]? {
+        cacheLock.lock()
         if let cached = cachedStage2Index, stage2IndexBuiltFrom == cacheTimestamp {
+            cacheLock.unlock()
             return cached
         }
+        cacheLock.unlock()
         let index = buildStage2Index(registry)
+        cacheLock.lock()
         cachedStage2Index = index
         stage2IndexBuiltFrom = cacheTimestamp
+        cacheLock.unlock()
         logger.info("[ModelsDev] stage-2 index built: \(index.count) normalized keys")
         return index
     }
@@ -405,9 +416,12 @@ enum ModelsDevAPI {
     /// refresh of models.dev is picked up without a relaunch.
     static func releaseIndex() -> ReleaseIndex? {
         guard let registry = loadRegistry() else { return nil }
+        cacheLock.lock()
         if let cached = cachedReleaseIndex, releaseIndexBuiltFrom == cacheTimestamp {
+            cacheLock.unlock()
             return cached
         }
+        cacheLock.unlock()
         var byFullId: [String: ReleaseEntry] = [:]
         var byTail: [String: ReleaseEntry] = [:]
         for provider in registry.values {
@@ -431,30 +445,38 @@ enum ModelsDevAPI {
             }
         }
         let index = ReleaseIndex(byFullId: byFullId, byTail: byTail)
+        cacheLock.lock()
         cachedReleaseIndex = index
         releaseIndexBuiltFrom = cacheTimestamp
+        cacheLock.unlock()
         logger.info("[ModelRank] release index built: full=\(byFullId.count) tail=\(byTail.count)")
         return index
     }
 
     private static func loadRegistry() -> [String: ModelsDevProvider]? {
         // 1. In-memory cache (fresh)
+        cacheLock.lock()
         if let cached = cachedRegistry, let ts = cacheTimestamp,
            Date().timeIntervalSince(ts) < cacheTTL {
+            cacheLock.unlock()
             return cached
         }
 
         // 2. In-memory cache exists but stale — return it, schedule refresh
         if let cached = cachedRegistry {
+            cacheLock.unlock()
             scheduleBackgroundRefresh()
             return cached
         }
+        cacheLock.unlock()
 
         // 3. Disk cache (downloaded data) — fallback to bundled on parse failure
         if let (diskData, diskDate) = loadDiskCache() {
             if let parsed = parseRegistry(diskData) {
+                cacheLock.lock()
                 cachedRegistry = parsed
                 cacheTimestamp = diskDate
+                cacheLock.unlock()
                 if Date().timeIntervalSince(diskDate) >= cacheTTL {
                     scheduleBackgroundRefresh()
                 }
@@ -466,8 +488,10 @@ enum ModelsDevAPI {
 
         // 4. Bundled fallback — must always succeed
         if let bundled = loadBundledRegistry() {
+            cacheLock.lock()
             cachedRegistry = bundled
             cacheTimestamp = Date() // Treat as fresh to avoid repeated bundled loads within same session
+            cacheLock.unlock()
             scheduleBackgroundRefresh()
             return bundled
         }
@@ -477,15 +501,21 @@ enum ModelsDevAPI {
 
     /// Schedule a background refresh if one isn't already in flight.
     private static func scheduleBackgroundRefresh() {
-        guard !isRefreshing else { return }
+        cacheLock.lock()
+        guard !isRefreshing else { cacheLock.unlock(); return }
         isRefreshing = true
+        cacheLock.unlock()
         Task.detached(priority: .utility) {
             await refreshFromNetwork()
         }
     }
 
     private static func refreshFromNetwork() async {
-        defer { isRefreshing = false }
+        defer {
+            cacheLock.lock()
+            isRefreshing = false
+            cacheLock.unlock()
+        }
         do {
             guard let url = URL(string: sourceURL) else { return }
             var request = URLRequest(url: url)
@@ -496,8 +526,10 @@ enum ModelsDevAPI {
                 return
             }
             if let parsed = parseRegistry(data) {
+                cacheLock.lock()
                 cachedRegistry = parsed
                 cacheTimestamp = Date()
+                cacheLock.unlock()
                 saveDiskCache(data)
                 logger.info("Background-refreshed models.dev registry: \(parsed.count) providers")
             }
