@@ -136,12 +136,14 @@ final class AppearanceStudio: ObservableObject {
             customColors = [:]
         }
         userAvatar = UserDefaults.standard.string(forKey: Keys.userAvatar) ?? ""
-        if let data = UserDefaults.standard.data(forKey: Keys.icons),
-           let value = try? JSONDecoder().decode([String: String].self, from: data) {
-            customIcons = value
-        } else {
-            customIcons = [:]
-        }
+        // [PIC-6] Custom icons used to live in UserDefaults as one JSON blob
+        // of base64 data URIs (23 slots × ~1MB of PNG = a multi-MB plist
+        // the system rewrites on every sync). They now live as PNG files
+        // under the appearance directory; the in-memory dictionary is kept
+        // as the read cache and `customIcon(for:)`'s data-URI contract is
+        // unchanged.
+        migrateCustomIconsFromUserDefaults()
+        customIcons = loadCustomIconsFromDisk()
         let storedOpacity = UserDefaults.standard.object(forKey: Keys.surfaceOpacity) as? Double
         let storedShade = UserDefaults.standard.object(forKey: Keys.wallpaperShade) as? Double
         surfaceOpacity = storedOpacity ?? 0.88
@@ -396,22 +398,73 @@ final class AppearanceStudio: ObservableObject {
 
     func setIcon(_ image: UIImage, for id: String) {
         if case .success(let value) = SoulIconImage.encode(image) {
+            // [PIC-6] File first, memory second: the PNG file is the source
+            // of truth; the dictionary is only the read cache.
+            try? FileManager.default.createDirectory(at: customIconsDirectory,
+                                                     withIntermediateDirectories: true)
+            if let png = SoulIconImage.pngData(from: value) {
+                try? png.write(to: customIconURL(for: id), options: .atomic)
+            }
             customIcons[id] = value
             persistIcons()
         }
     }
 
     func removeIcon(for id: String) {
+        try? FileManager.default.removeItem(at: customIconURL(for: id))
         customIcons.removeValue(forKey: id)
         persistIcons()
     }
 
     private func persistIcons() {
-        if let data = try? JSONEncoder().encode(customIcons) {
-            UserDefaults.standard.set(data, forKey: Keys.icons)
-        }
+        // [PIC-6] The dictionary is now only the in-memory read cache; the
+        // files are the source of truth (setIcon/removeIcon write them).
         iconRevision += 1
         objectWillChange.send()
+    }
+
+    // MARK: - [PIC-6] Custom icons on disk
+
+    private var customIconsDirectory: URL {
+        appearanceDirectory.appendingPathComponent("icons", isDirectory: true)
+    }
+
+    private func customIconURL(for id: String) -> URL {
+        customIconsDirectory.appendingPathComponent("\(id).png")
+    }
+
+    private static let customIconsMigratedKey = "appearanceStudio.customIconsMigrated.v1"
+
+    /// One-time migration: UserDefaults JSON blob → one PNG file per slot.
+    /// Runs once; the UserDefaults key is removed afterwards.
+    private func migrateCustomIconsFromUserDefaults() {
+        guard !UserDefaults.standard.bool(forKey: Self.customIconsMigratedKey) else { return }
+        defer {
+            UserDefaults.standard.removeObject(forKey: Keys.icons)
+            UserDefaults.standard.set(true, forKey: Self.customIconsMigratedKey)
+        }
+        guard let data = UserDefaults.standard.data(forKey: Keys.icons),
+              let value = try? JSONDecoder().decode([String: String].self, from: data),
+              !value.isEmpty else { return }
+        try? FileManager.default.createDirectory(at: customIconsDirectory,
+                                                 withIntermediateDirectories: true)
+        for (id, uri) in value {
+            guard let png = SoulIconImage.pngData(from: uri) else { continue }
+            try? png.write(to: customIconURL(for: id), options: .atomic)
+        }
+    }
+
+    private func loadCustomIconsFromDisk() -> [String: String] {
+        var loaded: [String: String] = [:]
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: customIconsDirectory,
+            includingPropertiesForKeys: nil) else { return loaded }
+        for url in files where url.pathExtension.lowercased() == "png" {
+            let id = url.deletingPathExtension().lastPathComponent
+            guard !id.isEmpty, let data = try? Data(contentsOf: url) else { continue }
+            loaded[id] = "data:image/png;base64," + data.base64EncodedString()
+        }
+        return loaded
     }
 
     // MARK: UIKit-backed surfaces

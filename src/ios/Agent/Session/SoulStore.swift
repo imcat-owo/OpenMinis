@@ -24,6 +24,13 @@ enum SoulIconImage {
 
     static func isDataURI(_ s: String) -> Bool { s.hasPrefix(prefix) }
 
+    /// [PIC-6] Raw PNG bytes behind a stored data URI (what `encode`
+    /// produced), for writing the value to a file without re-encoding.
+    static func pngData(from value: String) -> Data? {
+        guard isDataURI(value) else { return nil }
+        return Data(base64Encoded: String(value.dropFirst(prefix.count)))
+    }
+
     /// Why an image was refused.
     ///
     /// [T-soul-icon-opaque-rounded] `opaque` is gone. It used to reject any
@@ -70,8 +77,7 @@ enum SoulIconImage {
     /// Decode a stored data URI back to an image. Returns nil for a
     /// non-image value (including a legacy emoji) or anything malformed,
     /// so callers fall back to the default presentation.
-    static func decode(_ value: String) -> UIImage? {
-        guard isDataURI(value) else { return nil }
+    static func decode(_ value: String) -> UIImage? {        guard isDataURI(value) else { return nil }
         // [PIC-1] Decoded-image cache: every chat bubble header, settings
         // preview and icon picker row decodes the same data URI on each
         // render — base64 + full decode per frame. Cache per value (keyed
