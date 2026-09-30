@@ -1123,6 +1123,19 @@ enum ChatStoreSyncHydrators {
         return SyncableTypeRegistry.shared.metadata(for: "MemoryDailyV2")?.buildPortable(synced)
     }
 
+    /// Stable FNV-1a hash for MemoryDaily conflict-key suffixes.
+    /// `String.hashValue` is randomised per process launch, so a suffix
+    /// derived from it differs on every run and the same conflict keeps
+    /// minting fresh keys (and fresh copies) across restarts.
+    private static func stableContentHash(_ content: String) -> Int {
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in content.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x100000001b3
+        }
+        return Int(hash % 100_000_000)
+    }
+
     private static func mergeMemoryDaily(record: PortableRecord) async {
         guard let dateKey = stringField(record, "dateKey"),
               let entriesJson = stringField(record, "entriesJson"),
@@ -1162,7 +1175,7 @@ enum ChatStoreSyncHydrators {
         for e in localEntries {
             if let existing = merged[e.timestamp] {
                 if existing.content != e.content {
-                    let hashSuffix = String(abs(e.content.hashValue) % 100_000_000)
+                    let hashSuffix = String(stableContentHash(e.content))
                     let conflictKey = "\(e.timestamp)#\(hashSuffix)"
                     if merged[conflictKey] == nil { merged[conflictKey] = e }
                 }
@@ -1174,7 +1187,7 @@ enum ChatStoreSyncHydrators {
             if let existing = merged[e.timestamp] {
                 if existing.content != e.content {
                     // Conflict: deterministic suffix from content hash.
-                    let hashSuffix = String(abs(e.content.hashValue) % 100_000_000)
+                    let hashSuffix = String(stableContentHash(e.content))
                     let conflictKey = "\(e.timestamp)#\(hashSuffix)"
                     if merged[conflictKey] == nil {
                         merged[conflictKey] = e
