@@ -244,6 +244,16 @@ final class EnvVarStore: ObservableObject {
         SecItemDelete(syncQuery as CFDictionary)
     }
 
+    /// Keychain values are keyed by NAME while entries are per-UUID, and
+    /// sync deliberately keeps same-name entries created on two devices —
+    /// so two entries can share the one value stored under their key.
+    /// Deleting/renaming either entry must not destroy the shared value
+    /// while another entry still references that key.
+    private func deleteValueIfUnreferenced(forKey key: String) {
+        guard !entries.contains(where: { $0.key == key }) else { return }
+        Self.deleteValue(forKey: key)
+    }
+
     /// Non-isolated read for use from CloudSyncEngine (background thread).
     nonisolated static func loadValueSync(forKey key: String) -> String? {
         loadValue(forKey: key)
@@ -342,7 +352,7 @@ final class EnvVarStore: ObservableObject {
         markEntryDirty(entryId: entries[idx].id, operation: "upsert")
 
         if keyChanged {
-            Self.deleteValue(forKey: oldKey)
+            deleteValueIfUnreferenced(forKey: oldKey)
         }
         logger.info("Updated env var: \(trimmedKey)")
     }
@@ -362,7 +372,7 @@ final class EnvVarStore: ObservableObject {
         guard let idx = entries.firstIndex(where: { $0.id == id }) else { return }
         let key = entries[idx].key
         entries.remove(at: idx)
-        Self.deleteValue(forKey: key)
+        deleteValueIfUnreferenced(forKey: key)
         saveEntries()
         // Mark the entry's per-key record for cloud deletion. Peers will
         // hard-delete it via applyEnvVarItemDeletion. The recordId is the
@@ -416,7 +426,7 @@ final class EnvVarStore: ObservableObject {
                 // (same race as update() rename — never delete-before-write).
                 if Self.saveValue(value, forKey: key) {
                     if keyChanged {
-                        Self.deleteValue(forKey: existing.key)
+                        deleteValueIfUnreferenced(forKey: existing.key)
                     }
                 } else {
                     logger.error("[EnvVarStore] applyRemoteItem Keychain write failed for \(key); prior key left intact")
@@ -431,7 +441,7 @@ final class EnvVarStore: ObservableObject {
                 // value under the new key so we don't strand it.
                 if let oldVal = Self.loadValue(forKey: existing.key),
                    Self.saveValue(oldVal, forKey: key) {
-                    Self.deleteValue(forKey: existing.key)
+                    deleteValueIfUnreferenced(forKey: existing.key)
                 } else {
                     logger.error("[EnvVarStore] applyRemoteItem rename migrate failed for \(key); prior key left intact")
                     entries[idx].key = existing.key
@@ -460,7 +470,7 @@ final class EnvVarStore: ObservableObject {
         guard let idx = entries.firstIndex(where: { $0.id == id }) else { return }
         let key = entries[idx].key
         entries.remove(at: idx)
-        Self.deleteValue(forKey: key)
+        deleteValueIfUnreferenced(forKey: key)
         saveEntries()
         logger.info("[EnvVarStore] applyRemoteDeletion id=\(id.prefix(8)) key=\(key)")
     }
