@@ -585,8 +585,14 @@ final class SyncCore {
     /// Apply a remote batch to local SQLite via per-type appliers
     /// registered through `SyncCoreHydrators`. Skips records whose
     /// recordType is not registered (per §3.6.3).
-    func processInbound(_ batch: SyncInboundBatch, from transport: String, countAsReceived: Bool = true) {
-        guard !batch.records.isEmpty || !batch.deletes.isEmpty else { return }
+    /// `bypassEchoFilter` is for explicit user-driven replays (Force Pull)
+    /// where the records MUST land even if this device pushed them moments
+    /// ago — the local rows have already been deleted at that point, so the
+    /// own-echo skip would silently drop them. `onComplete` fires once the
+    /// background merge task has actually finished, not just been queued.
+    func processInbound(_ batch: SyncInboundBatch, from transport: String, countAsReceived: Bool = true,
+                        bypassEchoFilter: Bool = false, onComplete: (() -> Void)? = nil) {
+        guard !batch.records.isEmpty || !batch.deletes.isEmpty else { onComplete?(); return }
         // Don't inflate Sync Activity counters when this batch is just the
         // server-side echo from a conflict (our own send racing another
         // device). Real remote fetches and observe-driven inbound do
@@ -604,6 +610,7 @@ final class SyncCore {
         // chance to release intermediate Codable structs. Observed:
         // 3+GB resident before OOM crash on a 1196-session migration.
         Task { @MainActor [weak self] in
+            defer { onComplete?() }
             var applied = 0, skipped = 0, blocked = 0, ownEcho = 0
             let allRecords = batch.records
             let allDeletes = batch.deletes
@@ -638,7 +645,8 @@ final class SyncCore {
                     // every cached AIChatViewModel for nothing. Drop it
                     // from the inbound flow so the notification only
                     // fires for genuinely new peer writes.
-                    if let pushedAt = self?.recentlyPushedIds[record.id.description],
+                    if !bypassEchoFilter,
+                       let pushedAt = self?.recentlyPushedIds[record.id.description],
                        now.timeIntervalSince(pushedAt) < (self?.echoTTL ?? 30) {
                         ownEcho += 1
                         continue
@@ -788,6 +796,11 @@ final class SyncCore {
     /// Apply a pre-fetched portable batch through the standard inbound
     /// path (hydrators land them in SQLite). Used by forcePullSession
     /// after it has committed to swapping local for cloud.
+    ///
+    /// Awaits the actual merge (not just the enqueue) per slice, so the
+    /// caller only reports success once rows are in SQLite; also bypasses
+    /// the own-echo filter, since the local rows were just deleted and a
+    /// skipped record would otherwise be lost from this device.
     func applyPortables(_ portables: [PortableRecord], transportName: String) async {
         guard !portables.isEmpty else { return }
         let chunk = 50
@@ -795,8 +808,13 @@ final class SyncCore {
         while i < portables.count {
             let end = min(i + chunk, portables.count)
             let slice = Array(portables[i..<end])
-            await MainActor.run {
-                self.processInbound(SyncInboundBatch(records: slice, deletes: [], sourceDeviceId: nil), from: transportName)
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                Task { @MainActor in
+                    self.processInbound(SyncInboundBatch(records: slice, deletes: [], sourceDeviceId: nil),
+                                        from: transportName, bypassEchoFilter: true) {
+                        continuation.resume()
+                    }
+                }
             }
             i = end
         }
