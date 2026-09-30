@@ -22,6 +22,13 @@ struct AnySyncableTypeMetadata {
     /// Diagnostic only; transports don't need it.
     let hasCleanupHook: Bool
 
+    /// True when this type's conflict policy is
+    /// `.lastWriteWinsByField(\.updatedAt)`. Transports that merge at the
+    /// CKRecord level (below the model layer `resolveConflict` works at)
+    /// use it to decide whether an `updatedAt` comparison must gate
+    /// overlaying local fields onto a server record.
+    let conflictUsesUpdatedAt: Bool
+
     /// Field descriptors as opaque tuples — the transport uses
     /// `extractFields(from:)` rather than peeking inside.
     let fieldKinds: [(cloudKey: String, kind: FieldKind, isOptional: Bool)]
@@ -116,6 +123,10 @@ final class SyncableTypeRegistry: @unchecked Sendable {
 
         let knownKeys = Set(m.fields.map(\.cloudKey))
         let kinds = m.fields.map { ($0.cloudKey, $0.kind, $0.isOptional) }
+        let conflictUsesUpdatedAt: Bool = {
+            if case .lastWriteWinsByField = m.conflictPolicy { return true }
+            return false
+        }()
 
         let buildPortable: (Any) -> PortableRecord? = { anyModel in
             guard let model = anyModel as? T else { return nil }
@@ -187,6 +198,7 @@ final class SyncableTypeRegistry: @unchecked Sendable {
             minimumCompatibleVersion: m.minimumCompatibleVersion,
             knownCloudKeys: knownKeys,
             hasCleanupHook: m.cleanupOnDelete != nil,
+            conflictUsesUpdatedAt: conflictUsesUpdatedAt,
             fieldKinds: kinds,
             buildPortable: buildPortable,
             applyPortableToBlank: applyPortableToBlank,

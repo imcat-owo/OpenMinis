@@ -1815,19 +1815,39 @@ extension ICloudSharedZoneTransport: CKSyncEngineDelegate {
                 serverRecordCache[server.recordID] = server
                 etagCacheDirty = true
                 pendingOutcomes[failed.record.recordID.recordName] = .conflict(id, serverRecord: portable)
-                // Re-queue with the fresh etag. CKSyncEngine consults
-                // both engine.state AND nextRecordZoneChangeBatch — only
-                // adding to engine.state without re-appending the record
-                // body silently drops the retry. So rebuild a fresh
-                // CKRecord on top of the server's system fields, copy
-                // failed.record's known fields onto it, and re-append
-                // to pendingRecords so the next batch ships the merge.
-                let mergedRecord = server   // server has correct etag + system fields
-                for key in failed.record.allKeys() {
-                    mergedRecord[key] = failed.record[key]
+                // [R3-085] Honour the type's declared conflict policy
+                // before re-queueing. For lastWriteWinsByField(\.updatedAt)
+                // types, overlaying the local record wholesale would
+                // clobber a NEWER server change (written by another device
+                // after our copy) with our older fields, and the
+                // registry's resolveConflict would never get a say at this
+                // CKRecord level. Only re-queue the merge when the local
+                // copy is at least as new (mirroring resolveConflict's
+                // `local >= remote` tie-break); when the server wins, the
+                // .conflict outcome above already delivers the server
+                // version to the local store, so there is nothing to push.
+                let serverIsNewer: Bool = {
+                    guard SyncableTypeRegistry.shared.metadata(for: failed.record.recordType)?.conflictUsesUpdatedAt == true,
+                          let localUpdated = failed.record["updatedAt"] as? Date,
+                          let serverUpdated = server["updatedAt"] as? Date
+                    else { return false }
+                    return serverUpdated > localUpdated
+                }()
+                if !serverIsNewer {
+                    // Re-queue with the fresh etag. CKSyncEngine consults
+                    // both engine.state AND nextRecordZoneChangeBatch — only
+                    // adding to engine.state without re-appending the record
+                    // body silently drops the retry. So rebuild a fresh
+                    // CKRecord on top of the server's system fields, copy
+                    // failed.record's known fields onto it, and re-append
+                    // to pendingRecords so the next batch ships the merge.
+                    let mergedRecord = server   // server has correct etag + system fields
+                    for key in failed.record.allKeys() {
+                        mergedRecord[key] = failed.record[key]
+                    }
+                    pendingRecords.append(mergedRecord)
+                    syncEngine?.state.add(pendingRecordZoneChanges: [.saveRecord(failed.record.recordID)])
                 }
-                pendingRecords.append(mergedRecord)
-                syncEngine?.state.add(pendingRecordZoneChanges: [.saveRecord(failed.record.recordID)])
             } else if Self.isTransientCKError(failed.error) {
                 pendingOutcomes[failed.record.recordID.recordName] = .transientFailure(id, retryAfter: failed.error.retryAfterSeconds)
                 // Same C1 fix: re-append the record body so the engine
