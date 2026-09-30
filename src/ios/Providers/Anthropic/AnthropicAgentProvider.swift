@@ -92,10 +92,12 @@ final class AnthropicAgentProvider: AgentProvider {
         )
         thinkingLogger.info("[resolve] provider=anthropic model=\(model.id) level=\(thinkingLevel.rawValue) shape=[\(thinkShape.keys.sorted().joined(separator: ","))]")
         if let effort = thinkShape["effort"] as? String {
-            RequestBodyPatcher.setThinkingEffort(effort)
+            // [T-ios-thinking-flag-cross-request] Stamp the model, like
+            // setThinkingDisabled below — see RequestBodyPatcher.
+            RequestBodyPatcher.setThinkingEffort(effort, modelId: model.id)
             logger.info("Thinking enabled (adaptive): effort=\(effort)")
         } else if let budget = thinkShape["budget_tokens"] as? Int {
-            RequestBodyPatcher.setThinkingBudget(budget)
+            RequestBodyPatcher.setThinkingBudget(budget, modelId: model.id)
             logger.info("Thinking enabled (budget): budget_tokens=\(budget)")
         } else if thinkShape["disabled"] != nil {
             // Adaptive-generation models (4.6+/5) think by DEFAULT when the

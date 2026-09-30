@@ -1031,13 +1031,20 @@ enum RequestBodyPatcher {
     /// [T-ios-thinking-flag-cross-request] Model the pending `_thinkingDisabled`
     /// intent was computed for; "" means unstamped (legacy callers).
     private static var _thinkingDisabledModelId: String = ""
+    /// Same stamp for the budget/effort intents: they are claimed by whichever
+    /// request reaches `URLProtocol.startLoading` first, so without a stamp a
+    /// concurrent request (e.g. title generation on another model) would apply
+    /// — and consume — another chat's thinking config.
+    private static var _thinkingBudgetModelId: String = ""
+    private static var _thinkingEffortModelId: String = ""
 
     /// Set thinking budget tokens for the next request (0 = disabled).
     /// Used for legacy Claude models (<= 4.5) that take `thinking.type="enabled"`
     /// + `budget_tokens`.
-    static func setThinkingBudget(_ budget: Int) {
+    static func setThinkingBudget(_ budget: Int, modelId: String = "") {
         thinkingLock.lock()
         _thinkingBudget = budget
+        _thinkingBudgetModelId = modelId
         thinkingLock.unlock()
     }
 
@@ -1045,9 +1052,10 @@ enum RequestBodyPatcher {
     /// Used for Claude 4.6+ which take `thinking.type="adaptive"` +
     /// `output_config.effort = low|medium|high|xhigh|max` and ignore the
     /// older budget-based form.
-    static func setThinkingEffort(_ effort: String?) {
+    static func setThinkingEffort(_ effort: String?, modelId: String = "") {
         thinkingLock.lock()
         _thinkingEffort = effort
+        _thinkingEffortModelId = modelId
         thinkingLock.unlock()
     }
 
@@ -1083,20 +1091,24 @@ enum RequestBodyPatcher {
         return (d, m)
     }
 
-    private static func takeThinkingBudget() -> Int {
+    private static func takeThinkingBudget() -> (budget: Int, modelId: String) {
         thinkingLock.lock()
         defer { thinkingLock.unlock() }
         let b = _thinkingBudget
+        let m = _thinkingBudgetModelId
         _thinkingBudget = 0
-        return b
+        _thinkingBudgetModelId = ""
+        return (b, m)
     }
 
-    private static func takeThinkingEffort() -> String? {
+    private static func takeThinkingEffort() -> (effort: String?, modelId: String) {
         thinkingLock.lock()
         defer { thinkingLock.unlock() }
         let e = _thinkingEffort
+        let m = _thinkingEffortModelId
         _thinkingEffort = nil
-        return e
+        _thinkingEffortModelId = ""
+        return (e, m)
     }
 
     // MARK: - Compat-proxy reasoning echo
@@ -1211,16 +1223,29 @@ enum RequestBodyPatcher {
     /// In both cases temperature handling follows AnthropicProvider.modelRejectsTemperature
     /// — Claude 4.6+ rejects temperature entirely, so we drop it.
     static func injectThinkingConfig(into request: NSMutableURLRequest) {
-        let budget = takeThinkingBudget()
-        let effort = takeThinkingEffort()
+        let (budgetRaw, budgetForModel) = takeThinkingBudget()
+        let (effortRaw, effortForModel) = takeThinkingEffort()
         let (disabledRaw, disabledForModel) = takeThinkingDisabled()
-        // Nothing to do if the caller didn't set any thinking intent for this request.
-        guard budget > 0 || effort != nil || disabledRaw else { return }
 
         guard let body = request.httpBody,
               var json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else { return }
 
         let modelId = (json["model"] as? String) ?? ""
+        // [T-ios-thinking-flag-cross-request] Same stamp rule as `disabled`
+        // below: a budget/effort intent computed for another model must not be
+        // applied to this request (it would also be consumed, leaving the
+        // owning chat's thinking silently off). Unstamped ("") intents are
+        // honoured as before.
+        let budget = (budgetForModel.isEmpty || budgetForModel == modelId) ? budgetRaw : 0
+        let effort: String? = (effortForModel.isEmpty || effortForModel == modelId) ? effortRaw : nil
+        if budgetRaw > 0, budget == 0 {
+            logger.info("[Thinking] dropped cross-request budget intent set for \(budgetForModel) — this request is \(modelId)")
+        }
+        if effortRaw != nil, effort == nil {
+            logger.info("[Thinking] dropped cross-request effort intent set for \(effortForModel) — this request is \(modelId)")
+        }
+        // Nothing to do if the caller didn't set any thinking intent for this request.
+        guard budget > 0 || effort != nil || disabledRaw else { return }
         // Claude 4.6+ always uses adaptive. On Anthropic-compat relays, non-Claude
         // ids (MiniMax-M3 etc., OpenMinis#311) also need type=adaptive when thinking
         // is on — their docs treat omit as off and only adaptive as force-on.
