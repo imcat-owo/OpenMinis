@@ -778,7 +778,11 @@ final class ElevenLabsVoiceProvider: VoiceProvider {
         // voice_id (legacy path above) — reusing it as model_id would send the
         // voice id as the model name. Only a request that carries its voice
         // separately (service layer) has a genuine model id in `model`.
-        let modelId = (request.voice?.isEmpty == false && request.model?.isEmpty == false) ? request.model! : Self.modelId
+        // Quick Test duplicates the entry id into BOTH fields, so voice ==
+        // model also means "no genuine model id" (same idiom as MiniMax's
+        // voice==model guard) — without this it sent the voice id as
+        // model_id and ElevenLabs 404'd.
+        let modelId = (request.voice?.isEmpty == false && request.model?.isEmpty == false && request.voice != request.model) ? request.model! : Self.modelId
         var base = effectiveBaseURL()
         while base.hasSuffix("/") { base.removeLast() }
         if !base.lowercased().hasSuffix("/v1") { base += "/v1" }
