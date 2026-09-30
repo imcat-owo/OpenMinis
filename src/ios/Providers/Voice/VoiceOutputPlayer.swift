@@ -218,6 +218,14 @@ final class VoiceOutputPlayer: NSObject, ObservableObject {
     /// always miss, silently dropping the playing sentence on a voice switch.
     private var playingUnit: Unit?
 
+    /// [TTS-10] Read hooks for the Now Playing extension in
+    /// VoiceNowPlaying.swift. `player` / `playingUnit` stay private to this
+    /// file (and `Unit` is a private nested type), so the cross-file
+    /// extension reads playback state through these instead of touching
+    /// the private storage directly.
+    var nowPlayingHasLivePlayer: Bool { player != nil }
+    var nowPlayingUnitText: String? { playingUnit?.text }
+
     /// Owner id used by non-session read-aloud entry points (long-press menu,
     /// markdown preview) — never collides with a real session id.
     static let manualOwnerId = "__manual__"

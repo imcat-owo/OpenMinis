@@ -153,11 +153,11 @@ final class VoiceNowPlaying {
 extension VoiceOutputPlayer {
     /// True while a live AVAudioPlayer exists (playing OR paused) — i.e.
     /// this engine currently owns the audio session for voice.
-    var hasLivePlayer: Bool { player != nil }
+    var hasLivePlayer: Bool { nowPlayingHasLivePlayer }
 
     /// Short title for Now Playing: the current sentence, trimmed.
     var nowPlayingTitle: String {
-        let text = (playingUnit?.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = (nowPlayingUnitText ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {
             return AppLocalized("Reading aloud", comment: "Now Playing title fallback for read-aloud")
         }
