@@ -190,6 +190,10 @@ final class BackgroundKeepAliveManager: NSObject, ObservableObject, CLLocationMa
     // MARK: - CLBackgroundActivitySession (iOS 17+)
     private var bgActivitySession: Any?
     private var liveUpdatesTask: Task<Void, Never>?
+    /// Token identifying the current liveUpdates task generation; bumped on
+    /// every start/stop so a cancelled task's late teardown can recognise
+    /// that the handle has been taken over by a newer session.
+    private var liveUpdatesGeneration: UInt64 = 0
     private var lastLocationLAUpdate: Date = .distantPast
     private static let locationLAMinInterval: TimeInterval = 5.0
 
@@ -1055,10 +1059,15 @@ final class BackgroundKeepAliveManager: NSObject, ObservableObject, CLLocationMa
         guard liveUpdatesTask == nil else { return }
 
         if #available(iOS 17.0, *) {
+            // Invalidate any previous session before overwriting the handle,
+            // or it leaks with no reachable invalidate path.
+            (bgActivitySession as? CLBackgroundActivitySession)?.invalidate()
             let session = CLBackgroundActivitySession()
             bgActivitySession = session
             logger.info("[BKA][LocationLA] CLBackgroundActivitySession created")
 
+            liveUpdatesGeneration += 1
+            let myGeneration = liveUpdatesGeneration
             liveUpdatesTask = Task { @MainActor [weak self] in
                 guard let self else { return }
                 do {
@@ -1080,7 +1089,12 @@ final class BackgroundKeepAliveManager: NSObject, ObservableObject, CLLocationMa
                     }
                 }
                 logger.info("[BKA][LocationLA] stream ended")
-                self.liveUpdatesTask = nil
+                // Only clear the handle if it still belongs to THIS task —
+                // a newer session may have taken over after we were
+                // cancelled, and clearing unconditionally would orphan it.
+                if self.liveUpdatesGeneration == myGeneration {
+                    self.liveUpdatesTask = nil
+                }
             }
             logger.info("[BKA][LocationLA] liveUpdates stream started")
         }
@@ -1088,6 +1102,9 @@ final class BackgroundKeepAliveManager: NSObject, ObservableObject, CLLocationMa
 
     private func stopBackgroundActivitySession() {
         let hadSomething = liveUpdatesTask != nil || bgActivitySession != nil
+        // Bump the generation so the cancelled task's late teardown can't
+        // clear the handle of a session started after this stop.
+        liveUpdatesGeneration += 1
         liveUpdatesTask?.cancel()
         liveUpdatesTask = nil
         if #available(iOS 17.0, *) {
