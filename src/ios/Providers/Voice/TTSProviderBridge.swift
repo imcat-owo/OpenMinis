@@ -108,11 +108,20 @@ enum TTSProviderBridge {
     /// into the typed field so vendors that special-case it (MiniMax, Azure)
     /// still see it through the normal channel.
     static func request(for service: TTSServiceOptions, text: String) -> VoiceOutputRequest {
-        var extras = service.extras
+        // [TTS-2] Send-time clamp: definitions saved before the range
+        // table existed (or written by another build) are pulled into
+        // the vendor's documented ranges here too, not only at save.
+        var extras = service.clampedExtras().extras
         var speed: Float? = nil
         if let raw = extras["speed"], let v = Double(raw), v > 0 {
             speed = Float(v)
-            extras.removeValue(forKey: "speed")
+            // [TTS-2] The speed value STAYS in extras as well as the
+            // typed field: several vendors read it via extra("speed")
+            // (Doubao's req_params.speed, Xunfei's spte) and the old
+            // removeValue here silently disabled their service-layer
+            // speed knob — only the Model-Group path ever reached them.
+            // No consumer double-sends: the base class and MiniMax both
+            // prefer the typed field and only fall back to the extra.
         }
         // Strip empties so an untouched field never becomes an empty string in
         // a request body (some vendors 400 on `emotion: ""`).

@@ -214,7 +214,20 @@ struct TTSServiceEditorView: View {
     }
 
     private func save() {
-        let draft = buildDraft()
+        var draft = buildDraft()
+        // [TTS-2] Save-time clamp: numeric tuning values are pulled into
+        // the vendor's documented range before persisting (the request
+        // builder clamps again at send time for older stored values).
+        // When anything changed, say so — never rewrite silently.
+        let clamp = draft.clampedExtras()
+        if !clamp.adjusted.isEmpty {
+            draft.extras = clamp.extras
+            extras = clamp.extras
+            let fields = clamp.adjusted.joined(separator: ", ")
+            MinisToast.show(AppLocalized("Some tuning values were outside the supported range and have been adjusted: ")
+                            + fields,
+                            systemImage: "exclamationmark.triangle.fill")
+        }
         store.upsert(draft)
         if !apiKey.isEmpty {
             store.saveAPIKey(apiKey, for: draft)

@@ -227,7 +227,9 @@ final class MiniMaxVoiceProvider: VoiceProvider {
         // historical constants so the Model-Group path is byte-identical.
         let volumeRaw = request.extraDouble("volume") ?? 1.0
         let volume = min(10.0, max(0.1, volumeRaw))
-        let pitch = request.extraInt("pitch") ?? 0
+        // [TTS-2] Pitch gets the same send-time clamp as speed/volume
+        // (documented −12…12) — it used to go out raw.
+        let pitch = min(12, max(-12, request.extraInt("pitch") ?? 0))
         var voiceSetting: [String: Any] = [
             "voice_id": requestedVoice ?? defaultVoiceOutputVoice(),  // voice -> voice_id
             "speed":    speed,
@@ -807,10 +809,30 @@ final class ElevenLabsVoiceProvider: VoiceProvider {
         req.setValue(apiKey ?? "", forHTTPHeaderField: "xi-api-key")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("audio/mpeg", forHTTPHeaderField: "Accept")
+        var settings: [String: Any] = [
+            // [TTS-5] Voice settings are knob-driven; absent knobs fall
+            // back to the historical constants, so existing services
+            // synthesize identically.
+            "stability": request.extraDouble("stability") ?? 0.5,
+            "similarity_boost": request.extraDouble("similarity") ?? 0.75
+        ]
+        if let style = request.extraDouble("style") {
+            settings["style"] = style
+        }
+        let elevenSpeed = request.extraDouble("speed") ?? Double(request.speed ?? 1.0)
+        if elevenSpeed != 1.0 {
+            // ElevenLabs' own speed lever lives inside voice_settings
+            // (0.7–1.2); only send it when it differs from the default
+            // so untouched services keep the legacy body shape.
+            settings["speed"] = min(1.2, max(0.7, elevenSpeed))
+        }
+        if let boost = request.extra("useSpeakerBoost") {
+            settings["use_speaker_boost"] = (boost.lowercased() == "true")
+        }
         let body: [String: Any] = [
             "text": request.input,
             "model_id": modelId,
-            "voice_settings": ["stability": 0.5, "similarity_boost": 0.75]
+            "voice_settings": settings
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         return try await executeRequest(req)   // MP3 bytes

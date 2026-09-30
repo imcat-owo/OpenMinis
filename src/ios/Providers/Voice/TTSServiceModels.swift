@@ -98,11 +98,15 @@ enum TTSServiceKind: String, CaseIterable, Codable, Identifiable {
         }
     }
 
-    /// Default synthesis model id.
+    /// Default synthesis model id. Only used when a service is CREATED —
+    /// saved services keep their stored model (the decoder only falls
+    /// back to this on an empty value), so bumping a default never
+    /// migrates existing configurations. [TTS-6] Gemini's default moved
+    /// to the current-generation TTS model on that basis.
     var defaultModel: String {
         switch self {
         case .openai:     return "gpt-4o-mini-tts"
-        case .gemini:     return "gemini-2.5-flash-preview-tts"
+        case .gemini:     return "gemini-3.1-flash-tts-preview"
         case .azure:      return "azure-tts"
         case .minimax:    return "speech-2.8-turbo"
         case .qwen:       return "qwen3-tts-flash"
@@ -166,10 +170,32 @@ extension TTSServiceKind {
                 TTSKnob(key: "speed", title: "Speed", placeholder: "0.5 – 2.0", defaultValue: "1.0"),
                 TTSKnob(key: "volume", title: "Volume", placeholder: "0.1 – 10.0", defaultValue: "1.0"),
                 TTSKnob(key: "pitch", title: "Pitch", placeholder: "-12 – 12", defaultValue: "0"),
+                // [TTS-3] The request builder already reads these three
+                // (audio_setting.format / sample_rate / bitrate) — they
+                // simply had no editor entry, so the wire always carried
+                // the built-in defaults.
+                TTSKnob(key: "format", title: "Format", placeholder: "mp3 / wav / flac", defaultValue: "mp3"),
+                TTSKnob(key: "sampleRate", title: "Sample Rate", placeholder: "8000 – 44100", defaultValue: "32000"),
+                TTSKnob(key: "bitrate", title: "Bitrate", placeholder: "32000 – 256000", defaultValue: "128000"),
             ]
         case .elevenlabs:
             return [
                 TTSKnob(key: "outputFormat", title: "Output Format", placeholder: "mp3_44100_128", defaultValue: "mp3_44100_128"),
+                // [TTS-5] Voice-settings levers. The request builder sent
+                // stability 0.5 / similarity 0.75 hard-coded; these knobs
+                // feed the same fields (absent = the old constants).
+                TTSKnob(key: "stability", title: "Stability", placeholder: "0 – 1", defaultValue: "0.5"),
+                TTSKnob(key: "similarity", title: "Similarity Boost", placeholder: "0 – 1", defaultValue: "0.75"),
+                TTSKnob(key: "style", title: "Style Exaggeration", placeholder: "0 – 1", defaultValue: "0"),
+                TTSKnob(key: "speed", title: "Speed", placeholder: "0.7 – 1.2", defaultValue: "1.0"),
+                TTSKnob(key: "useSpeakerBoost", title: "Speaker Boost", placeholder: "true / false", defaultValue: "false"),
+            ]
+        case .openai, .groq, .openrouter:
+            // [TTS-3] The OpenAI-compatible request already carries a
+            // typed speed — the editor just never offered the field for
+            // these kinds, so it could only ever be the default.
+            return [
+                TTSKnob(key: "speed", title: "Speed", placeholder: "0.25 – 4.0", defaultValue: "1.0"),
             ]
         case .qwen:
             return [
@@ -178,6 +204,9 @@ extension TTSServiceKind {
         case .xai:
             return [
                 TTSKnob(key: "language", title: "Language", placeholder: "auto", defaultValue: "auto"),
+                // [TTS-3] xAI rides the OpenAI-compatible shape — same
+                // speed field as the .openai case above.
+                TTSKnob(key: "speed", title: "Speed", placeholder: "0.25 – 4.0", defaultValue: "1.0"),
             ]
         case .azure:
             return [
@@ -272,6 +301,73 @@ struct TTSServiceOptions: Identifiable, Codable, Equatable {
         let v = extras[key]?.trimmingCharacters(in: .whitespaces)
         if let v, !v.isEmpty { return v }
         return kind.knobs.first { $0.key == key }?.defaultValue.nonEmpty
+    }
+}
+
+// MARK: - Knob range clamping
+
+extension TTSServiceKind {
+    /// [TTS-2] Official numeric range for a tuning knob, when the vendor
+    /// defines one. Keys not listed here (free text like emotion /
+    /// language, booleans like useSpeakerBoost) pass through untouched.
+    func knobRange(_ key: String) -> (min: Double, max: Double, integer: Bool)? {
+        switch (self, key) {
+        case (.minimax, "speed"):      return (0.5, 2.0, false)
+        case (.minimax, "volume"):     return (0.1, 10.0, false)
+        case (.minimax, "pitch"):      return (-12, 12, true)
+        case (.minimax, "sampleRate"): return (8000, 44100, true)
+        case (.minimax, "bitrate"):    return (32000, 256000, true)
+        case (.openai, "speed"), (.groq, "speed"),
+             (.xai, "speed"), (.openrouter, "speed"):
+            return (0.25, 4.0, false)
+        case (.doubao, "speed"):       return (0.2, 3.0, false)
+        case (.xunfei, "speed"):       return (0.5, 2.0, false)
+        case (.elevenlabs, "speed"):   return (0.7, 1.2, false)
+        case (.elevenlabs, "stability"), (.elevenlabs, "similarity"),
+             (.elevenlabs, "style"):
+            return (0.0, 1.0, false)
+        default:                        return nil
+        }
+    }
+}
+
+extension TTSServiceOptions {
+    /// [TTS-2] Clamp every ranged numeric knob in `extras` to the vendor's
+    /// documented range. Out-of-range values are pulled to the nearest
+    /// bound; values that don't parse as numbers at all are DROPPED (the
+    /// vendor default then applies — sending garbage risks a 400 that
+    /// silences the whole read-aloud). Returns the list of keys that were
+    /// changed so the caller can tell the user instead of adjusting
+    /// silently. Applied both when the editor saves AND when a request is
+    /// built, so definitions stored before this clamp existed are still
+    /// safe on the wire.
+    func clampedExtras() -> (extras: [String: String], adjusted: [String]) {
+        var out = extras
+        var adjusted: [String] = []
+        for (key, raw) in extras {
+            guard let range = kind.knobRange(key) else { continue }
+            let trimmed = raw.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty { continue }
+            guard let value = Double(trimmed) else {
+                out.removeValue(forKey: key)
+                adjusted.append(key)
+                continue
+            }
+            let clamped = min(range.max, max(range.min, value))
+            let formatted: String
+            if range.integer {
+                formatted = String(Int(clamped.rounded()))
+            } else if clamped == value {
+                continue  // in range — keep the user's exact text
+            } else {
+                formatted = String(format: "%g", clamped)
+            }
+            if formatted != trimmed {
+                out[key] = formatted
+                adjusted.append(key)
+            }
+        }
+        return (out, adjusted)
     }
 }
 

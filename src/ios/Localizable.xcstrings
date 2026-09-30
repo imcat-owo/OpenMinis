@@ -104276,6 +104276,29 @@
           }
         }
       }
+    },
+
+    "Some tuning values were outside the supported range and have been adjusted: ": {
+        "localizations": {
+            "en": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "Some tuning values were outside the supported range and have been adjusted: "
+                }
+            },
+            "zh-Hans": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "有些参数超出了支持范围，已自动调整："
+                }
+            },
+            "zh-Hant": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "有些參數超出了支援範圍，已自動調整："
+                }
+            }
+        }
     }
   },
   "version" : "1.0"
