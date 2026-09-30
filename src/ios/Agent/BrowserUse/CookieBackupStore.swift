@@ -181,11 +181,35 @@ final class CookieBackupStore {
     /// Group key for the per-domain backup file: the registrable domain
     /// (last two labels, leading dot stripped) so ".x.com", "x.com" and
     /// "api.x.com" cookies all land in `x.com.txt`.
+    /// Multi-part public suffixes under which unrelated sites register their
+    /// own names (a.co.uk vs b.co.uk). Taking only the last two labels would
+    /// merge every such site into one backup bucket ("co.uk"), so when the
+    /// host ends in one of these, the registrable domain is three labels.
+    /// This is the common-case subset of the public suffix list (plus the
+    /// github.io hosting suffix), not the full PSL.
+    private static let multiPartPublicSuffixes: Set<String> = [
+        "github.io",
+    ]
+    /// Second-level labels that, under a two-letter ccTLD, act as public
+    /// suffixes (com.cn, co.uk, or.jp, gob.mx, govt.nz, …).
+    private static let ccSecondLevelSuffixLabels: Set<String> = [
+        "com", "net", "org", "gov", "edu", "ac", "co", "or", "ne", "go",
+        "gob", "govt", "idv", "firm", "gen", "ind", "per", "sch", "me",
+    ]
+
     private static func registrableDomain(_ domain: String) -> String {
         let bare = domain.hasPrefix(".") ? String(domain.dropFirst()) : domain
         let parts = bare.split(separator: ".")
         guard parts.count > 2 else { return bare }
-        return parts.suffix(2).joined(separator: ".")
+        let lastTwo = parts.suffix(2).joined(separator: ".")
+        let endsInMultiPartSuffix =
+            multiPartPublicSuffixes.contains(lastTwo)
+            || (parts.last!.count == 2
+                && ccSecondLevelSuffixLabels.contains(String(parts[parts.count - 2])))
+        if endsInMultiPartSuffix {
+            return parts.suffix(3).joined(separator: ".")
+        }
+        return lastTwo
     }
 
     /// Record a real navigation to `url`'s registrable domain so its backup
