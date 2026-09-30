@@ -765,20 +765,50 @@ final class AnthropicAgentProvider: AgentProvider {
     }
 
     /// Convert `[String: Any]` to the SDK's `MessageResponse.Content.Input` type.
+    /// Nested objects/arrays are converted recursively and decimals keep their
+    /// fractional part — nothing is silently dropped or truncated.
     private func convertToInput(_ dict: [String: Any]) -> MessageResponse.Content.Input {
         var result: MessageResponse.Content.Input = [:]
         for (key, value) in dict {
-            if let s = value as? String {
-                result[key] = .string(s)
-            } else if let n = value as? NSNumber {
-                if CFBooleanGetTypeID() == CFGetTypeID(n) {
-                    result[key] = .bool(n.boolValue)
-                } else {
-                    result[key] = .integer(n.intValue)
-                }
+            if let v = convertToInputValue(value) {
+                result[key] = v
             }
         }
         return result
+    }
+
+    /// Recursive scalar/collection mapping for `convertToInput`. Returns nil
+    /// only for NSNull (mapped to .null) — i.e. never nil — and for object
+    /// types that have no JSON representation, which stay dropped as before.
+    private func convertToInputValue(_ value: Any) -> MessageResponse.Content.DynamicContent? {
+        if let s = value as? String {
+            return .string(s)
+        }
+        if let n = value as? NSNumber {
+            if CFBooleanGetTypeID() == CFGetTypeID(n) {
+                return .bool(n.boolValue)
+            }
+            // Keep decimals as doubles; whole numbers as integers.
+            let d = n.doubleValue
+            if d == d.rounded(), !d.isInfinite, abs(d) < Double(Int.max) {
+                return .integer(n.intValue)
+            }
+            return .double(d)
+        }
+        if let dict = value as? [String: Any] {
+            var out: [String: MessageResponse.Content.DynamicContent] = [:]
+            for (k, v) in dict {
+                if let cv = convertToInputValue(v) { out[k] = cv }
+            }
+            return .dictionary(out)
+        }
+        if let arr = value as? [Any] {
+            return .array(arr.compactMap { convertToInputValue($0) })
+        }
+        if value is NSNull {
+            return .null
+        }
+        return nil
     }
 
     // MARK: - Image Helpers
