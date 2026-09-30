@@ -4,6 +4,17 @@ import os.log
 
 private let logger = AppLogger(category: "AntigravityModelsAPI")
 
+/// Session for the models endpoint, configured like AntigravityProvider's
+/// (registered for stale-connection eviction) instead of URLSession.shared,
+/// whose defaults the rest of this provider deliberately avoids.
+private let antigravityModelsSession: URLSession = {
+    let config = URLSessionConfiguration.default
+    config.timeoutIntervalForRequest = 600
+    let session = URLSession(configuration: config)
+    LLMSessionRegistry.shared.register(session)
+    return session
+}()
+
 enum AntigravityModelsAPI {
 
     /// Fetch available models from the Antigravity Cloud Code endpoint.
@@ -55,7 +66,7 @@ enum AntigravityModelsAPI {
 
         logger.info("POST \(urlString)")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await antigravityModelsSession.data(for: request)
         let http = response as? HTTPURLResponse
         let statusCode = http?.statusCode ?? -1
         let responseBody = String(data: data, encoding: .utf8) ?? "<binary>"

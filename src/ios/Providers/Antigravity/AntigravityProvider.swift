@@ -297,7 +297,17 @@ final class AntigravityProvider: LLMProvider {
         var contents: [[String: Any]] = []
         for msg in messages {
             let role = msg.role == .user ? "user" : "model"
-            var parts: [[String: Any]] = msg.audios.map(GeminiWireFormat.audioPart)
+            // Image attachments ride inlineData parts exactly like
+            // GeminiProvider builds them — omitting them here silently
+            // dropped every image sent through this provider (the audio
+            // line below was the R3-061 fix; images were left out).
+            var parts: [[String: Any]] = msg.images.map { img in
+                ["inlineData": [
+                    "mimeType": img.mimeType,
+                    "data": img.data.base64EncodedString()
+                ]]
+            }
+            parts.append(contentsOf: msg.audios.map(GeminiWireFormat.audioPart))
             parts.append(GeminiWireFormat.textPart(msg.content))
             contents.append([
                 "role": role,
@@ -404,6 +414,11 @@ final class AntigravityProvider: LLMProvider {
 
         for part in parts {
             if let t = part["text"] as? String {
+                // Thought parts belong to the thinking channel, not the
+                // visible reply — the streaming parser below already routes
+                // them by this flag; the non-streaming path concatenated
+                // them into the answer text.
+                if part["thought"] as? Bool == true { continue }
                 text += t
             }
             if let fc = part["functionCall"] as? [String: Any] {
