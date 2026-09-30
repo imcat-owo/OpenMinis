@@ -353,6 +353,19 @@ static NSString *stateString(CBManagerState state) {
     }
 }
 
+/// Whether `s` is a string CBUUID can parse: a 16/32-bit short UUID (4 or 8
+/// hex digits) or a full 128-bit UUID. `+[CBUUID UUIDWithString:]` throws an
+/// NSInternalInconsistencyException on anything else instead of returning
+/// nil, so user-supplied strings must be validated before they reach it.
+static BOOL isValidCBUUIDString(NSString *s) {
+    if (s.length == 4 || s.length == 8) {
+        NSCharacterSet *hexDigits =
+            [NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF"];
+        return [s rangeOfCharacterFromSet:[hexDigits invertedSet]].location == NSNotFound;
+    }
+    return [[NSUUID alloc] initWithUUIDString:s] != nil;
+}
+
 static NSData *dataFromHex(NSString *hex) {
     NSMutableData *data = [NSMutableData new];
     for (NSUInteger i = 0; i + 1 < hex.length; i += 2) {
@@ -428,6 +441,13 @@ static int cmd_scan(int argc, char **argv, int stdout_fd, BOOL compact, BOOL qui
     NSString *serviceFilter = noff_find_arg(argc, argv, "--service");
     NSArray *serviceUUIDs = nil;
     if (serviceFilter) {
+        if (!isValidCBUUIDString(serviceFilter)) {
+            noff_emit_json(stdout_fd,
+                noff_json_error(TOOL_NAME, @"scan", NOFF_ERR_INVALID_ARGS,
+                    @"--service must be a valid UUID (e.g. 180D or a full 128-bit UUID)."),
+                compact, quiet);
+            return NOFF_EXIT_INVALID_ARGS;
+        }
         serviceUUIDs = @[[CBUUID UUIDWithString:serviceFilter]];
     }
 
