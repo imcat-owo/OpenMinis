@@ -24,9 +24,23 @@ static ssize_t write_file(const char *path, const char *buf, size_t size) {
     struct fd *fd = generic_open(path, O_WRONLY_|O_CREAT_|O_TRUNC_, 0644);
     if (IS_ERR(fd))
         return PTR_ERR(fd);
-    ssize_t n = fd->ops->write(fd, buf, size);
+    // fd->ops->write bottoms out in a single write(2) (realfs_write), which
+    // may return short (0 <= n < size: ENOSPC, RLIMIT_FSIZE, signals).
+    // Loop until everything is out; bail on error or zero progress so the
+    // caller sees the true written count (AE B-7).
+    size_t total = 0;
+    while (total < size) {
+        ssize_t n = fd->ops->write(fd, buf + total, size - total);
+        if (n < 0) {
+            fd_close(fd);
+            return n;
+        }
+        if (n == 0)
+            break;
+        total += (size_t)n;
+    }
     fd_close(fd);
-    return n;
+    return (ssize_t)total;
 }
 
 void FsApplyOverlay(void) {
@@ -96,7 +110,7 @@ void FsApplyOverlay(void) {
         }
 
         ssize_t written = write_file(dst.UTF8String, data.bytes, data.length);
-        if (written < 0) {
+        if (written < 0 || (size_t)written != data.length) {
             NSLog(@"[RootfsPatch] FAIL %@ -> %@ (error %zd)", src, dst, written);
             failed++;
         } else {
@@ -105,11 +119,22 @@ void FsApplyOverlay(void) {
         }
     }
 
-    // Record installed version
-    generic_mkdirat(AT_PWD, "/ish", 0755);
-    NSString *versionStr = [NSString stringWithFormat:@"%d\n", patchVersion];
-    write_file("/ish/overlay-version", versionStr.UTF8String,
-               [versionStr lengthOfBytesUsingEncoding:NSUTF8StringEncoding]);
+    // Record installed version — only when every file landed. Advancing
+    // the version after a failure would make the installedVersion gate
+    // above skip this patch on every later boot, permanently cementing a
+    // half-applied overlay (AE B-7). The version write itself is checked
+    // too; if it fails, the next boot simply retries the patch.
+    if (failed == 0) {
+        generic_mkdirat(AT_PWD, "/ish", 0755);
+        NSString *versionStr = [NSString stringWithFormat:@"%d\n", patchVersion];
+        size_t versionLen = [versionStr lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+        ssize_t versionWritten = write_file("/ish/overlay-version", versionStr.UTF8String, versionLen);
+        if (versionWritten < 0 || (size_t)versionWritten != versionLen) {
+            NSLog(@"[RootfsPatch] FAIL writing overlay-version (wrote %zd of %zu)", versionWritten, versionLen);
+        }
+    } else {
+        NSLog(@"[RootfsPatch] NOT recording v%d — %d file(s) failed, will retry next boot", patchVersion, failed);
+    }
 
     NSLog(@"[RootfsPatch] done: %d applied, %d failed, now at v%d", applied, failed, patchVersion);
 }
