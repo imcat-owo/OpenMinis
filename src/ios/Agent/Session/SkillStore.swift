@@ -899,20 +899,23 @@ thinking 填/描/强调不必手写。贴包后跟 `colorsLight.accent` / 聊天
         // the throw so SKILL.md-level failures (auth, parse, network) still
         // bubble — they're meaningful "the update did not happen at all".
         let preflight = try await preflightGitHubImport(urlString: urlString)
-        _ = try importSkill(content: preflight.content, source: .url(urlString))
+        // Keep the returned skill: if upstream renamed it, the id (slug)
+        // changed, and everything below must target the NEW skill, not the
+        // stale pre-update one.
+        let refreshed = try importSkill(content: preflight.content, source: .url(urlString))
 
         // Now re-run sibling download synchronously (the user is looking at
         // a spinner) so we can return the partial-success state directly.
         guard let ghInfo = Self.parseGitHubURL(urlString) else { return .success }
-        let skillDir = skillsDir.appendingPathComponent(skill.id)
-        let outcome = await downloadSiblingFiles(ghInfo: ghInfo, destDir: skillDir, skill: skill)
+        let skillDir = skillsDir.appendingPathComponent(refreshed.id)
+        let outcome = await downloadSiblingFiles(ghInfo: ghInfo, destDir: skillDir, skill: refreshed)
 
-        if let idx = skills.firstIndex(where: { $0.id == skill.id }) {
+        if let idx = skills.firstIndex(where: { $0.id == refreshed.id }) {
             skills[idx].updatedAt = Date()
-            dbUpdateSkillMeta(id: skill.id, name: skills[idx].name, description: skills[idx].description,
+            dbUpdateSkillMeta(id: refreshed.id, name: skills[idx].name, description: skills[idx].description,
                               version: skills[idx].version, updatedAt: skills[idx].updatedAt)
         }
-        Task { await ChatStore.shared.markDirty(recordType: "Skill", recordId: skill.id) }
+        Task { await ChatStore.shared.markDirty(recordType: "Skill", recordId: refreshed.id) }
 
         if !outcome.isComplete {
             let reason = outcome.reason ?? "\(outcome.filesFailed) sibling file(s) failed to download"
