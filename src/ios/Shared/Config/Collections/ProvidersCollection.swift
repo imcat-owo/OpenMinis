@@ -108,7 +108,10 @@ struct ProvidersCollection: ConfigCollection {
         if case .bool(let b)? = dict["appendV1Suffix"] { appendV1Suffix = b }
 
         var imageEndpointMode: ImageEndpointMode = .auto
-        if case .string(let s)? = dict["imageEndpointMode"], let m = ImageEndpointMode(rawValue: s) {
+        if case .string(let s)? = dict["imageEndpointMode"] {
+            guard let m = ImageEndpointMode(rawValue: s) else {
+                throw ConfigError.invalidValue("Unknown image endpoint mode")
+            }
             imageEndpointMode = m
         }
 
