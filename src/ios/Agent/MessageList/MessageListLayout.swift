@@ -735,6 +735,9 @@ final class MessageListLayout: UICollectionViewLayout {
             self.precalcHeights.removeAll()
             self.estimatedHeights.removeAll()
             self.geometryReaderConfirmed.removeAll()
+            // Deferred heights were measured at the old width — keeping them
+            // would apply stale widths' heights to rows at the new width.
+            self.deferredHeights.removeAll()
             self.lastSettledWidth = cv.bounds.width
             self.invalidateLayout()
         }
@@ -756,18 +759,24 @@ final class MessageListLayout: UICollectionViewLayout {
         var newEstimated: [Int: CGFloat] = [:]
         var newPrecalc: [Int: CGFloat] = [:]
         var newConfirmed: Set<Int> = []
+        var newDeferred: [Int: CGFloat] = [:]
         for (newIndex, item) in newIds.enumerated() {
             if let oldIndex = oldIndexByItem[item] {
                 if let h = heightCache[oldIndex] { newCache[newIndex] = h }
                 if let h = precalcHeights[oldIndex] { newPrecalc[newIndex] = h }
                 if let h = estimatedHeights[oldIndex] { newEstimated[newIndex] = h }
                 if geometryReaderConfirmed.contains(oldIndex) { newConfirmed.insert(newIndex) }
+                // Deferred heights are index-keyed too: remap them with the
+                // item, or a height measured for a moved row would later be
+                // applied to whatever row now sits at the old index.
+                if let h = deferredHeights[oldIndex] { newDeferred[newIndex] = h }
             }
         }
         heightCache = newCache
         precalcHeights = newPrecalc
         estimatedHeights = newEstimated
         geometryReaderConfirmed = newConfirmed
+        deferredHeights = newDeferred
     }
 
     /// Invalidate the cached height for a specific item index, forcing re-measurement.
@@ -887,6 +896,7 @@ final class MessageListLayout: UICollectionViewLayout {
         precalcHeights.removeAll()
         estimatedHeights.removeAll()
         geometryReaderConfirmed.removeAll()
+        deferredHeights.removeAll()
         measuredHeightByContentKey.removeAll()
         contentKeyByIndex.removeAll()
         footerHugByIndex.removeAll()
