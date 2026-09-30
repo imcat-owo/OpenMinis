@@ -504,12 +504,19 @@ final class AnthropicAgentProvider: AgentProvider {
                 case .toolResult(let id, _, let content, let isError, let imageData, _, _, _):
                     let safeId = sanitizeToolId(id)
                     if let data = imageData {
-                        // Downscale to Anthropic's recommended 1568px to avoid
-                        // "many-image" dimension errors in long conversations.
+                        // [IMG-5/IMG-11] Downscale to the cap for THIS
+                        // model's vision tier (1568 standard / 2576
+                        // high-resolution) — the old flat 2000 sent
+                        // over-tier tool images to standard models, which
+                        // is exactly the range Anthropic's many-image
+                        // dimension errors live in.
                         // downscaleForAnthropic always returns JPEG data, so force
                         // the mime type to match — prevents media_type/data mismatch
                         // when restored sessions have PNG data sniffed as image/png.
-                        let downscaled = Self.downscaleForAnthropic(data)
+                        let downscaled = Self.downscaleForAnthropic(
+                            data,
+                            maxLongEdge: ImagePayloadPrep.anthropicLongEdgeCap(forModelId: model.id)
+                        )
                         // Label from the FINAL bytes: downscale output is
                         // JPEG; a within-bounds payload keeps its bytes, so
                         // the sniffed format wins over the recorded mime
@@ -535,7 +542,12 @@ final class AnthropicAgentProvider: AgentProvider {
                     // as JPEG bytes claiming image/png (and HEIC bytes,
                     // which pass the extension-era labelling as "jpeg"
                     // without conversion, claimed whatever was recorded).
-                    if let downscaled = Self.downscaleForAnthropic(data) {
+                    // [IMG-5] The downscale cap is this model's vision
+                    // tier (1568 / 2576) — see the tool-result branch.
+                    if let downscaled = Self.downscaleForAnthropic(
+                        data,
+                        maxLongEdge: ImagePayloadPrep.anthropicLongEdgeCap(forModelId: model.id)
+                    ) {
                         return .image(.init(type: .base64, mediaType: .jpeg, data: downscaled.base64EncodedString()))
                     }
                     // No re-encode happened: bytes go out as-is, so derive
@@ -859,9 +871,11 @@ final class AnthropicAgentProvider: AgentProvider {
 
     // MARK: - Image Helpers
 
-    /// Anthropic supports up to 8000×8000 / 5MB; we standardize at 2000 long edge
-    /// across attachments / browser / read_image. Returns nil if already within bounds.
-    private static func downscaleForAnthropic(_ data: Data, maxLongEdge: CGFloat = 2000) -> Data? {
+    /// Downscale for Anthropic at the given long-edge cap (the caller
+    /// passes the model's vision-tier cap from
+    /// `ImagePayloadPrep.anthropicLongEdgeCap`). Returns nil if already
+    /// within bounds.
+    private static func downscaleForAnthropic(_ data: Data, maxLongEdge: CGFloat = 1568) -> Data? {
         guard let image = UIImage(data: data), let cgImage = image.cgImage else { return nil }
         let pixelW = CGFloat(cgImage.width)
         let pixelH = CGFloat(cgImage.height)

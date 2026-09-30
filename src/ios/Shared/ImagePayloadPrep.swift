@@ -147,6 +147,43 @@ enum ImagePayloadPrep {
         return (jpeg, "image/jpeg")
     }
 
+    // MARK: - Per-provider long-edge caps
+
+    /// [IMG-5] Anthropic's long-edge cap depends on the model's vision
+    /// tier: standard-tier models are served at ≤1568px (and long
+    /// many-image conversations can hard-fail above it), while the
+    /// high-resolution tier — Opus / Sonnet 4.5 and later, and the
+    /// 5-series — accepts up to 2576px. Model ids arrive in several
+    /// shapes ("claude-opus-4-5", "claude-sonnet-4.5-20250929",
+    /// dated/suffixed variants), so the tier test scans for the family +
+    /// version tokens instead of exact-matching names. Anything
+    /// unrecognized gets the STANDARD cap: sending smaller than allowed
+    /// costs a little detail, sending larger risks a rejected request.
+    static func anthropicLongEdgeCap(forModelId modelId: String) -> CGFloat {
+        let id = modelId.lowercased()
+        // Family + major version ≥ 5 ("opus-5", "sonnet-5", "opus-6"…).
+        for family in ["opus-", "sonnet-"] {
+            var searchRange = id.startIndex..<id.endIndex
+            while let hit = id.range(of: family, range: searchRange) {
+                let rest = id[hit.upperBound...]
+                if let first = rest.first, let major = first.wholeNumberValue {
+                    if major >= 5 { return 2576 }
+                    if major == 4 {
+                        // 4.x: high-resolution starts at 4.5 — the minor
+                        // version follows a '-' or '.' separator.
+                        let afterMajor = rest.dropFirst()
+                        if afterMajor.first == "-" || afterMajor.first == "." {
+                            let minor = afterMajor.dropFirst()
+                            if let m = minor.first?.wholeNumberValue, m >= 5 { return 2576 }
+                        }
+                    }
+                }
+                searchRange = hit.upperBound..<id.endIndex
+            }
+        }
+        return 1568
+    }
+
     // MARK: - Tool-result image gate
 
     /// Why a tool-produced image (read_image file, browser screenshot) was

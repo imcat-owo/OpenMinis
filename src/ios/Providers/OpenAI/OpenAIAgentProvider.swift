@@ -1272,9 +1272,14 @@ final class OpenAIAgentProvider: AgentProvider {
                     case .imageData(let data, let mimeType, let linuxPath):
                         if supportsImages {
                             let base64 = data.base64EncodedString()
+                            // [IMG-5] Explicit detail: user attachments
+                            // keep the provider default behaviour via
+                            // "auto" (named explicitly so relays don't
+                            // have to guess); tool images get "high" at
+                            // their own site below.
                             contentParts.append([
                                 "type": "image_url",
-                                "image_url": ["url": "data:\(mimeType);base64,\(base64)"],
+                                "image_url": ["url": "data:\(mimeType);base64,\(base64)", "detail": "auto"],
                             ])
                         } else {
                             // [T-ios-vision-group-t264 #182] Points the model at
@@ -1376,7 +1381,10 @@ final class OpenAIAgentProvider: AgentProvider {
                             "role": "user",
                             "content": [[
                                 "type": "image_url",
-                                "image_url": ["url": "data:\(mime);base64,\(base64)"],
+                                // [IMG-5] Tool images (screenshots, read_image)
+                                // are the model's only eyes on detail —
+                                // always request the high-detail read.
+                                "image_url": ["url": "data:\(mime);base64,\(base64)", "detail": "high"],
                             ]] as [[String: Any]],
                         ])
                     }
@@ -1674,7 +1682,9 @@ final class OpenAIAgentProvider: AgentProvider {
                         let base64 = data.base64EncodedString()
                         contentParts.append([
                             "type": "image_url",
-                            "image_url": ["url": "data:\(mimeType);base64,\(base64)"],
+                            // [IMG-5] User attachment — see the sibling
+                            // site in convertMessagesChatCompletions.
+                            "image_url": ["url": "data:\(mimeType);base64,\(base64)", "detail": "auto"],
                         ])
                     } else {
                         // [T-ios-vision-group-t264 #182] See the sibling site in
@@ -1786,7 +1796,9 @@ final class OpenAIAgentProvider: AgentProvider {
                         result.append([
                             "role": "user",
                             "content": [
-                                ["type": "input_image", "image_url": "data:\(mime);base64,\(base64)"],
+                                // [IMG-5] Tool image — high detail, as on
+                                // the Chat Completions path.
+                                ["type": "input_image", "image_url": "data:\(mime);base64,\(base64)", "detail": "high"],
                             ],
                         ])
                     }
@@ -1797,7 +1809,9 @@ final class OpenAIAgentProvider: AgentProvider {
                         result.append([
                             "role": msg.role == .user ? "user" : "assistant",
                             "content": [
-                                ["type": "input_image", "image_url": "data:\(mimeType);base64,\(base64)"],
+                                // [IMG-5] User attachment — "auto", as on
+                                // the Chat Completions path.
+                                ["type": "input_image", "image_url": "data:\(mimeType);base64,\(base64)", "detail": "auto"],
                             ],
                         ])
                     }
