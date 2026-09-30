@@ -156,6 +156,7 @@ final class AntigravityOAuthManager: NSObject, ObservableObject {
         ProviderKeychainHelper.deleteOAuthToken(instanceId: instanceId)
         ProviderKeychainHelper.deleteOAuthString(instanceId: instanceId, account: "oauth-email")
         ProviderKeychainHelper.deleteOAuthString(instanceId: instanceId, account: "oauth-gcp-project")
+        ProviderKeychainHelper.deleteOAuthString(instanceId: instanceId, account: "oauth-base-url")
     }
 
     func validAccessToken(instanceId: String) async throws -> String {
