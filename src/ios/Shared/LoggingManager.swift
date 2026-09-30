@@ -263,7 +263,7 @@ final class LoggingManager: ObservableObject {
         // failing the whole block's decode and losing its timestamps.
         lineCarry.append(data)
         if let lastNewline = lineCarry.lastIndex(of: 0x0A) {
-            let complete = lineCarry.subdata(in: 0...lastNewline)
+            let complete = lineCarry.subdata(in: 0..<(lastNewline + 1))
             lineCarry = lineCarry.subdata(in: (lastNewline + 1)..<lineCarry.count)
             if let text = String(data: complete, encoding: .utf8) {
                 let timestamp = timeDateFormatter.string(from: capturedAt)
