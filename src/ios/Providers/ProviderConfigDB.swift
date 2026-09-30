@@ -178,6 +178,8 @@ actor ProviderConfigDB {
                     context_limit_tokens     INTEGER,
                     context_limit_remembered INTEGER,
                     member_entry_ids_json    TEXT NOT NULL,
+                    removed_members_json     TEXT NOT NULL DEFAULT '{}',
+                    added_members_json       TEXT NOT NULL DEFAULT '{}',
                     sort_order               INTEGER NOT NULL DEFAULT 0,
                     updated_at               REAL NOT NULL,
                     extras_json              TEXT
@@ -296,6 +298,13 @@ actor ProviderConfigDB {
             }
         }
         sqlite3_finalize(stmt)
+        // Empty set = table doesn't exist yet (brand-new DB: this backstop
+        // runs BEFORE the v1 CREATE TABLE). Skip the ALTERs — they would
+        // fail with "no such table" and add nothing; the v1 DDL already
+        // creates the table WITH both columns, and on later opens (table
+        // present) this ensure repairs DBs from the partial migration.
+        // Mirrors ensureInstanceCustomUAColumn's guard.
+        guard !existing.isEmpty else { return }
         if !existing.contains("removed_members_json") {
             exec(db: db, "ALTER TABLE provider_model_groups ADD COLUMN removed_members_json TEXT NOT NULL DEFAULT '{}'")
             logger.info("[v3] schema repair: added missing column removed_members_json")
