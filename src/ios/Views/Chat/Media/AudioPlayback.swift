@@ -126,13 +126,17 @@ class GlobalAudioPlayer: ObservableObject {
                 self.duration = dur
                 self.currentTime = 0
                 self.isLoaded = true
-                self.rate = 1.0
+                // [TTS-13] Don't reset to 1.0 — reuse the last rate the
+                // user picked in the audio preview.
+                self.rate = VoiceBubblePlaybackState.rememberedRate
                 // Start playing immediately. Declaring `.mediaAttachment` preempts
                 // reply TTS (mutually exclusive) and applies the playback profile.
                 AudioSessionCoordinator.shared.begin(.mediaAttachment)
+                p.rate = self.rate
                 p.play()
                 self.isPlaying = true
                 self.startTimer()
+                VoiceNowPlaying.shared.refresh()
             }
         }
     }
@@ -150,6 +154,7 @@ class GlobalAudioPlayer: ObservableObject {
             isPlaying = true
             startTimer()
         }
+        VoiceNowPlaying.shared.refresh()
     }
 
     func seek(to time: TimeInterval) {
@@ -172,6 +177,8 @@ class GlobalAudioPlayer: ObservableObject {
 
     func setRate(_ r: Float) {
         rate = r
+        // [TTS-13] Remember the user's pick for the next bubble/file.
+        VoiceBubblePlaybackState.rememberRate(r)
         if let p = player, p.isPlaying {
             p.rate = r
         }
@@ -204,6 +211,12 @@ class GlobalAudioPlayer: ObservableObject {
         // starting playback after the user already stopped.
         playRequestId += 1
         let wasLoaded = isLoaded
+        // [TTS-13] Record where this file stopped for resume/unlistened
+        // state (only when something was actually loaded).
+        if wasLoaded {
+            VoiceBubblePlaybackState.recordProgress(
+                fileName: fileName, position: currentTime, duration: duration)
+        }
         timer?.invalidate()
         timer = nil
         player?.stop()
@@ -217,6 +230,7 @@ class GlobalAudioPlayer: ObservableObject {
         // End the media-attachment intent — coordinator re-applies the next intent
         // or deactivates. Note: TTS is NOT auto-resumed (per plan scenario 1).
         AudioSessionCoordinator.shared.end(.mediaAttachment)
+        VoiceNowPlaying.shared.refresh()
         // Resume silent audio keep-alive if we had suspended it
         if wasLoaded {
             let preCount = BackgroundKeepAliveManager.shared.silentAudioSuspendCount
@@ -236,6 +250,10 @@ class GlobalAudioPlayer: ObservableObject {
                     self.timer?.invalidate()
                     // Natural end → release the media-attachment intent.
                     AudioSessionCoordinator.shared.end(.mediaAttachment)
+                    // [TTS-13] Mark the file finished for unlistened state.
+                    VoiceBubblePlaybackState.recordProgress(
+                        fileName: self.fileName, position: self.duration, duration: self.duration)
+                    VoiceNowPlaying.shared.refresh()
                 }
             }
         }

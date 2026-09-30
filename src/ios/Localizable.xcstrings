@@ -104299,6 +104299,52 @@
                 }
             }
         }
+    },
+
+    "Reading aloud": {
+        "localizations": {
+            "en": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "Reading aloud"
+                }
+            },
+            "zh-Hans": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "正在朗读"
+                }
+            },
+            "zh-Hant": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "正在朗讀"
+                }
+            }
+        }
+    },
+
+    "AI voice message": {
+        "localizations": {
+            "en": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "AI voice message"
+                }
+            },
+            "zh-Hans": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "AI 语音消息"
+                }
+            },
+            "zh-Hant": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "AI 語音訊息"
+                }
+            }
+        }
     }
   },
   "version" : "1.0"

@@ -398,6 +398,7 @@ final class VoiceOutputPlayer: NSObject, ObservableObject {
         isPaused = false
         isSynthesizing = false
         releaseSessionIfSafe()
+        VoiceNowPlaying.shared.refresh()
         return remainder
     }
 
@@ -456,6 +457,7 @@ final class VoiceOutputPlayer: NSObject, ObservableObject {
         if let p = player, p.isPlaying { p.pause() }
         isPaused = true
         stopProgressTick(reset: false)
+        VoiceNowPlaying.shared.refresh()
     }
 
     /// Resume paused cloud audio. Resumes the live player if one is paused, and
@@ -468,6 +470,7 @@ final class VoiceOutputPlayer: NSObject, ObservableObject {
             p.play()
             startProgressTick()
         } else { pumpPlayback() }
+        VoiceNowPlaying.shared.refresh()
     }
 
     /// The cloud TTS queue has drained — end the reply-TTS intent. The coordinator
@@ -876,6 +879,7 @@ final class VoiceOutputPlayer: NSObject, ObservableObject {
             p.play()
             player = p
             isPlaying = true
+            VoiceNowPlaying.shared.refresh()
             // [T-kelivo-tts 09-10] Progress tick for the floating control's
             // scrubber (0.1s cadence — kelivo's floating player updates at
             // frame rate but a tenth-second is plenty for a 40pt-wide bar).
@@ -968,6 +972,9 @@ extension VoiceOutputPlayer: AVAudioPlayerDelegate {
             if self.queue.isEmpty && self.player == nil && !generating {
                 self.releaseSessionIfSafe()
             }
+            // [TTS-10] A unit just ended (or the queue moved on): the
+            // Now Playing title belongs to the NEXT unit — refresh.
+            VoiceNowPlaying.shared.refresh()
         }
     }
 }
