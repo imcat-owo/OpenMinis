@@ -150,13 +150,22 @@ static int cmd_transcribe(int argc, char **argv, int stdout_fd, BOOL compact, BO
             if (authStatus != SFSpeechRecognizerAuthorizationStatusNotDetermined) return;
 
             dispatch_semaphore_t authSem = dispatch_semaphore_create(0);
-            __block SFSpeechRecognizerAuthorizationStatus newStatus;
+            // Initialized: if the wait below times out before the callback
+            // runs, newStatus is never written — reading it uninitialized
+            // would be undefined behavior.
+            __block SFSpeechRecognizerAuthorizationStatus newStatus = SFSpeechRecognizerAuthorizationStatusNotDetermined;
             [SFSpeechRecognizer requestAuthorization:^(SFSpeechRecognizerAuthorizationStatus status) {
                 newStatus = status;
                 dispatch_semaphore_signal(authSem);
             }];
-            dispatch_semaphore_wait(authSem, dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC));
-            authStatus = newStatus;
+            long waitResult = dispatch_semaphore_wait(authSem, dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC));
+            if (waitResult == 0) {
+                authStatus = newStatus;
+            } else {
+                // Timed out: fall back to the framework's current status
+                // rather than trusting a variable the callback never set.
+                authStatus = [SFSpeechRecognizer authorizationStatus];
+            }
         });
     }
 
