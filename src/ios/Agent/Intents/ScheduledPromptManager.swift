@@ -146,6 +146,13 @@ final class ScheduledPromptStore: ObservableObject {
     private func reschedule(_ prompt: ScheduledPrompt) async {
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: [notifId(prompt.id)])
+        // A fresh schedule supersedes the previous generation entirely —
+        // including its delivered copy. That copy shares this identifier,
+        // and leaving it in Notification Center makes the next cold start's
+        // rescheduleAll mistake it for "this generation already fired" and
+        // retire a prompt the user just re-armed (e.g. a .once reminder
+        // whose time they edited), even though it has not fired yet.
+        center.removeDeliveredNotifications(withIdentifiers: [notifId(prompt.id)])
         guard prompt.enabled else { return }
         let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
         guard granted else {
@@ -219,6 +226,12 @@ final class ScheduledPromptStore: ObservableObject {
             && deliveredIds.contains(notifId(prompts[i].id)) {
             prompts[i].enabled = false
             retiredAny = true
+            // Retiring must actually disarm. The re-arm loop below skips
+            // disabled prompts, so without this the pending request the
+            // user scheduled survives — the switch reads off while the
+            // notification still fires once at the new time.
+            UNUserNotificationCenter.current()
+                .removePendingNotificationRequests(withIdentifiers: [notifId(prompts[i].id)])
         }
         if retiredAny { persist() }
         for p in prompts where p.enabled {
