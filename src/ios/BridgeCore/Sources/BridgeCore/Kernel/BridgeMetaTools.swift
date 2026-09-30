@@ -1,0 +1,191 @@
+import Foundation
+import MCP
+
+/// 桥对外只暴露的两个元工具——「搜」与「命令」（架构定稿锁死）。
+/// 内部几百个工具怎么组织是桥自己的事，外部 AI 永远只看见这两个口。
+public enum BridgeMetaTools {
+    public static let searchName = "搜"
+    public static let commandName = "命令"
+
+    /// 造一台只挂这两个元工具的 MCP Server。
+    /// 每会话调用一次（会话工厂语义），Server 不跨会话共享。
+    /// handler 注册完才返回，调用方随后 start，不存在「先开服后挂 handler」的竞态。
+    public static func makeServer(registry: ToolRegistry, steward: Steward) async -> Server {
+        let server = Server(
+            name: BridgeKernel.serverName,
+            version: BridgeKernel.serverVersion,
+            title: "桥",
+            instructions: """
+                你连上的是「桥」。桥对外只有两个工具：
+                先用「搜」按关键词找到能干活的工具（返回名字与一句话简介），
+                再用「命令」下指令让桥里的小管家执行，只回清洗后的高密度结果。
+                """,
+            capabilities: .init(tools: .init(listChanged: false))
+        )
+
+        let searchTool = Tool(
+            name: searchName,
+            description: "在桥的工具库里按关键词搜索可用工具，返回短清单（名字 + 一句话简介）。先搜再执行。",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "query": .object([
+                        "type": .string("string"),
+                        "description": .string("搜索关键词，如：回声、时间、蓝牙"),
+                    ])
+                ]),
+                "required": .array([.string("query")]),
+            ])
+        )
+        let commandTool = Tool(
+            name: commandName,
+            description: "下达一条指令，桥里的小管家负责找工具、执行、清洗，只回高密度结果。可点名 tool 指定工具，不点名则由管家按指令智能路由。",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "instruction": .object([
+                        "type": .string("string"),
+                        "description": .string("要执行的指令"),
+                    ]),
+                    "tool": .object([
+                        "type": .string("string"),
+                        "description": .string("可选：点名要用的工具（先用「搜」查到名字）"),
+                    ]),
+                    "arguments": .object([
+                        "type": .string("object"),
+                        "description": .string("可选：给工具的参数对象"),
+                    ]),
+                    "timeoutSeconds": .object([
+                        "type": .string("number"),
+                        "description": .string("可选：超时秒数，默认 30"),
+                    ]),
+                    "sensitiveApproved": .object([
+                        "type": .string("boolean"),
+                        "description": .string("可选：敏感工具经主人确认后传 true"),
+                    ]),
+                ]),
+                "required": .array([.string("instruction")]),
+            ])
+        )
+        let tools = [searchTool, commandTool]
+
+        await server.withMethodHandler(ListTools.self) { _ in
+            ListTools.Result(tools: tools)
+        }
+        await server.withMethodHandler(CallTool.self) { params in
+            await handleCall(params: params, registry: registry, steward: steward)
+        }
+        return server
+    }
+
+    // MARK: - 调用处理
+
+    private static func handleCall(
+        params: CallTool.Parameters, registry: ToolRegistry, steward: Steward
+    ) async -> CallTool.Result {
+        switch params.name {
+        case searchName:
+            return await handleSearch(params: params, registry: registry)
+        case commandName:
+            return await handleCommand(params: params, steward: steward)
+        default:
+            return errorResult("未知工具：\(params.name)。桥对外只提供「搜」和「命令」。")
+        }
+    }
+
+    private static func handleSearch(
+        params: CallTool.Parameters, registry: ToolRegistry
+    ) async -> CallTool.Result {
+        let arguments: StrictJSONObject
+        switch strictArguments(of: params) {
+        case .success(let parsed): arguments = parsed
+        case .failure(let error): return errorResult("「搜」参数解析失败：\(error.description)")
+        }
+        guard let query = try? arguments.requireString("query") else {
+            return errorResult("「搜」缺少必填参数 query（字符串）")
+        }
+        let hits = await registry.search(query)
+        guard !hits.isEmpty else {
+            return textResult("没有找到与「\(query)」匹配的工具。")
+        }
+        let lines = hits.map { "- \($0.name)：\($0.summary)" }
+        return textResult("找到 \(hits.count) 个工具：\n" + lines.joined(separator: "\n"))
+    }
+
+    private static func handleCommand(
+        params: CallTool.Parameters, steward: Steward
+    ) async -> CallTool.Result {
+        let arguments: StrictJSONObject
+        switch strictArguments(of: params) {
+        case .success(let parsed): arguments = parsed
+        case .failure(let error): return errorResult("「命令」参数解析失败：\(error.description)")
+        }
+        guard let instruction = try? arguments.requireString("instruction") else {
+            return errorResult("「命令」缺少必填参数 instruction（字符串）")
+        }
+        let request = StewardRequest(
+            instruction: instruction,
+            toolName: arguments.string("tool"),
+            arguments: arguments.object("arguments") ?? StrictJSONObject(raw: [:]),
+            timeoutSeconds: arguments.double("timeoutSeconds") ?? 30,
+            sensitiveApproved: arguments.bool("sensitiveApproved") ?? false)
+        let result = await steward.execute(request)
+        let text = result.cleanedText ?? "（没有返回内容）"
+        return CallTool.Result(
+            content: [.text(text: text, annotations: nil, _meta: nil)],
+            isError: result.isError)
+    }
+
+    // MARK: - 严格参数解析
+
+    /// 严格解析调用参数：优先走原始 HTTP body（`Server.currentHandlerContext`
+    /// 暴露的 httpContext），绕开 SDK `Value` 可能的宽松数值/布尔混读；
+    /// 拿不到原始 body 时回退到把已解出的 Value 重新序列化再严格解析。
+    static func strictArguments(
+        of params: CallTool.Parameters
+    ) -> Result<StrictJSONObject, StrictJSONError> {
+        if let httpContext = Server.currentHandlerContext?.httpContext,
+            let body = httpContext.body
+        {
+            do {
+                let root = try StrictJSON.parseObject(body)
+                guard let rpcParams = root.object("params") else {
+                    return .success(StrictJSONObject(raw: [:]))
+                }
+                if rpcParams.raw["arguments"] == nil {
+                    return .success(StrictJSONObject(raw: [:]))
+                }
+                guard let arguments = rpcParams.object("arguments") else {
+                    return .failure(
+                        .typeMismatch(
+                            key: "arguments", expected: "对象",
+                            actual: StrictJSON.typeName(of: rpcParams.raw["arguments"] ?? NSNull())))
+                }
+                return .success(arguments)
+            } catch let error as StrictJSONError {
+                return .failure(error)
+            } catch {
+                return .failure(.invalidJSON("\(error)"))
+            }
+        }
+        if let arguments = params.arguments {
+            do {
+                let data = try JSONEncoder().encode(Value.object(arguments))
+                return .success(try StrictJSON.parseObject(data))
+            } catch let error as StrictJSONError {
+                return .failure(error)
+            } catch {
+                return .failure(.invalidJSON("\(error)"))
+            }
+        }
+        return .success(StrictJSONObject(raw: [:]))
+    }
+
+    private static func textResult(_ text: String) -> CallTool.Result {
+        CallTool.Result(content: [.text(text: text, annotations: nil, _meta: nil)], isError: false)
+    }
+
+    private static func errorResult(_ text: String) -> CallTool.Result {
+        CallTool.Result(content: [.text(text: text, annotations: nil, _meta: nil)], isError: true)
+    }
+}
