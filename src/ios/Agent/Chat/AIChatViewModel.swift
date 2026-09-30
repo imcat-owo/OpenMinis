@@ -6287,6 +6287,10 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
             // trimOldImagesFromHistory() at the top of the next turn handles
             // historical pressure. [T-image-budget-double-count]
             let imageBudgetActor = BatchImageBudget(initial: Self.kImageContextKeepCount)
+            // [AE C-4] Per-batch claim registry so concurrent shell tasks
+            // attribute each new/modified /var/minis file to exactly one
+            // task instead of every task whose snapshot window covers it.
+            let fileClaimRegistry = BatchFileClaimRegistry()
 
             #if DEBUG
             // [T-ios-concurrent-toolcall-dup-id] Per-batch dispatch trace —
@@ -6350,7 +6354,8 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
                             ))
                         }
                         let outcome = await self.executeSingleToolUse(
-                            tu: tu, msgIdx: msgIdx, tools: toolsSnapshot, batchBudget: imageBudgetActor
+                            tu: tu, msgIdx: msgIdx, tools: toolsSnapshot, batchBudget: imageBudgetActor,
+                            batchFileClaims: fileClaimRegistry
                         )
                         return (idx, outcome)
                     }

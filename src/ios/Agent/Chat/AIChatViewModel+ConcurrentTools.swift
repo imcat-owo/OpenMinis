@@ -64,6 +64,29 @@ extension AIChatViewModel {
         var strippedSoFar: Int { strippedCount }
     }
 
+    /// Per-batch claim registry for shell file-change attribution.
+    ///
+    /// Shell tasks in one TaskGroup batch run truly concurrently — the
+    /// coordinator forks an independent /bin/sh per call (see
+    /// ISHExecutionCoordinator), so a sibling's writes land inside this
+    /// task's [preSnapshot, postSnapshot] window and would otherwise be
+    /// reported as this task's own products by every task whose window
+    /// covers the write. Each shell task claims its changed paths here
+    /// before reporting: the first task to claim a path keeps it, later
+    /// siblings skip it, so a path is attributed (and registered in the
+    /// fakefs metadata) exactly once per batch. [AE C-4]
+    actor BatchFileClaimRegistry {
+        private var claimedPaths: Set<String> = []
+
+        /// Atomically claim the subset of `paths` no sibling in this
+        /// batch has claimed yet. Returns the paths this caller owns.
+        func claim(_ paths: [String]) -> [String] {
+            let fresh = paths.filter { !claimedPaths.contains($0) }
+            claimedPaths.formUnion(fresh)
+            return fresh
+        }
+    }
+
     /// Outcome of executing a single tool call. Collected by each child
     /// task and merged in original index order by the outer dispatcher.
     struct ToolExecOutcome {
@@ -85,7 +108,8 @@ extension AIChatViewModel {
         tu: StreamResult.ToolEntry,
         msgIdx: Int,
         tools: [AgentToolDefinition],
-        batchBudget: BatchImageBudget
+        batchBudget: BatchImageBudget,
+        batchFileClaims: BatchFileClaimRegistry
     ) async -> ToolExecOutcome {
         let blockIdx = tu.blockIdx
 
@@ -458,11 +482,19 @@ extension AIChatViewModel {
 
             // Scan for new/modified files under /var/minis/
             let postSnapshot = snapshotMinisFiles()
-            let newOrModified = postSnapshot.filter { key, date in
-                preSnapshot[key] == nil || preSnapshot[key]! < date
-            }
+            // [AE C-4] Sibling shell tasks in this batch execute truly
+            // concurrently (one forked /bin/sh each), so their writes
+            // land inside this task's [pre, post] snapshot window. Claim
+            // the changed paths against the per-batch registry first:
+            // each path is reported — and registered in the fakefs
+            // metadata — by exactly one task in the batch.
+            let newOrModified = await batchFileClaims.claim(
+                postSnapshot.filter { key, date in
+                    preSnapshot[key] == nil || preSnapshot[key]! < date
+                }.map { $0.key }
+            )
             if !newOrModified.isEmpty {
-                for (path, _) in newOrModified {
+                for path in newOrModified {
                     var isDir: ObjCBool = false
                     if let hostURL = resolveHostPath(path) {
                         FileManager.default.fileExists(atPath: hostURL.path, isDirectory: &isDir)
@@ -471,7 +503,7 @@ extension AIChatViewModel {
                     ensureFakefsMetadata(for: path, isDirectory: isDir.boolValue)
                 }
                 toolOutput += "\n\n[minis] New/modified files:"
-                for path in newOrModified.keys.sorted() {
+                for path in newOrModified.sorted() {
                     if let url = linuxPathToMinisURL(path) {
                         toolOutput += "\n  \(url)"
                     }
