@@ -120,7 +120,7 @@ struct AppearanceStudioView: View {
                         }
                         Text(role.hint)
                             .font(.caption2)
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(studio.color(.secondaryText, scope: paletteScope, variant: variant).opacity(0.8))
                     }
                 }
             }
