@@ -622,7 +622,7 @@ actor BackupExporter {
 
         return BackupManifest.CategoryStat(
             entries: messageCount + fileCount,
-            bytes: sessions.totalBytes + messages.totalBytes + markers.totalBytes + fileBytes,
+            bytes: sessions.totalBytes + messages.totalBytes + markers.totalBytes + folders.totalBytes + fileBytes,
             encrypted: false, messages: messageCount, files: fileCount)
     }
 
