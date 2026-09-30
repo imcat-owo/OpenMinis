@@ -139,7 +139,14 @@ final class ThumbnailCache {
     // MARK: - Private
 
     private func cacheKey(path: String, maxSize: CGFloat) -> String {
-        "thumb:\(Int(maxSize)):\(path)"
+        // Include the file's size + modification time so overwriting the file
+        // at the same path produces a different key — a path-only key would
+        // keep serving the old image until eviction/memory-warning/background.
+        // A missing file stamps as 0:0, which simply never matches a real load.
+        let attrs = try? FileManager.default.attributesOfItem(atPath: path)
+        let size = (attrs?[.size] as? NSNumber)?.int64Value ?? 0
+        let mtime = (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        return "thumb:\(Int(maxSize)):\(path):\(size):\(mtime)"
     }
 
     /// Load image from disk and downsample to maxSize using ImageIO.
