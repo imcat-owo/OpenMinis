@@ -268,6 +268,13 @@ static int32_t _sweptContexts = 0;
               ctx.guestPid, -[ctx.startTime timeIntervalSinceNow],
               ctx.isCompleted, ctx.liveReaders);
         OSAtomicIncrement32(&_sweptContexts);
+        // Actually stop the guest before declaring a timeout: finalising
+        // alone leaves the process running as an orphan that nobody owns.
+        // killProcessGroup refuses pid <= 1 and re-verifies the task, so a
+        // context whose process already exited is safe to pass through.
+        if (ctx.guestPid > 1 && !ctx.isCompleted) {
+            [self killProcessGroup:ctx.guestPid];
+        }
         [self finalizeContext:ctx exitCode:-1 error:ISHShellExecutorErrorTimeout];
     }
 }
