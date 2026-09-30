@@ -265,15 +265,29 @@ enum DeviceIdentity {
 
     private static func writeKeychain(_ value: String) {
         let data = Data(value.utf8)
+        // [R3-027] SecItemDelete takes a QUERY dictionary (class + attributes
+        // + search keys only). The old code fed it the add dictionary, which
+        // contains kSecValueData — a value key that matches nothing — so the
+        // delete silently no-opped, SecItemAdd then failed with
+        // errSecDuplicateItem against the surviving (bad) item, and both
+        // statuses were discarded: the "self-heal" overwrite never happened
+        // and the bad value was read back on every launch.
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: keychainAccount,
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            kSecAttrAccount as String: keychainAccount
         ]
         // Delete any existing entry first
-        SecItemDelete(query as CFDictionary)
-        SecItemAdd(query as CFDictionary, nil)
+        let deleteStatus = SecItemDelete(query as CFDictionary)
+        if deleteStatus != errSecSuccess && deleteStatus != errSecItemNotFound {
+            AppLogger(category: "DeviceIdentity").error("deviceId keychain delete failed: status=\(deleteStatus)")
+        }
+        var addQuery = query
+        addQuery[kSecValueData as String] = data
+        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+        if addStatus != errSecSuccess {
+            AppLogger(category: "DeviceIdentity").error("deviceId keychain add failed: status=\(addStatus)")
+        }
     }
 }
