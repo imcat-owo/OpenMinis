@@ -663,17 +663,25 @@ final class MarkdownRenderView: UIView, UIGestureRecognizerDelegate {
                 let nsStr = tv.textStorage.string as NSString
                 var start = charIndex
                 var end = charIndex
-                // Expand to word boundaries
+                // Expand to word boundaries.
+                // [R3-028] character(at:) returns a UTF-16 code unit, and a
+                // surrogate half of an emoji pair is NOT a valid Unicode
+                // scalar — `Unicode.Scalar(c)!` trapped on any word touching
+                // an emoji. A surrogate half is never whitespace or
+                // punctuation, so treat "not a scalar" as a word character
+                // and keep expanding instead of force-unwrapping.
                 while start > 0 {
                     let c = nsStr.character(at: start - 1)
-                    if CharacterSet.whitespacesAndNewlines.contains(Unicode.Scalar(c)!) ||
-                       CharacterSet.punctuationCharacters.contains(Unicode.Scalar(c)!) { break }
+                    if let scalar = Unicode.Scalar(c),
+                       CharacterSet.whitespacesAndNewlines.contains(scalar) ||
+                       CharacterSet.punctuationCharacters.contains(scalar) { break }
                     start -= 1
                 }
                 while end < nsStr.length {
                     let c = nsStr.character(at: end)
-                    if CharacterSet.whitespacesAndNewlines.contains(Unicode.Scalar(c)!) ||
-                       CharacterSet.punctuationCharacters.contains(Unicode.Scalar(c)!) { break }
+                    if let scalar = Unicode.Scalar(c),
+                       CharacterSet.whitespacesAndNewlines.contains(scalar) ||
+                       CharacterSet.punctuationCharacters.contains(scalar) { break }
                     end += 1
                 }
                 tv.selectedRange = NSRange(location: start, length: end - start)
