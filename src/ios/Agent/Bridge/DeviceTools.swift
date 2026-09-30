@@ -13,5 +13,6 @@ enum DeviceTools {
         try await ClipboardDeviceTool.register(into: registry)
         try await LocationDeviceTool.register(into: registry)
         try await NotificationDeviceTool.register(into: registry)
+        try await PhotosDeviceTool.register(into: registry)
     }
 }
