@@ -166,7 +166,16 @@ final class VoiceActivityDetector: NSObject {
     func start() throws {
         guard !isRunning else { return }
         try configureSession()
-        try setupEngineAndVAD()
+        do {
+            try setupEngineAndVAD()
+        } catch {
+            // configureSession already acquired the .capture intent (and
+            // suspended keep-alive silent audio). Without this rollback the
+            // session stays locked in record mode and stop() can't recover
+            // it — its `guard isRunning` never passes for a failed start.
+            tearDown()
+            throw error
+        }
         // `audioEngine.start()` can throw an Objective-C NSException (not a Swift
         // Error) when the engine/route is in a bad state — Swift `try` can't
         // catch it and it crashes via SIGABRT. Wrap in noff_try_objc.
@@ -176,6 +185,7 @@ final class VoiceActivityDetector: NSObject {
         }
         if let engineError {
             VoiceLog.log("audioEngine start failed: \(engineError.localizedDescription)")
+            tearDown()
             throw engineError
         }
         guard started else {
