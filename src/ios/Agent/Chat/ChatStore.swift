@@ -5301,7 +5301,7 @@ extension ChatStore {
         let recentSessSql = """
             SELECT s.id FROM sessions s
             WHERE EXISTS (SELECT 1 FROM messages m WHERE m.session_id = s.id)
-            ORDER BY s.updated_at DESC
+            ORDER BY s.updated_at DESC, s.id DESC
             LIMIT \(recentLimit)
             """
         var recentIds: [String] = []
@@ -5322,9 +5322,14 @@ extension ChatStore {
            let oldestUpdatedAt = sessionUpdatedAt(id: oldestRecent) {
             UserDefaults.standard.set(oldestUpdatedAt.timeIntervalSince1970,
                                       forKey: "cloudSync.v2.backlogScanCursorAt")
+            // Companion keyset component: sessions sharing the boundary
+            // updated_at must not fall between Phase A and Phase B.
+            UserDefaults.standard.set(oldestRecent,
+                                      forKey: "cloudSync.v2.backlogScanCursorId")
         } else {
             UserDefaults.standard.set(Date().timeIntervalSince1970,
                                       forKey: "cloudSync.v2.backlogScanCursorAt")
+            UserDefaults.standard.removeObject(forKey: "cloudSync.v2.backlogScanCursorId")
         }
         UserDefaults.standard.set(true, forKey: initialDoneKey)
 
@@ -5446,6 +5451,7 @@ extension ChatStore {
 
     private func runHistoricalBacklogScan() async {
         let cursorKey = "cloudSync.v2.backlogScanCursorAt"
+        let cursorIdKey = "cloudSync.v2.backlogScanCursorId"
         let cancelKey = "cloudSync.v2.backlogScanCanceled"
         let windowSize = 100
         let backlogPriority = 1
@@ -5472,17 +5478,25 @@ extension ChatStore {
                 iCloudLogger.info("[iCloud] historicalBacklogScan: cursor=0 (drained), totalStaged=\(totalStaged) passes=\(passes)")
                 return
             }
+            // Keyset pagination on (updated_at, id): a bare `updated_at < ?`
+            // drops sessions that share the boundary timestamp with the
+            // previous window. A missing cursor id (cursor written by an
+            // older build) degrades to the old strict-less-than behaviour
+            // until the next markAllLocalForReupload re-seeds it.
+            let cursorId = UserDefaults.standard.string(forKey: cursorIdKey) ?? ""
             let sql = """
                 SELECT id, updated_at FROM sessions
-                WHERE updated_at < ?
+                WHERE (updated_at < ? OR (updated_at = ? AND id < ?))
                   AND EXISTS (SELECT 1 FROM messages m WHERE m.session_id = sessions.id)
-                ORDER BY updated_at DESC
+                ORDER BY updated_at DESC, id DESC
                 LIMIT \(windowSize)
                 """
             var batch: [(id: String, updatedAt: Double)] = []
             var stmt: OpaquePointer?
             if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
                 sqlite3_bind_double(stmt, 1, cursor)
+                sqlite3_bind_double(stmt, 2, cursor)
+                sqlite3_bind_text(stmt, 3, (cursorId as NSString).utf8String, -1, nil)
                 while sqlite3_step(stmt) == SQLITE_ROW {
                     let sid = String(cString: sqlite3_column_text(stmt, 0))
                     let updatedAt = sqlite3_column_double(stmt, 1)
@@ -5495,6 +5509,7 @@ extension ChatStore {
                 // Sentinel to mark fully drained — next launch's
                 // kickHistoricalBacklogScan returns immediately.
                 UserDefaults.standard.set(0.0, forKey: cursorKey)
+                UserDefaults.standard.removeObject(forKey: cursorIdKey)
                 return
             }
             for (sid, _) in batch {
@@ -5503,8 +5518,9 @@ extension ChatStore {
             }
             // Advance cursor to the OLDEST in this window so the next
             // pass picks up strictly older sessions.
-            if let oldest = batch.last?.updatedAt {
-                UserDefaults.standard.set(oldest, forKey: cursorKey)
+            if let oldest = batch.last {
+                UserDefaults.standard.set(oldest.updatedAt, forKey: cursorKey)
+                UserDefaults.standard.set(oldest.id, forKey: cursorIdKey)
             }
             passes += 1
             iCloudLogger.info("[iCloud] historicalBacklogScan: pass=\(passes) staged=\(batch.count) cumulative=\(totalStaged) cursorNext=\(batch.last?.updatedAt ?? 0)")
