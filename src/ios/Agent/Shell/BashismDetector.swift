@@ -80,20 +80,67 @@ enum BashismDetector {
 
     // MARK: - Heredoc stripping (F1)
 
+    /// Returns `line` with every `$(( … ))` arithmetic-expansion character
+    /// blanked to a space, carrying the paren depth across calls so
+    /// multi-line expansions stay masked. Heredoc-delimiter collection runs
+    /// on the masked copy: a `<<` inside arithmetic is the left-shift
+    /// operator, never a heredoc opener (AE B-3).
+    private static func maskingArithmetic(in line: String, depth: inout Int) -> String {
+        let scalars = Array(line.unicodeScalars)
+        var masked: [Unicode.Scalar] = []
+        masked.reserveCapacity(scalars.count)
+        var i = 0
+        while i < scalars.count {
+            let c = scalars[i]
+            let next: Unicode.Scalar? = i + 1 < scalars.count ? scalars[i + 1] : nil
+            if c == "$", next == "(", i + 2 < scalars.count, scalars[i + 2] == "(" {
+                depth += 1
+                masked.append(contentsOf: "   ".unicodeScalars)
+                i += 3
+                continue
+            }
+            guard depth > 0 else {
+                masked.append(c)
+                i += 1
+                continue
+            }
+            if c == "(", next == "(" {
+                depth += 1
+                masked.append(contentsOf: "  ".unicodeScalars)
+                i += 2
+            } else if c == ")", next == ")" {
+                depth -= 1
+                masked.append(contentsOf: "  ".unicodeScalars)
+                i += 2
+            } else {
+                masked.append(" ")
+                i += 1
+            }
+        }
+        var result = ""
+        result.unicodeScalars.append(contentsOf: masked)
+        return result
+    }
+
     /// Returns each original line paired with the text to scan; heredoc-body
     /// lines (and the delimiter lines) are returned as nil so they are skipped
     /// while line numbers stay aligned to the original script.
     static func shellLayerLines(_ script: String) -> [(line: Int, text: String?)] {
         let lines = script.components(separatedBy: "\n")
         var out: [(Int, String?)] = []
+        var arithDepth = 0   // $(( … )) nesting on shell-layer lines (AE B-3)
         var i = 0
         while i < lines.count {
             let line = lines[i]
             out.append((i + 1, line))  // opening line IS shell-layer
             // Collect every heredoc delimiter opened on this line, in order.
-            let ns = line as NSString
+            // Scan a masked copy so an arithmetic `<<` (e.g. `$((1 << 3))`)
+            // can't feed a bogus delimiter ("3") into the state machine
+            // below and swallow the rest of the script as heredoc "body".
+            let scanLine = maskingArithmetic(in: line, depth: &arithDepth)
+            let ns = scanLine as NSString
             var delims: [String] = []
-            for m in heredocOpen.matches(in: line, range: NSRange(location: 0, length: ns.length)) {
+            for m in heredocOpen.matches(in: scanLine, range: NSRange(location: 0, length: ns.length)) {
                 if m.numberOfRanges > 1 {
                     delims.append(ns.substring(with: m.range(at: 1)))
                 }
