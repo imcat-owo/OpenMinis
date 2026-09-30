@@ -122,14 +122,31 @@ struct RetryRunIntent: AppIntent {
             )
         }
 
-        // Map entity index back to ChatMessage
-        let targetIdx = chosenEntity.index - 1
-        let targetMessage: ChatMessage
-        if targetIdx >= 0 && targetIdx < userMessages.count {
-            targetMessage = userMessages[targetIdx]
-        } else {
-            targetMessage = userMessages.last!
+        // [R3-035] Validate the chosen entity against THIS session before
+        // trusting its positional index. A saved shortcut holds the entity
+        // independently of the Session parameter — the user can pick a
+        // message, then change the session (or messages get deleted and
+        // indices shift). retryFromMessage deletes everything after the
+        // chosen message, so applying a foreign/stale index here silently
+        // truncated the current session at the wrong point; the old
+        // out-of-range path even fell back to the LAST message instead of
+        // complaining. Entities from the disambiguation above are built
+        // from this session, so they pass by construction.
+        guard chosenEntity.sessionId == session.id,
+              chosenEntity.index >= 1, chosenEntity.index <= userMessages.count else {
+            ShortcutRunTracker.markCompleted(recordId: pendingId, reason: "earlyReturn.messageSessionMismatch")
+            if eagerResult.armed {
+                SessionActivityTracker.shared.setInactive(session.id,
+                    source: "RetryRunIntent.eager.messageSessionMismatch")
+            }
+            return .result(
+                value: SendPromptResult(sessionId: session.id, modelName: "N/A", status: "Error", isNewSession: false),
+                dialog: IntentDialog(stringLiteral: AppLocalized("The selected message doesn't belong to this session."))
+            )
         }
+
+        // Map entity index back to ChatMessage
+        let targetMessage = userMessages[chosenEntity.index - 1]
 
         let promptPreview = String(targetMessage.content.prefix(50))
 
