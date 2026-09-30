@@ -443,11 +443,17 @@ struct RcloneAddServerView: View {
             if !v.isEmpty { params[f.key] = v }
         }
 
+        // [R3-029] Rollback may only remove what THIS attempt added. `add`
+        // throws nameTaken/invalidName before writing anything, so an
+        // unconditional remove in the catch deleted a pre-existing remote
+        // with the same name — including its Keychain secret.
+        var addedByThisAttempt = false
         do {
             try RcloneRemoteStore.add(
                 name: name, backend: b.type, params: params,
                 secret: secretKey.flatMap { values[$0] }, path: "",
                 allowInsecureTLS: allowInsecureTLS)
+            addedByThisAttempt = true
             RcloneRemoteStore.syncToRclone()
 
             guard let r = RcloneRemoteStore.remote(named: name) else { return }
@@ -461,7 +467,9 @@ struct RcloneAddServerView: View {
             connectedRemote = r
             await list(dir: "")
         } catch {
-            RcloneRemoteStore.remove(name: name)
+            if addedByThisAttempt {
+                RcloneRemoteStore.remove(name: name)
+            }
             // A certificate failure is offered a way forward instead of being
             // a dead end: a NAS with its own certificate is ordinary, and the
             // alternative users reach for otherwise is plain HTTP, which is
