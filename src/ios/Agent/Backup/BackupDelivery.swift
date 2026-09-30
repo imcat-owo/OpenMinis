@@ -167,8 +167,33 @@ enum BackupDelivery {
             try? FileManager.default.removeItem(at: partial)
             throw error
         }
-        try? FileManager.default.removeItem(at: dest)
-        try FileManager.default.moveItem(at: partial, to: dest)
+        // Swap the verified partial in WITHOUT destroying the previous good
+        // package first: park the old file under a scratch name, rename, and
+        // only then drop the parked copy. The old code deleted `dest` before
+        // the rename, so a failed rename (a FileProvider backend having a bad
+        // moment — the exact flakiness this function exists to survive) left
+        // the destination with NEITHER the old backup nor a complete new one,
+        // plus an orphaned `.partial` nobody cleaned up.
+        let replaced = root.appendingPathComponent(".\(packageURL.lastPathComponent).replaced")
+        try? FileManager.default.removeItem(at: replaced)
+        var parkedOld = false
+        if FileManager.default.fileExists(atPath: dest.path) {
+            do {
+                try FileManager.default.moveItem(at: dest, to: replaced)
+                parkedOld = true
+            } catch {
+                try? FileManager.default.removeItem(at: partial)
+                throw error
+            }
+        }
+        do {
+            try FileManager.default.moveItem(at: partial, to: dest)
+        } catch {
+            try? FileManager.default.removeItem(at: partial)
+            if parkedOld { try? FileManager.default.moveItem(at: replaced, to: dest) }
+            throw error
+        }
+        try? FileManager.default.removeItem(at: replaced)
         logger.info("[Backup] package copied to mounted folder at \(root.lastPathComponent)")
         return dest
     }
