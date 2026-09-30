@@ -213,6 +213,36 @@ class RootfsManager {
         logger.info("[Rootfs] installation complete (\(currentArch)) at \(rootfsPath.path)")
     }
 
+    /// Directory holding user-data backups made by reset(keepUserData:).
+    /// Deliberately OUTSIDE rootfsPath (reset deletes that tree) and NOT in
+    /// temporaryDirectory (the system purges it, and the restore flow spans
+    /// an app restart for reinstall — [R3-032]).
+    var backupsDirectory: URL {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return documents.appendingPathComponent("rootfs-backups")
+    }
+
+    /// Newest surviving user-data backup (the `root` directory itself, as
+    /// returned by reset), or nil. Also scans the legacy temporaryDirectory
+    /// location so a backup made by an older build can still be found if
+    /// the system has not purged it yet.
+    func latestBackupURL() -> URL? {
+        let fm = FileManager.default
+        let searchRoots = [backupsDirectory, fm.temporaryDirectory]
+        var candidates: [(url: URL, created: Date)] = []
+        for dir in searchRoots {
+            guard let names = try? fm.contentsOfDirectory(atPath: dir.path) else { continue }
+            for name in names where name.hasPrefix("rootfs-backup-") {
+                let root = dir.appendingPathComponent(name).appendingPathComponent("root")
+                var isDir: ObjCBool = false
+                guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else { continue }
+                let created = (try? root.resourceValues(forKeys: [.creationDateKey]))?.creationDate ?? .distantPast
+                candidates.append((root, created))
+            }
+        }
+        return candidates.max(by: { $0.created < $1.created })?.url
+    }
+
     /// Reset (delete) the rootfs, forcing a fresh install on next launch
     /// - Parameter keepUserData: If true, backs up /root directory before deletion
     /// - Returns: URL of backup directory if keepUserData was true, nil otherwise
@@ -226,7 +256,7 @@ class RootfsManager {
             // Backup /root directory
             let userDataPath = dataPath.appendingPathComponent("root")
             if FileManager.default.fileExists(atPath: userDataPath.path) {
-                let backupPath = FileManager.default.temporaryDirectory
+                let backupPath = backupsDirectory
                     .appendingPathComponent("rootfs-backup-\(Date().timeIntervalSince1970)")
                     .appendingPathComponent("root")
 

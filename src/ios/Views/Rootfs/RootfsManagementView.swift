@@ -216,6 +216,18 @@ class RootfsManagementViewModel: ObservableObject {
     func refresh() {
         isInstalled = RootfsManager.shared.isInstalled
 
+        // [R3-032] Rediscover the backup from disk on every refresh. It used
+        // to live only in this view model's memory (set by the reset
+        // callback), so after the app restart the reset flow itself
+        // prompts — or simply leaving the page — the "Restore User Data"
+        // button never appeared again even though the backup existed.
+        if let found = RootfsManager.shared.latestBackupURL() {
+            backupURL = found
+            hasBackup = true
+        } else if backupURL == nil {
+            hasBackup = false
+        }
+
         if isInstalled {
             DispatchQueue.global(qos: .utility).async {
                 do {
