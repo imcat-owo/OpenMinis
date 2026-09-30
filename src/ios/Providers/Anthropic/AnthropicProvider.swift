@@ -68,6 +68,8 @@ final class AnthropicProvider: LLMProvider {
         guard lower.contains("claude") else { return nil }
         // Accepts `claude-opus-4-7`, `claude-sonnet-4-6-thinking`,
         // `anthropic/claude-opus-4.7`, `claude-fable-5`, `claude-opus-5`, etc.
+        // A trailing 8-digit date (`claude-opus-4-20250514`) is NOT a minor
+        // version — it parses as (4, 0).
         // The minor group is optional but greedy, so `claude-3-5-sonnet` still
         // parses its first PAIR as (3,5) — never (3,0).
         let pattern = #"[-/]?(\d+)(?:[-.](\d+))?(?:\b|[^0-9])"#
@@ -80,9 +82,12 @@ final class AnthropicProvider: LLMProvider {
             return nil
         }
         // Group 2 (minor) is absent for single-segment versions → minor 0.
+        // An 8-digit "minor" is a date suffix (YYYYMMDD), not a generation:
+        // `claude-opus-4-20250514` is plain Claude 4, not generation 4.20250514.
         let minor: Int
         if let minorRange = Range(match.range(at: 2), in: lower),
-           let parsed = Int(lower[minorRange]) {
+           let parsed = Int(lower[minorRange]),
+           lower[minorRange].count != 8 {
             minor = parsed
         } else {
             minor = 0
