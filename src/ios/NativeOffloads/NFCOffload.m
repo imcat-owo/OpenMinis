@@ -154,14 +154,18 @@ static NSString *const HELP_TEXT =
 // MARK: - Hex Helpers
 
 static NSData *dataFromHex(NSString *hex) {
+    // Strict: odd length or any non-hex pair returns nil so callers can
+    // reject the input instead of silently writing mangled bytes.
+    if (hex.length % 2 != 0) return nil;
     NSMutableData *data = [NSMutableData new];
     for (NSUInteger i = 0; i + 1 < hex.length; i += 2) {
         unsigned int byte;
         NSScanner *scanner = [NSScanner scannerWithString:[hex substringWithRange:NSMakeRange(i, 2)]];
-        if ([scanner scanHexInt:&byte]) {
-            uint8_t b = (uint8_t)byte;
-            [data appendBytes:&b length:1];
+        if (![scanner scanHexInt:&byte] || !scanner.isAtEnd) {
+            return nil;
         }
+        uint8_t b = (uint8_t)byte;
+        [data appendBytes:&b length:1];
     }
     return data;
 }
@@ -1015,6 +1019,7 @@ static int cmd_tag_info(int argc, char **argv, int stdout_fd, BOOL compact, BOOL
         NSString *message = noff_find_arg(argc, argv, "--message") ?: @"Hold your iPhone near the NFC tag";
         NSString *timeoutStr = noff_find_arg(argc, argv, "--timeout");
         NSTimeInterval timeout = timeoutStr ? [timeoutStr doubleValue] : 30.0;
+        if (timeout <= 0 || timeout > 120) timeout = 30.0;
 
         __block NSMutableDictionary *info = [NSMutableDictionary new];
         RawTagHelper *helper = [[RawTagHelper alloc] init];
@@ -1096,6 +1101,7 @@ static int cmd_tag_read(int argc, char **argv, int stdout_fd, BOOL compact, BOOL
         NSString *message = noff_find_arg(argc, argv, "--message") ?: @"Hold near tag to read";
         NSString *timeoutStr = noff_find_arg(argc, argv, "--timeout");
         NSTimeInterval timeout = timeoutStr ? [timeoutStr doubleValue] : 30.0;
+        if (timeout <= 0 || timeout > 120) timeout = 30.0;
 
         __block NSMutableDictionary *readResult = [NSMutableDictionary new];
         __block NSString *readError = nil;
@@ -1230,12 +1236,20 @@ static int cmd_tag_write(int argc, char **argv, int stdout_fd, BOOL compact, BOO
             return NOFF_EXIT_INVALID_ARGS;
         }
         NSData *writeData = dataFromHex(hexData);
+        if (!writeData) {
+            noff_emit_json(stdout_fd,
+                noff_json_error(TOOL_NAME, @"tag-write", NOFF_ERR_INVALID_ARGS,
+                    @"--data must be valid hex (even number of 0-9/a-f characters)."),
+                compact, quiet);
+            return NOFF_EXIT_INVALID_ARGS;
+        }
         NSString *pageStr = noff_find_arg(argc, argv, "--page") ?: noff_find_arg(argc, argv, "--block");
         int page = pageStr ? [pageStr intValue] : 4; // default to page 4 (first user data page on NTAG)
 
         NSString *message = noff_find_arg(argc, argv, "--message") ?: @"Hold near tag to write";
         NSString *timeoutStr = noff_find_arg(argc, argv, "--timeout");
         NSTimeInterval timeout = timeoutStr ? [timeoutStr doubleValue] : 30.0;
+        if (timeout <= 0 || timeout > 120) timeout = 30.0;
 
         __block BOOL writeOk = NO;
         __block NSString *writeError = nil;
@@ -1378,6 +1392,7 @@ static int cmd_apdu(int argc, char **argv, int stdout_fd, BOOL compact, BOOL qui
         NSString *message = noff_find_arg(argc, argv, "--message") ?: @"Hold near smart card";
         NSString *timeoutStr = noff_find_arg(argc, argv, "--timeout");
         NSTimeInterval timeout = timeoutStr ? [timeoutStr doubleValue] : 30.0;
+        if (timeout <= 0 || timeout > 120) timeout = 30.0;
 
         // Semantic shortcuts for SELECT commands.
         // --select-aid <hex-or-alias>   e.g. "A0000000041010" or "unionpay" or "ppse"
@@ -1412,6 +1427,13 @@ static int cmd_apdu(int argc, char **argv, int stdout_fd, BOOL compact, BOOL qui
                     return NOFF_EXIT_INVALID_ARGS;
                 }
                 selData = dataFromHex(resolvedAidHex);
+                if (!selData) {
+                    noff_emit_json(stdout_fd,
+                        noff_json_error(TOOL_NAME, @"apdu", NOFF_ERR_INVALID_ARGS,
+                            [NSString stringWithFormat:@"'%@' is not valid hex.", selectAid]),
+                        compact, quiet);
+                    return NOFF_EXIT_INVALID_ARGS;
+                }
                 p1 = 0x04; // SELECT by DF name / AID
             } else {
                 selData = [selectName dataUsingEncoding:NSASCIIStringEncoding];
@@ -1435,6 +1457,13 @@ static int cmd_apdu(int argc, char **argv, int stdout_fd, BOOL compact, BOOL qui
             uint8_t p2 = hexByte(noff_find_arg(argc, argv, "--p2") ?: @"00");
             NSString *dataHex = noff_find_arg(argc, argv, "--data");
             NSData *cmdData = dataHex ? dataFromHex(dataHex) : [NSData data];
+            if (dataHex && !cmdData) {
+                noff_emit_json(stdout_fd,
+                    noff_json_error(TOOL_NAME, @"apdu", NOFF_ERR_INVALID_ARGS,
+                        @"--data must be valid hex (even number of 0-9/a-f characters)."),
+                    compact, quiet);
+                return NOFF_EXIT_INVALID_ARGS;
+            }
             NSString *leStr = noff_find_arg(argc, argv, "--le");
             NSInteger le = leStr ? [leStr integerValue] : -1;
 
@@ -1545,6 +1574,7 @@ static int cmd_felica(int argc, char **argv, int stdout_fd, BOOL compact, BOOL q
         NSString *message = noff_find_arg(argc, argv, "--message") ?: @"Hold near FeliCa card";
         NSString *timeoutStr = noff_find_arg(argc, argv, "--timeout");
         NSTimeInterval timeout = timeoutStr ? [timeoutStr doubleValue] : 30.0;
+        if (timeout <= 0 || timeout > 120) timeout = 30.0;
 
         __block NSMutableDictionary *felicaResult = [NSMutableDictionary new];
         __block NSString *felicaError = nil;
@@ -1560,6 +1590,12 @@ static int cmd_felica(int argc, char **argv, int stdout_fd, BOOL compact, BOOL q
 
             NSData *serviceCode = dataFromHex(scHex);
             NSData *blockList = dataFromHex(blHex);
+            if (!serviceCode || !blockList) {
+                felicaError = @"Invalid hex in --sc/--bl (even number of 0-9/a-f characters required).";
+                [helper.session invalidateSession];
+                dispatch_semaphore_signal(helper.semaphore);
+                return;
+            }
 
             dispatch_semaphore_t fSem = dispatch_semaphore_create(0);
             [helper.felicaTag readWithoutEncryptionWithServiceCodeList:@[serviceCode]
@@ -1738,6 +1774,7 @@ static int cmd_read_emv(int argc, char **argv, int stdout_fd, BOOL compact, BOOL
         NSString *message = noff_find_arg(argc, argv, "--message") ?: @"Hold your iPhone near the bank card";
         NSString *timeoutStr = noff_find_arg(argc, argv, "--timeout");
         NSTimeInterval timeout = timeoutStr ? [timeoutStr doubleValue] : 30.0;
+        if (timeout <= 0 || timeout > 120) timeout = 30.0;
         BOOL verbose = noff_has_flag(argc, argv, "--verbose");
 
         __block NSMutableDictionary *emvResult = [NSMutableDictionary new];
