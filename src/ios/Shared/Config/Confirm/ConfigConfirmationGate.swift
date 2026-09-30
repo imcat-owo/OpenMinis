@@ -205,9 +205,9 @@ final class ConfigConfirmationGate: ObservableObject {
 
         let center = UNUserNotificationCenter.current()
         center.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
-        center.setNotificationCategories([
+        NotificationCategoryRegistry.register(
             UNNotificationCategory(identifier: Self.notifyCategoryId, actions: [], intentIdentifiers: [])
-        ])
+        )
 
         let content = UNMutableNotificationContent()
         content.title = "⚙️ Config change awaiting approval"

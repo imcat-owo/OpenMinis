@@ -337,13 +337,15 @@ enum ShortcutNotification {
             center.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
         }
 
-        // Register category (idempotent)
+        // Register category (idempotent). Via the union registry so this
+        // doesn't unregister other features' categories (e.g. the
+        // scheduled prompts' "Run now" action).
         let category = UNNotificationCategory(
             identifier: categoryId,
             actions: [],
             intentIdentifiers: []
         )
-        center.setNotificationCategories([category])
+        NotificationCategoryRegistry.register(category)
 
         let content = UNMutableNotificationContent()
         content.title = title

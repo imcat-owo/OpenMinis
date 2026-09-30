@@ -48,6 +48,27 @@ struct ScheduledPrompt: Identifiable, Codable, Equatable {
     var sessionId: String?
 }
 
+// MARK: - Notification category union registry
+//
+// `setNotificationCategories` REPLACES the whole registered set, so a
+// site that registers only its own category silently unregisters every
+// other feature's — most visibly the scheduled prompts' "Run now"
+// action vanished after any shortcut run. Every registration must go
+// through here, which keeps the union of all categories seen so far
+// and always applies the full set.
+enum NotificationCategoryRegistry {
+    private static var categories: [String: UNNotificationCategory] = [:]
+    private static let lock = NSLock()
+
+    static func register(_ category: UNNotificationCategory) {
+        lock.lock()
+        categories[category.identifier] = category
+        let all = Set(categories.values)
+        lock.unlock()
+        UNUserNotificationCenter.current().setNotificationCategories(all)
+    }
+}
+
 @MainActor
 final class ScheduledPromptStore: ObservableObject {
     static let shared = ScheduledPromptStore()
@@ -72,7 +93,6 @@ final class ScheduledPromptStore: ObservableObject {
 
     /// Register the tap-action category once. Safe to call repeatedly.
     func registerCategory() {
-        let center = UNUserNotificationCenter.current()
         let action = UNNotificationAction(
             identifier: "RUN_NOW",
             title: AppLocalized("Run now")
@@ -82,7 +102,7 @@ final class ScheduledPromptStore: ObservableObject {
             actions: [action],
             intentIdentifiers: []
         )
-        center.setNotificationCategories([category])
+        NotificationCategoryRegistry.register(category)
     }
 
     /// Add or update one prompt and (re)schedule its notification.

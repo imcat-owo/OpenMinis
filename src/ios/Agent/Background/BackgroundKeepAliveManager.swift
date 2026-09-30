@@ -882,7 +882,7 @@ final class BackgroundKeepAliveManager: NSObject, ObservableObject, CLLocationMa
             actions: [],
             intentIdentifiers: []
         )
-        center.setNotificationCategories([category])
+        NotificationCategoryRegistry.register(category)
 
         let content = UNMutableNotificationContent()
         if liveActivityPrivacyMode {
