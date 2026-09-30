@@ -102,10 +102,12 @@ struct ThinkingRulesCollection: ConfigCollection {
 
         var echo: ReasoningEchoPolicy? = nil
         if case .string(let f)? = dict["reasoning_echo_field"], !f.isEmpty {
-            var timingRaw = "afterToolUseOnly"
-            if case .string(let t)? = dict["reasoning_echo_timing"], !t.isEmpty { timingRaw = t }
-            // Reuse the persistence decoder rather than re-deriving the mapping, so the
-            // CLI can never accept a timing the database would store differently.
+            var timingInput: String? = nil
+            if case .string(let t)? = dict["reasoning_echo_timing"] { timingInput = t }
+            // Validate strictly BEFORE the persistence decoder: fromPersisted tolerates
+            // unknown timings by defaulting them, which is right for old DB rows but
+            // would silently rewrite a typo in fresh user input.
+            let timingRaw = try Self.validatedTimingRaw(timingInput)
             echo = ReasoningEchoPolicy.fromPersisted(field: f, timing: timingRaw)
         }
 
@@ -307,6 +309,19 @@ struct ThinkingRulesCollection: ConfigCollection {
         return value
     }
 
+    /// Strict check for USER-SUPPLIED echo timings. `fromPersisted` is a tolerant
+    /// storage decoder (unknown → `.afterToolUseOnly`) meant for reading old DB rows;
+    /// feeding it raw input would silently rewrite a typo and read it back as if that
+    /// were what the user typed. Absent/empty keeps the historical default.
+    static func validatedTimingRaw(_ raw: String?) throws -> String {
+        guard let raw, !raw.isEmpty else { return "afterToolUseOnly" }
+        guard raw == "everyTurn" || raw == "afterToolUseOnly" || raw == "never" else {
+            throw ConfigError.invalidValue(
+                "Unknown reasoning echo timing: \(raw) (expected everyTurn, afterToolUseOnly, or never)")
+        }
+        return raw
+    }
+
     // MARK: - Field factories
 
     private func labelField(_ cid: String, _ inst: String, _ rid: String) -> ConfigField {
@@ -395,8 +410,9 @@ struct ThinkingRulesCollection: ConfigCollection {
                     guard case .string(let f)? = o["field"], !f.isEmpty else {
                         throw ConfigError.invalidValue("`field` required, or pass null to disable")
                     }
-                    var timingRaw = "afterToolUseOnly"
-                    if case .string(let t)? = o["timing"], !t.isEmpty { timingRaw = t }
+                    var timingInput: String? = nil
+                    if case .string(let t)? = o["timing"] { timingInput = t }
+                    let timingRaw = try Self.validatedTimingRaw(timingInput)
                     echo = ReasoningEchoPolicy.fromPersisted(field: f, timing: timingRaw)
                 } else if case .null = v {
                     echo = nil
