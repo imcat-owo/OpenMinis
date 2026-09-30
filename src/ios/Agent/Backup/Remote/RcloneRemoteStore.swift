@@ -169,7 +169,10 @@ enum RcloneRemoteStore {
         }
     }
 
-    private static func loadSecret(for name: String) -> String? {
+    /// Internal (not private) so the connection editor can snapshot the
+    /// current secret before an edit and restore it when the edit fails
+    /// its connection test — [R3-031].
+    static func loadSecret(for name: String) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainService,

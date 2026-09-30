@@ -848,6 +848,12 @@ struct RcloneConnectionEditor: View {
         defer { isTesting = false }
 
         let previousParams = remote.params
+        // [R3-031] Snapshot the current secret BEFORE the edit. `update`
+        // writes the new secret to the Keychain immediately (before the
+        // connection test below), so without this snapshot a failed test
+        // left the new password in place and the old one unrecoverable —
+        // while the error text claimed nothing was saved.
+        let previousSecret = RcloneRemoteStore.loadSecret(for: remote.name)
         do {
             let updated = try RcloneRemoteStore.update(
                 name: remote.name,
@@ -864,10 +870,18 @@ struct RcloneConnectionEditor: View {
             onSaved(updated)
             dismiss()
         } catch {
-            // Roll the connection fields back; the secret is left as typed
-            // because re-entering it is the more likely intent after a
-            // failure, and it cannot be read back to restore anyway.
-            _ = try? RcloneRemoteStore.update(name: remote.name, newParams: previousParams)
+            // Roll the connection fields AND the secret back, so the
+            // "weren't saved" message below is true. `update` merges
+            // params, so keys the failed edit ADDED (absent from
+            // previousParams) must be explicitly emptied to remove them;
+            // a nil previous secret means "there was none" — restore that
+            // by clearing whatever the failed edit stored ("" = clear).
+            var rollbackParams = previousParams
+            for key in values.keys where previousParams[key] == nil {
+                rollbackParams[key] = ""
+            }
+            _ = try? RcloneRemoteStore.update(name: remote.name, newParams: rollbackParams,
+                                              newSecret: previousSecret ?? "")
             errorText = AppLocalized("Couldn't connect with these settings, so they weren't saved. \(error.localizedDescription)")
         }
     }
