@@ -317,6 +317,7 @@ extension BackupImporter {
             let isEnabled: Bool, installedAt: Date, updatedAt: Date, body: String
             let sourceURL: String?
         }
+        var lwwSkippedIds: Set<String> = []
         for rec in readJSONL(dataDir, base: "skills", as: SkillRecord.self) {
             // importSkillFromSync preserves the id and applies its own LWW,
             // which is exactly Merge semantics; it also skips markDirty, so the
@@ -329,7 +330,10 @@ extension BackupImporter {
                     updatedAt: rec.updatedAt, version: rec.version,
                     name: rec.name, description: rec.description)
             }
-            if applied { report.imported += 1 } else { report.skipped += 1 }
+            if applied { report.imported += 1 } else {
+                report.skipped += 1
+                lwwSkippedIds.insert(rec.id)
+            }
         }
 
         let files = try restoreFileTree(
@@ -337,6 +341,12 @@ extension BackupImporter {
             destinationFor: { path in
                 let parts = path.split(separator: "/", maxSplits: 2).map(String.init)
                 guard parts.count >= 3, parts[0] == "skills" else { return nil }
+                // A false from importSkillFromSync means the LOCAL skill is
+                // newer than the package's record — its contract says the
+                // caller MUST then stop file processing for that skill.
+                // Restoring its files anyway would silently roll the skill
+                // (SKILL.md and sidecars alike) back to the older backup.
+                guard !lwwSkippedIds.contains(parts[1]) else { return nil }
                 return AIChatViewModel.minisSkillsPersistentDir
                     .appendingPathComponent(parts[1], isDirectory: true)
                     .appendingPathComponent(parts[2])
