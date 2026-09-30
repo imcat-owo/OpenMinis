@@ -1840,6 +1840,10 @@ final class BrowserUseManager: NSObject, ObservableObject {
                                        viewportWidth: vp.width, viewportHeight: vp.height)
         newView.navigationDelegate = self
         newView.uiDelegate = self
+        // Rebuilt web views need the print bridge re-registered — makeWebView
+        // only injects the JS half; without this, window.print() silently
+        // no-ops until the tab is recreated (same omission in setViewport).
+        registerPrintHandler(on: newView)
 
         // If there's a current URL, reload in the new webview
         let oldURL = webView.url
@@ -1866,6 +1870,9 @@ final class BrowserUseManager: NSObject, ObservableObject {
                                        viewportWidth: width, viewportHeight: height)
         newView.navigationDelegate = self
         newView.uiDelegate = self
+        // See setUserAgent — rebuilt web views must re-register the print
+        // bridge or window.print() silently stops working.
+        registerPrintHandler(on: newView)
 
         let oldURL = webView.url
         webView = newView
