@@ -209,10 +209,24 @@ final class SessionForkManager {
             return false
         }
 
+        // fileName comes from the peer device's record, unvalidated. A bare
+        // "SOUL.md" would overwrite the local persona (it lives in this same
+        // directory), and a `../`-bearing name would escape the memory
+        // directory. Only a plain single-segment file name is accepted.
+        let fileName = memory.fileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nameIsSafe = !fileName.isEmpty
+            && fileName != "." && fileName != ".."
+            && !fileName.contains("/") && !fileName.contains("\\")
+            && fileName.lowercased() != "soul.md"
+        guard nameIsSafe else {
+            logger.error("[Fork] Refusing remote memory with unsafe fileName: '\(memory.fileName)'")
+            return false
+        }
+
         let memoryDir = AIChatViewModel.minisMemoryPersistentDir
         try? FileManager.default.createDirectory(at: memoryDir, withIntermediateDirectories: true)
 
-        let destURL = memoryDir.appendingPathComponent(memory.fileName)
+        let destURL = memoryDir.appendingPathComponent(fileName)
         do {
             try memory.content.write(to: destURL, atomically: true, encoding: String.Encoding.utf8)
             logger.info("[Fork] Copied remote memory: \(memory.fileName)")
