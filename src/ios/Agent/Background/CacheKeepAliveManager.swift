@@ -108,6 +108,17 @@ final class CacheKeepAliveManager {
     private func sendWarmup(sessionId: String, vm: AIChatViewModel) async {
         guard let provider = vm.makeAnthropicProviderForWarmup() else {
             logger.warning("🔥 cache keep-alive: failed to create Anthropic provider session=\(sessionId.prefix(8))")
+            // A failed warmup must not end the chain (AE C-5): give the
+            // count back (the fire-time guard and the reschedule helper
+            // both re-check the cap, so this can't exceed maxKeepAlives)
+            // and try again next cycle instead of going silent until the
+            // next real request — which would refresh the cache itself,
+            // making the lost warmups unrecoverable for this idle period.
+            if var state = sessions[sessionId] {
+                state.keepAliveCount = max(0, state.keepAliveCount - 1)
+                sessions[sessionId] = state
+            }
+            rescheduleAfterFailure(sessionId: sessionId)
             return
         }
 
@@ -149,6 +160,33 @@ final class CacheKeepAliveManager {
         } catch {
             let durationMs = Int((CFAbsoluteTimeGetCurrent() - startTime) * 1000)
             logger.error("🔥 cache keep-alive: warmup FAILED session=\(sessionId.prefix(8)) duration=\(durationMs)ms error=\(error.localizedDescription)")
+            // Same chain-preservation as the provider-failure branch above
+            // (AE C-5): refund the attempt and reschedule, or the remaining
+            // keep-alive budget for this idle period is silently lost.
+            if var state = sessions[sessionId] {
+                state.keepAliveCount = max(0, state.keepAliveCount - 1)
+                sessions[sessionId] = state
+            }
+            rescheduleAfterFailure(sessionId: sessionId)
         }
+    }
+
+    /// Reschedule the next warmup after a failed attempt, mirroring the
+    /// success branch's reschedule. The count was already refunded by the
+    /// caller; the cap is re-checked here and again at fire time, so a
+    /// failure loop can never exceed maxKeepAlives warmups per idle period
+    /// (AE C-5).
+    private func rescheduleAfterFailure(sessionId: String) {
+        guard var state = sessions[sessionId], state.keepAliveCount < maxKeepAlives else {
+            let count = sessions[sessionId]?.keepAliveCount ?? 0
+            logger.info("🔥 cache keep-alive: NOT rescheduling after failure session=\(sessionId.prefix(8)) keepAliveCount=\(count)/\(self.maxKeepAlives)")
+            return
+        }
+        state.timer?.invalidate()
+        let nextFireDate = Date().addingTimeInterval(keepAliveDelay)
+        let nextFireStr = ISO8601DateFormatter().string(from: nextFireDate)
+        state.timer = scheduleTimer(sessionId: sessionId)
+        sessions[sessionId] = state
+        logger.info("🔥 cache keep-alive: rescheduled after failure session=\(sessionId.prefix(8)) nextAttempt=\(state.keepAliveCount + 1)/\(self.maxKeepAlives) nextFire=\(nextFireStr)")
     }
 }
