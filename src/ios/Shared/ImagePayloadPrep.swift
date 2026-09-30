@@ -147,6 +147,144 @@ enum ImagePayloadPrep {
         return (jpeg, "image/jpeg")
     }
 
+    // MARK: - Tool-result image gate
+
+    /// Why a tool-produced image (read_image file, browser screenshot) was
+    /// refused at the shared gate. Each case carries enough detail for the
+    /// caller to tell the model — and the user reading the transcript —
+    /// exactly what was wrong, instead of a bare "could not read image".
+    enum ToolImageRejection: Error, Equatable {
+        /// Magic bytes match no known image format, the header is
+        /// unreadable, or the payload cannot be decoded at all (truncated
+        /// or corrupt file).
+        case notAnImage
+        /// A real image format that is on neither the whitelist nor the
+        /// transcodable list. (Defensive: today's sniffer only returns
+        /// formats that are on one of the two lists.)
+        case unsupportedFormat(String)
+        /// File size over the gate's byte ceiling (`.rejectOversize` only).
+        case fileTooLarge(bytes: Int, limit: Int)
+        /// Pixel count over the decode-safety ceiling (`.rejectOversize`).
+        case tooManyPixels(width: Int, height: Int, limit: Int)
+
+        /// One-line explanation suitable for a tool result.
+        var reason: String {
+            switch self {
+            case .notAnImage:
+                return "the file is not a recognizable image, or it is corrupted/truncated"
+            case .unsupportedFormat(let format):
+                return "image format \(format) is not supported here"
+            case .fileTooLarge(let bytes, let limit):
+                let mb = Double(bytes) / 1_048_576
+                let limitMB = limit / 1_048_576
+                return String(format: "the file is %.1f MB, over the %d MB limit", mb, limitMB)
+            case .tooManyPixels(let w, let h, let limit):
+                let mp = Double(w) * Double(h) / 1_000_000
+                return String(format: "the image is %dx%d (%.0f MP), over the %d MP limit", w, h, mp, limit / 1_000_000)
+            }
+        }
+    }
+
+    /// What the gate returns on success: context-ready bytes (always JPEG
+    /// today — see `gatedToolImage`), the truthful mime for them, and the
+    /// source's pixel size / sniffed format for the caller's metadata.
+    struct GatedToolImage {
+        let data: Data
+        let mimeType: String
+        let pixelSize: CGSize
+        let sourceFormat: String
+    }
+
+    /// How `gatedToolImage` treats byte/pixel ceilings.
+    enum OversizePolicy {
+        /// Hard gate: over-ceiling payloads are refused (read_image reads
+        /// arbitrary files — this is the decode-bomb guard).
+        case rejectOversize
+        /// Soft gate: over-ceiling payloads are converged by the re-encode
+        /// instead of refused (browser screenshots are produced by the app
+        /// itself; refusing would lose the model's view of the page).
+        case downscaleOversize
+    }
+
+    /// Formats accepted at the tool-image gate as-is (subject to the
+    /// universal re-encode below).
+    static let toolImageWhitelist: Set<String> = [
+        "image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp",
+    ]
+
+    /// Formats not sent to providers directly but decodable by ImageIO, so
+    /// the gate transcodes them to JPEG instead of refusing.
+    static let toolImageTranscodable: Set<String> = [
+        "image/heic", "image/heif", "image/avif", "image/tiff",
+    ]
+
+    /// Byte ceiling at the tool-image gate (Kelivo's WorkspaceImage uses
+    /// the same 20 MB class of limit).
+    static let toolImageMaxBytes = 20 * 1024 * 1024
+
+    /// Pixel-count ceiling at the tool-image gate: decoding a pathological
+    /// image (e.g. a 20000×8000 PNG) can exhaust memory before any resize
+    /// gets a chance to run, so the count is checked from the header,
+    /// before any decode.
+    static let toolImageMaxPixels = 40_000_000
+
+    /// The one gate every tool-produced image passes through before it is
+    /// attached to a tool result (read_image and browser screenshots share
+    /// it). Rules, in order:
+    ///
+    ///   1. Format is sniffed from magic bytes — never from the filename.
+    ///      Unknown bytes are refused as `.notAnImage`.
+    ///   2. Under `.rejectOversize`, payloads over `toolImageMaxBytes` or
+    ///      `toolImageMaxPixels` (from the header, pre-decode) are refused
+    ///      with the specific reason.
+    ///   3. Everything that passes is re-encoded through the unified prep
+    ///      (JPEG, EXIF orientation baked in by the ImageIO thumbnail
+    ///      transform, long edge ≤ `contextMaxLongEdge`, ≤ `contextMaxBytes`).
+    ///      Whitelisted formats and transcodable formats alike take this
+    ///      path — a pass-through would skip the orientation bake. Animated
+    ///      images are flattened to their first frame, same trade as the
+    ///      context prep. A payload the re-encode cannot handle is refused
+    ///      as `.notAnImage`.
+    static func gatedToolImage(
+        _ data: Data,
+        oversize: OversizePolicy = .rejectOversize
+    ) -> Result<GatedToolImage, ToolImageRejection> {
+        guard let sniffed = sniffMimeType(data) else {
+            return .failure(.notAnImage)
+        }
+        guard toolImageWhitelist.contains(sniffed) || toolImageTranscodable.contains(sniffed) else {
+            return .failure(.unsupportedFormat(sniffed))
+        }
+        if oversize == .rejectOversize, data.count > toolImageMaxBytes {
+            return .failure(.fileTooLarge(bytes: data.count, limit: toolImageMaxBytes))
+        }
+        guard let size = pixelSize(data) else {
+            return .failure(.notAnImage)
+        }
+        if oversize == .rejectOversize,
+           size.width * size.height > CGFloat(toolImageMaxPixels) {
+            return .failure(.tooManyPixels(
+                width: Int(size.width), height: Int(size.height), limit: toolImageMaxPixels
+            ))
+        }
+        // Empty passthrough set: nothing goes out un-re-encoded, so the
+        // EXIF orientation bake and the context caps always apply.
+        guard let prepared = preparedForContext(
+            data,
+            maxBytes: contextMaxBytes,
+            maxLongEdge: contextMaxLongEdge,
+            passthroughFormats: []
+        ) else {
+            return .failure(.notAnImage)
+        }
+        return .success(GatedToolImage(
+            data: prepared.data,
+            mimeType: prepared.mimeType,
+            pixelSize: size,
+            sourceFormat: sniffed
+        ))
+    }
+
     /// Re-encode to JPEG, walking a (long edge × quality) ladder until the
     /// output fits `maxBytes`. Returns nil when even the smallest useful
     /// rung stays over budget or the source cannot be decoded at all.

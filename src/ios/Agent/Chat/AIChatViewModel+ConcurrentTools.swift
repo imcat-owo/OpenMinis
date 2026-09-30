@@ -612,8 +612,22 @@ extension AIChatViewModel {
             toolSuccess = browserResult.success
             toolPageURL = browserResult.pageURL
             if let b64 = browserResult.base64Image, let data = Data(base64Encoded: b64) {
-                toolImageData = Self.resizedImageData(data, maxLongEdge: 2000) ?? data
-                toolImageMimeType = "image/jpeg"
+                // [IMG-10] Same gate as read_image, soft oversize policy:
+                // screenshots are app-produced, so an over-ceiling capture
+                // converges through the gate's re-encode instead of being
+                // refused; only an undecodable payload loses its image,
+                // with the reason noted in the tool text. (The old code
+                // force-labelled the raw bytes image/jpeg whenever its own
+                // resize failed.)
+                switch ImagePayloadPrep.gatedToolImage(data, oversize: .downscaleOversize) {
+                case .success(let gated):
+                    toolImageData = gated.data
+                    toolImageMimeType = gated.mimeType
+                case .failure(let rejection):
+                    toolImageData = nil
+                    toolImageMimeType = nil
+                    toolOutput += "\n[Screenshot was captured but could not be attached: \(rejection.reason).]"
+                }
 
                 let timestamp = Int(Date().timeIntervalSince1970)
                 let screenshotFilename = "screenshot_\(timestamp).jpg"
@@ -673,32 +687,33 @@ extension AIChatViewModel {
             let pathArg = toolArgs["path"] as? String ?? ""
             let resolvedURL = await resolveMinisPath(pathArg)
             ctLogger.info("[read_image] pathArg=\(pathArg) resolvedURL=\(resolvedURL?.path ?? "nil") exists=\(resolvedURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)")
-            if let resolvedURL {
-                let dataOK = (try? Data(contentsOf: resolvedURL)) != nil
-                let uiOK = (try? Data(contentsOf: resolvedURL)).flatMap { UIImage(data: $0) } != nil
-                ctLogger.info("[read_image] dataReadable=\(dataOK) uiImageDecodable=\(uiOK) fileSize=\((try? FileManager.default.attributesOfItem(atPath: resolvedURL.path)[.size]) ?? "?")")
+            // [IMG-10] One read, one shared gate (the browser-screenshot
+            // path uses the same one): format sniffed from magic bytes and
+            // checked against the whitelist, 20 MB / 40 MP ceilings checked
+            // from the header BEFORE any decode, EXIF orientation baked in,
+            // unified context caps. A refusal names the specific reason —
+            // the old code lumped unsupported formats, oversize files and
+            // truncated data into one "could not read" and probed the file
+            // with two extra full reads just for logging.
+            var gateRejection: ImagePayloadPrep.ToolImageRejection?
+            var gatedImage: ImagePayloadPrep.GatedToolImage?
+            var sourceData: Data?
+            if let fileURL = resolvedURL, let fileData = try? Data(contentsOf: fileURL) {
+                sourceData = fileData
+                switch ImagePayloadPrep.gatedToolImage(fileData) {
+                case .success(let gated): gatedImage = gated
+                case .failure(let rejection): gateRejection = rejection
+                }
             }
 
-            if let fileURL = resolvedURL,
-               let fileData = try? Data(contentsOf: fileURL),
-               let uiImage = UIImage(data: fileData) {
+            if let fileURL = resolvedURL, let fileData = sourceData, let gated = gatedImage {
                 let originalSize = fileData.count
-                let originalW = uiImage.cgImage.map { $0.width } ?? Int(uiImage.size.width)
-                let originalH = uiImage.cgImage.map { $0.height } ?? Int(uiImage.size.height)
-
-                let inferenceData: Data
-                let resizedW: Int
-                let resizedH: Int
-                if let resized = Self.resizedImageData(fileData, maxLongEdge: 2000),
-                   let resizedImage = UIImage(data: resized) {
-                    inferenceData = resized
-                    resizedW = resizedImage.cgImage.map { $0.width } ?? Int(resizedImage.size.width)
-                    resizedH = resizedImage.cgImage.map { $0.height } ?? Int(resizedImage.size.height)
-                } else {
-                    inferenceData = uiImage.jpegData(compressionQuality: 0.85) ?? fileData
-                    resizedW = originalW
-                    resizedH = originalH
-                }
+                let originalW = Int(gated.pixelSize.width)
+                let originalH = Int(gated.pixelSize.height)
+                let inferenceData = gated.data
+                let outSize = ImagePayloadPrep.pixelSize(gated.data)
+                let resizedW = outSize.map { Int($0.width) } ?? originalW
+                let resizedH = outSize.map { Int($0.height) } ?? originalH
 
                 if pathArg.hasPrefix("/var/minis/") {
                     toolImageLinuxPath = pathArg
@@ -715,7 +730,13 @@ extension AIChatViewModel {
                 if resizedW != originalW || resizedH != originalH {
                     meta += "\nResized for analysis: \(resizedW)x\(resizedH)"
                 }
-                meta += "\nMIME: image/jpeg"
+                if gated.sourceFormat != gated.mimeType {
+                    meta += "\nConverted from \(gated.sourceFormat) to \(gated.mimeType) for analysis."
+                }
+                if ImagePayloadPrep.frameCount(fileData) > 1 {
+                    meta += "\nAnimated image: first frame used for analysis."
+                }
+                meta += "\nMIME: \(gated.mimeType)"
 
                 // [T-ios-vision-group #182] Two ways to answer this call.
                 //
@@ -745,7 +766,7 @@ extension AIChatViewModel {
                 let nativeVision = self.activeModelHasNativeVision
                 if nativeVision {
                     toolImageData = inferenceData
-                    toolImageMimeType = "image/jpeg"
+                    toolImageMimeType = gated.mimeType
                     // Native models see the pixels, so the prompt isn't needed to
                     // direct anything — but echo it so the transcript shows what
                     // the model was looking for. Image data is untouched.
@@ -768,7 +789,7 @@ extension AIChatViewModel {
                         let pathForUI = pathArg
                         let outcome = try await VisionGroupResolver.describe(
                             imageData: inferenceData,
-                            mimeType: "image/jpeg",
+                            mimeType: gated.mimeType,
                             customPrompt: visionPrompt,
                             seed: abs(tu.id.hashValue),
                             onAttempt: { [weak self] attempt in
@@ -809,6 +830,10 @@ extension AIChatViewModel {
                     messages[msgIdx].blocks[blockIdx].imageFilePath = fileURL.path
                     messages[msgIdx].blocks[blockIdx].content = toolOutput
                 }
+            } else if let gateRejection {
+                ctLogger.error("[read_image] GATE-REFUSED pathArg=\(pathArg) reason=\(gateRejection.reason)")
+                toolOutput = "Error: Could not read image at '\(pathArg)': \(gateRejection.reason)."
+                toolSuccess = false
             } else {
                 ctLogger.error("[read_image] FAILED pathArg=\(pathArg) resolvedURL=\(resolvedURL?.path ?? "nil")")
                 toolOutput = "Error: Could not read image at '\(pathArg)'. Verify the path exists and is a valid image file."
