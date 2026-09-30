@@ -738,12 +738,37 @@ static int cmd_read(int argc, char **argv, int stdout_fd, BOOL compact, BOOL qui
     }
 
     BLEHelper *ble = sharedBLE();
-    CBPeripheral *peripheral = ble.connectedPeripheral;
-    if (!peripheral) {
-        noff_emit_json(stdout_fd,
-            noff_json_error(TOOL_NAME, @"read", NOFF_ERR_NO_DATA, @"No peripheral connected. Run 'apple-bluetooth scan' then 'connect --uuid <uuid>' first."),
-            compact, quiet);
-        return NOFF_EXIT_ERROR;
+    CBPeripheral *peripheral = nil;
+    NSString *uuidStr = noff_find_arg(argc, argv, "--uuid");
+    if (uuidStr) {
+        // --uuid names the target device: honor it (reconnecting if the
+        // current connection is to a different peripheral) instead of
+        // silently reading whatever happens to be connected.
+        NSString *connectErr = nil;
+        peripheral = ensureConnected(ble, uuidStr, &connectErr);
+        if (!peripheral) {
+            noff_emit_json(stdout_fd,
+                noff_json_error(TOOL_NAME, @"read", NOFF_ERR_NO_DATA,
+                    connectErr ?: @"Failed to connect to peripheral."),
+                compact, quiet);
+            return NOFF_EXIT_ERROR;
+        }
+        NSString *discoverErr = nil;
+        if (!ensureServicesDiscovered(ble, peripheral, &discoverErr)) {
+            noff_emit_json(stdout_fd,
+                noff_json_error(TOOL_NAME, @"read", NOFF_ERR_INTERNAL_ERROR,
+                    discoverErr ?: @"Failed to discover services."),
+                compact, quiet);
+            return NOFF_EXIT_ERROR;
+        }
+    } else {
+        peripheral = ble.connectedPeripheral;
+        if (!peripheral) {
+            noff_emit_json(stdout_fd,
+                noff_json_error(TOOL_NAME, @"read", NOFF_ERR_NO_DATA, @"No peripheral connected. Run 'apple-bluetooth scan' then 'connect --uuid <uuid>' first."),
+                compact, quiet);
+            return NOFF_EXIT_ERROR;
+        }
     }
 
     CBCharacteristic *characteristic = findCharacteristic(peripheral, serviceStr, charStr);
@@ -825,12 +850,37 @@ static int cmd_write(int argc, char **argv, int stdout_fd, BOOL compact, BOOL qu
     }
 
     BLEHelper *ble = sharedBLE();
-    CBPeripheral *peripheral = ble.connectedPeripheral;
-    if (!peripheral) {
-        noff_emit_json(stdout_fd,
-            noff_json_error(TOOL_NAME, @"write", NOFF_ERR_NO_DATA, @"No peripheral connected. Run 'apple-bluetooth scan' then 'connect --uuid <uuid>' first."),
-            compact, quiet);
-        return NOFF_EXIT_ERROR;
+    CBPeripheral *peripheral = nil;
+    NSString *uuidStr = noff_find_arg(argc, argv, "--uuid");
+    if (uuidStr) {
+        // --uuid names the target device: honor it (reconnecting if the
+        // current connection is to a different peripheral) instead of
+        // silently writing whatever happens to be connected.
+        NSString *connectErr = nil;
+        peripheral = ensureConnected(ble, uuidStr, &connectErr);
+        if (!peripheral) {
+            noff_emit_json(stdout_fd,
+                noff_json_error(TOOL_NAME, @"write", NOFF_ERR_NO_DATA,
+                    connectErr ?: @"Failed to connect to peripheral."),
+                compact, quiet);
+            return NOFF_EXIT_ERROR;
+        }
+        NSString *discoverErr = nil;
+        if (!ensureServicesDiscovered(ble, peripheral, &discoverErr)) {
+            noff_emit_json(stdout_fd,
+                noff_json_error(TOOL_NAME, @"write", NOFF_ERR_INTERNAL_ERROR,
+                    discoverErr ?: @"Failed to discover services."),
+                compact, quiet);
+            return NOFF_EXIT_ERROR;
+        }
+    } else {
+        peripheral = ble.connectedPeripheral;
+        if (!peripheral) {
+            noff_emit_json(stdout_fd,
+                noff_json_error(TOOL_NAME, @"write", NOFF_ERR_NO_DATA, @"No peripheral connected. Run 'apple-bluetooth scan' then 'connect --uuid <uuid>' first."),
+                compact, quiet);
+            return NOFF_EXIT_ERROR;
+        }
     }
 
     CBCharacteristic *characteristic = findCharacteristic(peripheral, serviceStr, charStr);
