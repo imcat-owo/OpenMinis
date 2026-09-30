@@ -571,6 +571,14 @@ struct MCPFormSheet: View {
             if let oauth = config.oauth {
                 MCPOAuthController.refreshBridgeIfAuthorized(server: config.id, oauth: oauth)
             }
+        } else if let old = server, old.oauth != nil, config.oauth == nil {
+            // Auth was switched away from OAuth: the stored record no longer
+            // carries the oauth config, but the Keychain secret/tokens and
+            // the guest bridge file are keyed by server name and would
+            // linger indefinitely — a later same-name save with OAuth back
+            // on would rebuild the bridge from the stale token. Purge them
+            // with the same full cleanup a server delete performs.
+            MCPOAuthController.purge(server: old.id)
         }
         return config
     }
