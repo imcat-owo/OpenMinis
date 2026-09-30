@@ -290,7 +290,8 @@ extension BackupImporter {
                     skillId: rec.id, content: rec.body,
                     source: rec.sourceURL.map { .url($0) } ?? .file,
                     isEnabled: rec.isEnabled, installedAt: rec.installedAt,
-                    updatedAt: rec.updatedAt, version: rec.version)
+                    updatedAt: rec.updatedAt, version: rec.version,
+                    name: rec.name, description: rec.description)
             }
             if applied { report.imported += 1 } else { report.skipped += 1 }
         }

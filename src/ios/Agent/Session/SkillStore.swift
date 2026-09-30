@@ -738,7 +738,7 @@ thinking 填/描/强调不必手写。贴包后跟 `colorsLight.accent` / 聊天
     func importSkillFromSync(
         skillId: String, content: String, source: SkillImportSource,
         isEnabled: Bool, installedAt: Date, updatedAt: Date,
-        version: String? = nil
+        version: String? = nil, name: String? = nil, description: String? = nil
     ) -> Bool {
         // [T-icloud-cloud-overwrites-local-edits] Local-newer guard. Skill
         // files (SKILL.md + bundled files) are user-editable; below we
@@ -758,10 +758,16 @@ thinking 填/描/强调不必手写。贴包后跟 `colorsLight.accent` / 聊天
             }
         }
         let parsed = Self.parse(skillMD: content)
+        // Callers whose content carries no frontmatter (backup restore)
+        // pass the recorded name/description explicitly, like version;
+        // parsing body-only content would otherwise fall back to
+        // "Untitled Skill" / "" and persist those as the skill's identity.
+        let resolvedName = name ?? parsed.name
+        let resolvedDescription = description ?? parsed.description
 
         // If a local skill exists with the same slugified name but a different ID,
         // remove the old one to prevent duplicates.
-        let slugId = Self.slugify(parsed.name)
+        let slugId = Self.slugify(resolvedName)
         if !slugId.isEmpty, slugId != skillId, let oldIdx = skills.firstIndex(where: { $0.id == slugId }) {
             let oldId = skills[oldIdx].id
             skills.remove(at: oldIdx)
@@ -779,8 +785,8 @@ thinking 填/描/强调不必手写。贴包后跟 `colorsLight.accent` / 聊天
 
         let skill = Skill(
             id: skillId,
-            name: parsed.name,
-            description: parsed.description,
+            name: resolvedName,
+            description: resolvedDescription,
             // Callers whose content carries no frontmatter (backup restore)
             // pass the recorded version explicitly; frontmatter otherwise.
             version: version ?? parsed.version,
@@ -798,7 +804,7 @@ thinking 填/描/强调不必手写。贴包后跟 `colorsLight.accent` / 聊天
         try? content.write(to: skillFile, atomically: true, encoding: .utf8)
 
         // Save to DB
-        dbInsertSkill(id: skillId, name: parsed.name, description: parsed.description,
+        dbInsertSkill(id: skillId, name: resolvedName, description: resolvedDescription,
                       version: version ?? parsed.version, importSource: source,
                       isEnabled: skill.isEnabled, installedAt: skill.installedAt, updatedAt: updatedAt)
 
