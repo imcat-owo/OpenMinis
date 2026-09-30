@@ -119,6 +119,12 @@ final class WebViewHolder: NSObject, ObservableObject {
             webView.observe(\.url) { [weak self] wv, _ in
                 DispatchQueue.main.async {
                     self?.currentURL = wv.url?.absoluteString ?? ""
+                    // Keep pendingURL naming the page the web view is actually
+                    // on: retryFailedLoad() and the failure overlay both read
+                    // it as "the current/last URL". Without this it stayed the
+                    // initial page forever, so after A→B a failed B retried A
+                    // and the overlay blamed A.
+                    if let u = wv.url { self?.pendingURL = u }
                 }
             },
             webView.observe(\.isLoading) { [weak self] wv, _ in
@@ -176,8 +182,12 @@ final class WebViewHolder: NSObject, ObservableObject {
     /// [T-ios-webview-error-ui] Retry the URL that failed (or reload current).
     /// Used by the error overlay's "Try Again".
     func retryFailedLoad() {
+        // Prefer the exact URL recorded on the error: a provisional failure
+        // happens before the web view commits the new URL, so neither
+        // webView.url nor pendingURL necessarily names the failed page yet.
+        let failed = loadError?.failedURL ?? pendingURL
         loadError = nil
-        if let failed = pendingURL {
+        if let failed {
             performLoad(url: failed)
         } else {
             webView.reload()
@@ -383,11 +393,22 @@ extension WebViewHolder: WKNavigationDelegate {
     func webView(_ webView: WKWebView,
                  didFailProvisionalNavigation navigation: WKNavigation!,
                  withError error: Error) {
-        loadError = WebLoadError(error: error, failedURL: pendingURL)
+        loadError = WebLoadError(error: error, failedURL: Self.failingURL(of: error, webView: webView, fallback: pendingURL))
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        loadError = WebLoadError(error: error, failedURL: pendingURL)
+        loadError = WebLoadError(error: error, failedURL: Self.failingURL(of: error, webView: webView, fallback: pendingURL))
+    }
+
+    /// The URL that actually failed: the error's own failing-URL entry is
+    /// authoritative (a provisional failure precedes any URL commit); the web
+    /// view's current URL and the last tracked URL are fallbacks.
+    private static func failingURL(of error: Error, webView: WKWebView, fallback: URL?) -> URL? {
+        if let s = (error as NSError).userInfo[NSURLErrorFailingURLStringErrorKey] as? String,
+           let u = URL(string: s) {
+            return u
+        }
+        return webView.url ?? fallback
     }
 }
 
