@@ -546,9 +546,10 @@ actor ProviderConfigDB {
     /// `ProviderConfigStore.applyMergedConfigFromSync` (Stage S3).
     ///
     /// Wraps the whole replace in a single transaction so a crash partway
-    /// leaves the prior contents intact. Per-row updated_at defaults to
-    /// the legacy `userModifiedAt` if present, otherwise the per-row
-    /// createdAt, otherwise `now`.
+    /// leaves the prior contents intact. Per-row updated_at is preserved
+    /// from the stored row when the rewrite is content-identical ([R3-104]);
+    /// new or changed rows are stamped fresh (entries prefer their
+    /// `userModifiedAt` when set).
     /// - Parameter preserveLocalOnlyStateIfEmpty: guard for the INBOUND-SYNC
     ///   caller only. See the agent-loop block below — the guard must NOT be on
     ///   for a user-initiated save, because clearing every agent-loop model is a
@@ -575,6 +576,16 @@ actor ProviderConfigDB {
         // `config` stay deleted — preservation is keyed by id, so a removed
         // instance/entry/group does not resurrect.
         var preservedInstanceSecrets: [String: (blob: String?, kind: String?, updatedAt: Double?, extras: String?)] = [:]
+        // [R3-104] Per-row content fingerprints + prior updated_at, same
+        // capture-before-wipe pattern. bulkReplace used to stamp EVERY row
+        // with `now`, so any unrelated save made every instance/entry/group
+        // on this device look freshly edited; a peer's genuinely newer edit
+        // carrying an earlier wall-clock stamp then lost the inbound LWW
+        // gate (upsert*FromInbound) and was silently dropped. A row whose
+        // synced content is byte-identical to what is already stored now
+        // keeps its prior updated_at; only new or actually-changed rows are
+        // stamped fresh (entries keep their userModifiedAt-first rule).
+        var priorInstanceStamps: [String: (fingerprint: String, updatedAt: Double)] = [:]
         for row in loadAllInstanceRows() {
             guard let id = row["id"] as? String else { continue }
             let blob = row["secret_blob"] as? String
@@ -584,17 +595,60 @@ actor ProviderConfigDB {
             if blob != nil || kind != nil || updatedAt != nil || extras != nil {
                 preservedInstanceSecrets[id] = (blob, kind, updatedAt, extras)
             }
+            if let priorTs = row["updated_at"] as? Double {
+                priorInstanceStamps[id] = ([
+                    Self.stampComponent(row["label"] as? String),
+                    Self.stampComponent(row["provider_type"] as? String),
+                    Self.stampComponent(row["credential_type"] as? String),
+                    Self.stampComponent(row["custom_base_url"] as? String),
+                    Self.stampComponent(row["append_v1_suffix"] as? Bool),
+                    Self.stampComponent(row["image_endpoint_mode"] as? String),
+                    Self.stampComponent(row["image_endpoint_resolved"] as? String),
+                    Self.stampComponent(row["is_enabled"] as? Bool),
+                    Self.stampComponent(row["sort_order"] as? Int),
+                    Self.stampComponent(row["created_at"] as? Double),
+                    Self.stampComponent(row["custom_user_agent"] as? String),
+                    Self.stampComponent(row["azure_mode"] as? Bool),
+                ].joined(separator: "\u{1}"), priorTs)
+            }
         }
         var preservedEntryExtras: [String: String] = [:]
+        var priorEntryStamps: [String: (fingerprint: String, updatedAt: Double)] = [:]
         for row in loadAllEntryRows() {
             if let id = row["id"] as? String, let extras = row["extras_json"] as? String {
                 preservedEntryExtras[id] = extras
             }
+            if let id = row["id"] as? String, let priorTs = row["updated_at"] as? Double {
+                priorEntryStamps[id] = ([
+                    Self.stampComponent(row["provider_instance_id"] as? String),
+                    Self.stampComponent(row["base_model_json"] as? String),
+                    Self.stampComponent(row["overrides_json"] as? String),
+                    Self.stampComponent(row["is_custom"] as? Bool),
+                    Self.stampComponent(row["is_hidden"] as? Bool),
+                    Self.stampComponent(row["user_modified_at"] as? Double),
+                    Self.stampComponent(row["sort_order"] as? Int),
+                ].joined(separator: "\u{1}"), priorTs)
+            }
         }
         var preservedGroupExtras: [String: String] = [:]
+        var priorGroupStamps: [String: (fingerprint: String, updatedAt: Double)] = [:]
         for row in loadAllGroupRows() {
             if let id = row["id"] as? String, let extras = row["extras_json"] as? String {
                 preservedGroupExtras[id] = extras
+            }
+            if let id = row["id"] as? String, let priorTs = row["updated_at"] as? Double {
+                priorGroupStamps[id] = ([
+                    Self.stampComponent(row["name"] as? String),
+                    Self.stampComponent(row["strategy"] as? String),
+                    Self.stampComponent(row["fallback_strategy"] as? String),
+                    Self.stampComponent(row["default_thinking_level"] as? String),
+                    Self.stampComponent(row["context_limit_tokens"] as? Int),
+                    Self.stampComponent(row["context_limit_remembered"] as? Int),
+                    Self.stampComponent(row["member_entry_ids_json"] as? String),
+                    Self.stampComponent(row["sort_order"] as? Int),
+                    Self.stampComponent(row["removed_members_json"] as? String),
+                    Self.stampComponent(row["added_members_json"] as? String),
+                ].joined(separator: "\u{1}"), priorTs)
             }
         }
         Self.exec(db: db, "DELETE FROM provider_model_groups")
@@ -632,6 +686,25 @@ actor ProviderConfigDB {
         // only seeds the metadata; secret_blob is left NULL until a
         // mutate happens or the v3 builder runs once.).
         for (idx, inst) in config.instances.enumerated() {
+            // [R3-104] Keep the prior updated_at when the rewrite is
+            // content-identical; stamp `now` only for new/changed rows.
+            let instanceFingerprint = [
+                Self.stampComponent(inst.label),
+                Self.stampComponent(inst.unknownProviderTypeRaw ?? inst.providerType.rawValue),
+                Self.stampComponent(inst.credentialType.rawValue),
+                Self.stampComponent(inst.customBaseURL),
+                Self.stampComponent(inst.appendV1Suffix),
+                Self.stampComponent(inst.imageEndpointMode.rawValue),
+                Self.stampComponent(inst.imageEndpointResolved?.rawValue),
+                Self.stampComponent(inst.isEnabled),
+                Self.stampComponent(idx),
+                Self.stampComponent(inst.createdAt.timeIntervalSince1970),
+                Self.stampComponent(inst.customUserAgent),
+                Self.stampComponent(inst.azureMode),
+            ].joined(separator: "\u{1}")
+            let instanceUpdatedAt = priorInstanceStamps[inst.id].map {
+                $0.fingerprint == instanceFingerprint ? $0.updatedAt : now
+            } ?? now
             upsertInstanceRow(
                 id: inst.id,
                 label: inst.label,
@@ -649,7 +722,7 @@ actor ProviderConfigDB {
                 secretKind: preservedInstanceSecrets[inst.id]?.kind,
                 secretUpdatedAt: preservedInstanceSecrets[inst.id]?.updatedAt,
                 createdAt: inst.createdAt.timeIntervalSince1970,
-                updatedAt: now,
+                updatedAt: instanceUpdatedAt,
                 extrasJson: preservedInstanceSecrets[inst.id]?.extras,
                 customUserAgent: inst.customUserAgent,
                 azureMode: inst.azureMode
@@ -667,6 +740,23 @@ actor ProviderConfigDB {
             } else {
                 overridesJSON = try? Self.jsonString(entry.overrides)
             }
+            // [R3-104] Same preservation as instances: an unchanged entry
+            // keeps its prior updated_at; a changed one keeps the existing
+            // userModifiedAt-first stamp rule.
+            let entryFingerprint = [
+                Self.stampComponent(entry.providerInstanceId),
+                Self.stampComponent(baseJSON),
+                Self.stampComponent(overridesJSON),
+                Self.stampComponent(entry.isCustom),
+                Self.stampComponent(entry.isHidden),
+                Self.stampComponent(entry.userModifiedAt?.timeIntervalSince1970),
+                Self.stampComponent(idx),
+            ].joined(separator: "\u{1}")
+            let entryUpdatedAt = priorEntryStamps[entry.uuid].map {
+                $0.fingerprint == entryFingerprint
+                    ? $0.updatedAt
+                    : (entry.userModifiedAt?.timeIntervalSince1970 ?? now)
+            } ?? (entry.userModifiedAt?.timeIntervalSince1970 ?? now)
             upsertEntryRow(
                 // [T-provider-entry-composite-key] DB primary key stays the
                 // random uuid (NOT entry.id, which is now the composite key).
@@ -684,7 +774,7 @@ actor ProviderConfigDB {
                 isHidden: entry.isHidden,
                 userModifiedAt: entry.userModifiedAt?.timeIntervalSince1970,
                 sortOrder: idx,
-                updatedAt: entry.userModifiedAt?.timeIntervalSince1970 ?? now,
+                updatedAt: entryUpdatedAt,
                 extrasJson: preservedEntryExtras[entry.uuid]
             )
         }
@@ -692,6 +782,25 @@ actor ProviderConfigDB {
         // Groups. memberEntryIds → JSON array column.
         for (idx, group) in config.modelGroups.enumerated() {
             let memberJSON = (try? Self.jsonString(group.memberEntryIds)) ?? "[]"
+            let removedMembersJson = Self.encodeMemberTimestamps(group.removedMembers)
+            let addedMembersJson = Self.encodeMemberTimestamps(group.addedMembers)
+            // [R3-104] Same preservation as instances: an unchanged group
+            // keeps its prior updated_at; stamp `now` only when changed.
+            let groupFingerprint = [
+                Self.stampComponent(group.name),
+                Self.stampComponent(group.strategy.rawValue),
+                Self.stampComponent(group.fallbackStrategy.rawValue),
+                Self.stampComponent(group.defaultThinkingLevel?.rawValue),
+                Self.stampComponent(group.contextLimitTokens),
+                Self.stampComponent(group.lastContextLimitTokens),
+                Self.stampComponent(memberJSON),
+                Self.stampComponent(idx),
+                Self.stampComponent(removedMembersJson),
+                Self.stampComponent(addedMembersJson),
+            ].joined(separator: "\u{1}")
+            let groupUpdatedAt = priorGroupStamps[group.id].map {
+                $0.fingerprint == groupFingerprint ? $0.updatedAt : now
+            } ?? now
             upsertGroupRow(
                 id: group.id,
                 name: group.name,
@@ -702,10 +811,10 @@ actor ProviderConfigDB {
                 contextLimitRemembered: group.lastContextLimitTokens,
                 memberEntryIdsJson: memberJSON,
                 sortOrder: idx,
-                updatedAt: now,
+                updatedAt: groupUpdatedAt,
                 extrasJson: preservedGroupExtras[group.id],
-                removedMembersJson: Self.encodeMemberTimestamps(group.removedMembers),
-                addedMembersJson: Self.encodeMemberTimestamps(group.addedMembers)
+                removedMembersJson: removedMembersJson,
+                addedMembersJson: addedMembersJson
             )
         }
 
@@ -1611,6 +1720,21 @@ actor ProviderConfigDB {
     private static func jsonString<T: Encodable>(_ value: T) throws -> String {
         let data = try JSONEncoder().encode(value)
         return String(data: data, encoding: .utf8) ?? "{}"
+    }
+
+    /// [R3-104] Canonical string form of one bulkReplace-managed column
+    /// value. bulkReplace fingerprints each stored row and each incoming
+    /// row with these components to decide whether the rewrite actually
+    /// changes the row (and therefore deserves a fresh updated_at).
+    private static func stampComponent(_ value: Any?) -> String {
+        switch value {
+        case nil: return "<nil>"
+        case let s as String: return "s:\(s)"
+        case let b as Bool: return b ? "b:1" : "b:0"
+        case let i as Int: return "i:\(i)"
+        case let d as Double: return "d:\(d)"
+        default: return "o:\(String(describing: value!))"
+        }
     }
 
     /// Convenience: counts across the four sync-domain tables. Helpful for
