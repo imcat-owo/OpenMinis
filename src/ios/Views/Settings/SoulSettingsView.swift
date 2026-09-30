@@ -343,6 +343,10 @@ struct SoulSettingsView: View {
         let parsed = SoulMDParser.parse(SoulStore.defaultContent)
         name = parsed.metadata.name
         rawEmoji = parsed.metadata.emoji
+        // The default content carries no icon, so this resets to "" (default
+        // presentation). Omitting it left the custom icon in place AND let
+        // the save() below write it into the "restored" file permanently.
+        icon = parsed.metadata.icon
         style = parsed.metadata.style
         lang = parsed.metadata.lang
         bodyText = parsed.body
