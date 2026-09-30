@@ -24,8 +24,10 @@ private let logger = AppLogger(category: "ModelUseOffload")
                                          modalityFilter: String?,
                                          showAll: Bool) -> NSDictionary {
         let store = ProviderConfigStore.shared
-        // Always restrict to agent loop models — showAll is accepted but ignored
-        var entries = store.resolvedAgentLoopEntries
+        // Default: agent loop models only. --all widens to every configured
+        // model across all enabled instances, as the CLI help promises.
+        var entries = showAll ? Self.allConfiguredEntries(store: store)
+                              : store.resolvedAgentLoopEntries
 
         if let modalityFilter, !modalityFilter.isEmpty {
             entries = Self.filterByModality(entries, filter: modalityFilter)
@@ -50,9 +52,11 @@ private let logger = AppLogger(category: "ModelUseOffload")
         let store = ProviderConfigStore.shared
         let q = query.lowercased()
 
-        // Always restrict to agent loop models — showAll is accepted but ignored
-        let pool = store.resolvedAgentLoopEntries
-            .filter { store.instance(for: $0.providerInstanceId)?.isEnabled == true }
+        // Default: agent loop models only; --all searches every configured
+        // model across all enabled instances instead.
+        let pool = showAll ? Self.allConfiguredEntries(store: store)
+            : store.resolvedAgentLoopEntries
+                .filter { store.instance(for: $0.providerInstanceId)?.isEnabled == true }
 
         var matches = pool.filter { entry in
             entry.model.id.lowercased().contains(q)
@@ -72,6 +76,20 @@ private let logger = AppLogger(category: "ModelUseOffload")
             result["usage"] = Self.usageHint
         }
         return result as NSDictionary
+    }
+
+    /// Every configured model entry across all enabled provider instances
+    /// (the `--all` pool), de-duplicated by entry id, in instance order.
+    private static func allConfiguredEntries(store: ProviderConfigStore) -> [ModelEntry] {
+        var seen = Set<String>()
+        var result: [ModelEntry] = []
+        for instance in store.instances where instance.isEnabled {
+            for entry in store.visibleEntries(for: instance.id) {
+                guard seen.insert(entry.id).inserted else { continue }
+                result.append(entry)
+            }
+        }
+        return result
     }
 
     /// Hint string appended to non-empty list/search results so the agent knows
