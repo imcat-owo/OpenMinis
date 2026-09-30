@@ -420,15 +420,21 @@ extension AIChatViewModel {
     ) async throws -> StreamResult {
         // Track entries we've gotten empty responses from to avoid infinite loops.
         var emptyResponseEntries: Set<String> = []
+        // Mutable copies advanced alongside `activeEntryId` below — the loop
+        // must stream through the provider built for the entry it claims to
+        // be trying, not the one handed in for the first entry.
+        var currentProvider = provider
+        var currentSystemPrompt = systemPrompt
+        var currentModel = model
 
         while true {
             let fbStream = try await streamWithGroupFallback(
-                provider: provider,
+                provider: currentProvider,
                 messages: messages,
                 baseSystemPrompt: baseSystemPrompt,
-                systemPrompt: systemPrompt,
+                systemPrompt: currentSystemPrompt,
                 tools: tools,
-                model: model,
+                model: currentModel,
                 lastContextTokens: lastContextTokens,
                 chatMessage: chatMessage,
                 activeGroupId: &activeGroupId,
@@ -437,7 +443,7 @@ extension AIChatViewModel {
             let result = try await processStreamEvents(
                 stream: fbStream,
                 msgIdx: msgIdx,
-                provider: provider
+                provider: currentProvider
             )
 
             // Empty-response detection: HTTP 200 + stream finished, but no text,
@@ -487,25 +493,21 @@ extension AIChatViewModel {
                 AIChatViewModel.clearUncommittedStreamTail(self.messages[msgIdx], committedBlockCount: self.committedBlockCount)
             }
 
-            // Throw a fallbackable error so streamWithGroupFallback skips the
-            // current entry and picks the next one.
-            // We catch it immediately in the next loop iteration.
-            // But wait — streamWithGroupFallback creates its own triedEntries...
-            // We need to make the current entry "fail" from streamWithGroupFallback's
-            // perspective. The simplest way: temporarily disable the entry? No.
-            // Better: just call streamWithGroupFallback again — it starts fresh with
-            // triedEntries = {activeEntryId}. If the activeEntryId hasn't changed,
-            // it will try the same entry again.
-            //
-            // Fix: update activeEntryId to force streamWithGroupFallback to start
-            // from a different entry. We do this by finding the next available entry
-            // ourselves and updating the binding.
+            // Advance to the next entry ourselves and loop: update
+            // activeEntryId + the binding, AND rebuild the provider, model
+            // and system prompt for that entry (same recipe
+            // streamWithGroupFallback uses when it advances internally).
+            // streamWithGroupFallback streams through the provider it is
+            // handed — without the rebuild, the next iteration would query
+            // the entry that just returned empty again while recording the
+            // empty against the new entry, draining the whole group.
             if let gid = activeGroupId, let currentEid = activeEntryId,
                let group = ProviderConfigStore.shared.group(for: gid) {
                 let nextEid = ModelGroupRouter.nextFallback(
                     group: group, currentEntryId: currentEid, store: ProviderConfigStore.shared
                 )
-                if let nextEid, !emptyResponseEntries.contains(nextEid) {
+                if let nextEid, !emptyResponseEntries.contains(nextEid),
+                   let nextEntry = ProviderConfigStore.shared.entry(for: nextEid) {
                     logger.info("🔀ROUTE-CONTENT manually advancing: \(currentEid) → \(nextEid)")
                     activeEntryId = nextEid
                     if let sid = sessionId {
@@ -516,6 +518,16 @@ extension AIChatViewModel {
                         )
                         ProviderConfigStore.shared.setBinding(binding, for: sid)
                     }
+                    currentProvider = await makeAgentProvider(for: nextEntry)
+                    currentModel = nextEntry.model
+                    var rebuiltPrompt = baseSystemPrompt
+                    if let capFragment = nextEntry.model.capabilityPromptFragment {
+                        rebuiltPrompt += "\n\n" + capFragment
+                    }
+                    if let behaviorFragment = nextEntry.model.agentBehaviorPromptFragment {
+                        rebuiltPrompt += "\n\n" + behaviorFragment
+                    }
+                    currentSystemPrompt = rebuiltPrompt
                 } else {
                     logger.error("🔀ROUTE-CONTENT no more untried entries")
                     return result
