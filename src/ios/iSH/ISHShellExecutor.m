@@ -22,19 +22,25 @@
 
 /// Hard cap on how long a single reader thread may live.
 ///
-/// Not a command timeout — callers set their own, and this is far above any of
-/// them. It only bounds the damage from a reader that never observed the
-/// signal to stop, so a stranded thread cannot hold a concurrent-queue slot
-/// for the life of the process.
+/// Not a command timeout — callers set their own. But it is NOT "far above
+/// any of them": caller timeouts arrive unbounded (a tool call may ask for
+/// many hours; the sync API's 0 means wait forever). This cap is therefore
+/// only a FLOOR: a context that recorded a longer caller contract raises
+/// its own cap to match (see `timeout` on the context and
+/// +recordTimeout:forPid:). Only contexts with no recorded contract are
+/// bounded by this value alone. It bounds the damage from a reader that
+/// never observed the signal to stop, so a stranded thread cannot hold a
+/// concurrent-queue slot for the life of the process.
 static const NSTimeInterval ISHShellExecutorReaderMaxLifetime = 3600.0; // 1h
 
 /// How often the stale-context sweeper runs.
 static const NSTimeInterval ISHShellExecutorSweepInterval = 60.0;
 
 /// How long past its last sign of life a context may sit in _activeExecutions
-/// before the sweeper reclaims it. Must comfortably exceed the longest command
-/// anyone runs, because the sweeper cannot distinguish "still working" from
-/// "stranded" — it only sees an entry that has been there a long time.
+/// before the sweeper reclaims it. Like the reader cap, this is a floor, not
+/// an absolute: a context whose recorded caller contract runs longer is
+/// reclaimed only after that contract (plus grace) has passed, and a context
+/// whose caller waits forever (timeout == 0) is never reclaimed by age.
 static const NSTimeInterval ISHShellExecutorStaleContextAge = 7200.0; // 2h
 
 #pragma mark - Result Implementation
@@ -66,6 +72,11 @@ static const NSTimeInterval ISHShellExecutorStaleContextAge = 7200.0; // 2h
 }
 @property (nonatomic) int guestPid;
 @property (nonatomic) NSDate *startTime;
+/// The caller's timeout contract, recorded via +recordTimeout:forPid:.
+/// -1 = no contract recorded (the leak-guard caps apply as-is);
+/// 0 = the caller waits forever (the caps must never reap this context);
+/// >0 = the caller's deadline in seconds (caps rise to at least this).
+@property (nonatomic) NSTimeInterval timeout;
 @property (nonatomic, copy) ISHShellLineCallback lineCallback;
 @property (nonatomic, copy) ISHShellCompletionCallback completion;
 @property (nonatomic) NSMutableString *stdoutBuffer;
@@ -102,6 +113,7 @@ static const NSTimeInterval ISHShellExecutorStaleContextAge = 7200.0; // 2h
 
 - (instancetype)init {
     if (self = [super init]) {
+        _timeout = -1; // no caller contract recorded yet
         _stdoutBuffer = [NSMutableString string];
         _stderrBuffer = [NSMutableString string];
         _stdoutPipe[0] = -1;
@@ -250,8 +262,19 @@ static int32_t _sweptContexts = 0;
     @synchronized(_activeExecutions) {
         for (NSNumber *key in _activeExecutions) {
             ISHShellExecutionContext *ctx = _activeExecutions[key];
+            // Respect the caller's own timeout contract: a context whose
+            // caller waits forever (timeout == 0) is never stale by age,
+            // and one with a long contract is only stale once that
+            // contract (plus grace for the caller's own teardown) has
+            // passed. Reaping earlier kills a live, healthy long command
+            // and reports a timeout the caller never asked for.
+            if (ctx.timeout == 0) continue;
+            NSTimeInterval limit = ISHShellExecutorStaleContextAge;
+            if (ctx.timeout > 0) {
+                limit = MAX(limit, ctx.timeout + 60.0);
+            }
             NSTimeInterval age = -[ctx.startTime timeIntervalSinceNow];
-            if (age > ISHShellExecutorStaleContextAge) {
+            if (age > limit) {
                 [stale addObject:ctx];
             }
         }
@@ -689,6 +712,12 @@ static int32_t _sweptContexts = 0;
         return result;
     }
 
+    // Record this call's timeout contract on the registered context so the
+    // leak guards don't reap the command at their fixed caps (1h reader /
+    // 2h sweeper) while this call is still legitimately waiting — timeout
+    // == 0 here means DISPATCH_TIME_FOREVER below, i.e. forever.
+    [self recordTimeout:timeout forPid:pid];
+
     // Wait for completion or timeout
     dispatch_time_t waitTime = timeout > 0
         ? dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeout * NSEC_PER_SEC))
@@ -911,6 +940,12 @@ static BOOL ISHTaskIsDescendantOf(struct task *t, pid_t_ rootPid) {
     }
 }
 
++ (void)recordTimeout:(NSTimeInterval)timeout forPid:(int)pid {
+    @synchronized(_activeExecutions) {
+        _activeExecutions[@(pid)].timeout = timeout;
+    }
+}
+
 + (void)finalizeTimedOutPid:(int)pid {
     ISHShellExecutionContext *ctx;
     @synchronized(_activeExecutions) {
@@ -1111,17 +1146,27 @@ static BOOL ISHTaskIsDescendantOf(struct task *t, pid_t_ rootPid) {
     //
     // Deliberately generous — this must never cut a legitimately long-running
     // command short. A build or a package install can quietly produce nothing
-    // for a long time; ISHShellExecutorReaderMaxLifetime is far beyond any
-    // timeout a caller passes, so in practice only a stranded reader reaches
-    // it. Hitting it at all is a bug, so it logs loudly.
-    NSDate *readerDeadline = [NSDate dateWithTimeIntervalSinceNow:
-                              ISHShellExecutorReaderMaxLifetime];
+    // for a long time. The base cap is only a floor: when the context recorded
+    // a longer caller contract it rises to match (plus grace), and when the
+    // caller waits forever (timeout == 0) there is no cap at all — the reader
+    // still exits on isCompleted or EOF. Contexts with no recorded contract
+    // keep the base cap. The contract is re-read every iteration because it
+    // is recorded just AFTER the readers start (the caller only learns the
+    // pid once execute returns). Hitting the cap at all is a bug, so it logs
+    // loudly.
+    NSDate *readerStart = [NSDate date];
 
     while (!ctx.isCompleted) {
-        if ([readerDeadline timeIntervalSinceNow] <= 0) {
+        NSTimeInterval readerLifetime = ISHShellExecutorReaderMaxLifetime;
+        if (ctx.timeout == 0) {
+            readerLifetime = 0; // caller waits forever — no cap
+        } else if (ctx.timeout > 0) {
+            readerLifetime = MAX(readerLifetime, ctx.timeout + 60.0);
+        }
+        if (readerLifetime > 0 && -[readerStart timeIntervalSinceNow] > readerLifetime) {
             NSLog(@"ISHShellExecutor[reader]: %s hit the %.0fs lifetime cap for pid=%d "
                   @"(isCompleted=%d) — abandoning to protect the thread pool",
-                  streamName, (double)ISHShellExecutorReaderMaxLifetime,
+                  streamName, readerLifetime,
                   ctx.guestPid, ctx.isCompleted);
             break;
         }

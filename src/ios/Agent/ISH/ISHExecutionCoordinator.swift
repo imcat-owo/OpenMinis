@@ -401,6 +401,12 @@ actor ISHExecutionCoordinator {
                 return
             }
 
+            // Record this call's timeout contract with the executor: its
+            // leak guards (1h reader cap / 2h stale sweeper) must not reap
+            // the command before this deadline — the tool timeout arrives
+            // unbounded and may legitimately exceed both caps.
+            ISHShellExecutor.recordTimeout(effectiveTimeout, forPid: pid)
+
             // Track PID
             Task { await self.recordInflightPid(sessionId: sessionId, id: myId, pid: pid) }
             pidCallback(pid)

@@ -139,6 +139,18 @@ typedef void (^ISHShellCompletionCallback)(ISHShellExecutionResult *result);
 /// @param pid Guest process PID whose context should be released
 + (void)finalizeTimedOutPid:(int)pid;
 
+/// Record the caller's timeout contract for a running execution, so the
+/// leak guards (reader lifetime cap, stale-context sweeper) never reap a
+/// command before its own deadline. Callers pass their timeout through
+/// unbounded — a tool call may legitimately ask for many hours, and the
+/// sync API treats 0 as "wait forever" — so a fixed cap that ignores the
+/// contract kills live, healthy long commands and reports them as
+/// timeouts the caller never asked for.
+///
+/// @param timeout The caller's timeout in seconds (0 = waits forever)
+/// @param pid Guest process PID (returned from the execute methods)
++ (void)recordTimeout:(NSTimeInterval)timeout forPid:(int)pid;
+
 /// Snapshot of the leak-guard counters, e.g.
 /// `activeExecutions=0 liveReaders=0 sweptContexts=0`.
 ///
