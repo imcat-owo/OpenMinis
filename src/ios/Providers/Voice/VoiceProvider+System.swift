@@ -432,9 +432,14 @@ final class SystemVoiceProvider: NSObject, VoiceInputCapable, VoiceOutputCapable
     }
 
     /// AVSpeechUtterance rate is 0.0...1.0; map from OpenAI-style speed 0.25...4.0.
+    /// Anchored so speed 1.0 lands exactly on AVSpeechUtteranceDefaultSpeechRate
+    /// (0.5, the system-normal rate): the old speed/4 curve put 1.0 at 0.25 —
+    /// half speed — and only reached normal at 2.0. Speeds above 2.0 saturate
+    /// at MaximumSpeechRate, which is only 2× the default rate.
     private func mapSpeed(_ speed: Float) -> Float {
-        let normalized = max(0.0625, min(1.0, speed / 4.0))  // 0.25..4.0 -> ~0.06..1.0
-        return normalized * AVSpeechUtteranceMaximumSpeechRate
+        let rate = speed * AVSpeechUtteranceDefaultSpeechRate
+        return min(AVSpeechUtteranceMaximumSpeechRate,
+                   max(AVSpeechUtteranceMinimumSpeechRate, rate))
     }
 }
 
