@@ -87,6 +87,13 @@ final class BrowserUseManager: NSObject, ObservableObject {
     /// the 10s already used by the other bounded eval in this file.
     private static let readActionTimeout: TimeInterval = 10
 
+    /// Bound on the `fetch` action's JS call. fetch downloads a whole resource
+    /// inside the page, so it gets more room than the read actions — but it
+    /// must still be bounded: an unbounded `callAsyncJavaScript` lets a page
+    /// whose fetch promise never settles pin the serial action slot forever
+    /// (same failure class as R3-169, which covered the read actions only).
+    private static let fetchTimeout: TimeInterval = 60
+
     /// Shared process pool so all tabs share cookies/sessions (needed for OAuth flows).
     static let sharedProcessPool = WKProcessPool()
 
@@ -1729,7 +1736,9 @@ final class BrowserUseManager: NSObject, ObservableObject {
 
         let rawResult: Any?
         do {
-            rawResult = try await webView.callAsyncJavaScript(js, arguments: [:], contentWorld: .page)
+            rawResult = try await callAsyncJavaScriptBounded(js, timeout: Self.fetchTimeout)
+        } catch is JSEvalTimeout {
+            return .error("JavaScript fetch timed out after \(Int(Self.fetchTimeout))s: the page did not finish the download in time.")
         } catch {
             return .error("JavaScript fetch failed: \(error.localizedDescription)")
         }
@@ -2552,7 +2561,10 @@ extension BrowserUseManager: WKDownloadDelegate {
 
             // Unique filename: name.ext, name-1.ext, name-2.ext, …
             // WKDownload requires that the destination file does not exist.
-            var name = suggestedFilename.isEmpty ? "download" : suggestedFilename
+            // suggestedFilename comes from the server (Content-Disposition) —
+            // run it through the same sanitizer as the fetch path (R3-022) so
+            // a name carrying "../" cannot write outside the session dir.
+            var name = Self.sanitizedFetchedFileName(suggestedFilename) ?? "download"
             let base = (name as NSString).deletingPathExtension
             let ext = (name as NSString).pathExtension
             var dest = dir.appendingPathComponent(name)
