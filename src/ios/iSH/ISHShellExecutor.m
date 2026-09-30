@@ -432,6 +432,9 @@ static int32_t _sweptContexts = 0;
         int real_fd = dup([ctx stdoutPipe][1]);
         if (real_fd < 0) {
             NSLog(@"ISHShellExecutor[stdout]: dup() failed: %s", strerror(errno));
+            // Close the stdin write end — nothing will ever write to it on
+            // this failure path (AE B-4).
+            if (stdinPipe[1] >= 0) { close(stdinPipe[1]); stdinPipe[1] = -1; }
             current = saved_current;
             [ctx cleanup];
             return ISHShellExecutorErrorProcessCreationFailed;
@@ -446,6 +449,7 @@ static int32_t _sweptContexts = 0;
         int real_fd = dup([ctx stderrPipe][1]);
         if (real_fd < 0) {
             NSLog(@"ISHShellExecutor[stderr]: dup() failed: %s", strerror(errno));
+            if (stdinPipe[1] >= 0) { close(stdinPipe[1]); stdinPipe[1] = -1; }
             current = saved_current;
             [ctx cleanup];
             return ISHShellExecutorErrorProcessCreationFailed;
@@ -509,6 +513,7 @@ static int32_t _sweptContexts = 0;
             const char *str = arg.UTF8String;
             size_t len = strlen(str) + 1;
             if (pos + len >= sizeof(argv_buf) - 1) {
+                if (stdinPipe[1] >= 0) { close(stdinPipe[1]); stdinPipe[1] = -1; }
                 current = saved_current;
                 [ctx cleanup];
                 NSLog(@"ISHShellExecutor: argv too long");
@@ -597,6 +602,7 @@ static int32_t _sweptContexts = 0;
     // Execute
     err = do_execve(exec_path, exec_argc, argv_buf, envp);
     if (err < 0) {
+        if (stdinPipe[1] >= 0) { close(stdinPipe[1]); stdinPipe[1] = -1; }
         current = saved_current;
         [ctx cleanup];
         NSLog(@"ISHShellExecutor: do_execve failed: %d", err);
