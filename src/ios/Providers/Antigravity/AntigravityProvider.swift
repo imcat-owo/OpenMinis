@@ -3,6 +3,21 @@ import os.log
 
 private let logger = AppLogger(category: "AntigravityProvider")
 
+/// URLSession with a long read timeout, mirroring GeminiProvider's.
+/// URLSession.shared's default timeoutIntervalForRequest (60s) can kill
+/// long-running streams, and with no timeout configured at all a stalled
+/// request could hang indefinitely; this session gives the server 10
+/// minutes of idle time before timing out.
+private let antigravitySession: URLSession = {
+    let config = URLSessionConfiguration.default
+    config.timeoutIntervalForRequest = 600  // 10 minutes
+    let session = URLSession(configuration: config)
+    // Evict this session's pooled (possibly stale) connections on network
+    // transitions — see LLMSessionRegistry / Android #740.
+    LLMSessionRegistry.shared.register(session)
+    return session
+}()
+
 /// LLMProvider implementation for Antigravity (Cloud Code) models.
 /// Routes requests through the daily-cloudcode-pa.googleapis.com endpoints
 /// using the Antigravity request envelope format.
@@ -40,7 +55,7 @@ final class AntigravityProvider: LLMProvider {
         logFullRequest(request)
         #endif
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await antigravitySession.data(for: request)
         try checkHTTPResponse(response, data: data)
 
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
@@ -69,7 +84,7 @@ final class AntigravityProvider: LLMProvider {
         logFullRequest(request)
         #endif
 
-        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        let (bytes, response) = try await antigravitySession.bytes(for: request)
         try await checkStreamHTTPResponse(response, bytes: bytes)
 
         return AsyncThrowingStream { continuation in
@@ -144,7 +159,7 @@ final class AntigravityProvider: LLMProvider {
         logFullRequest(request)
         #endif
 
-        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        let (bytes, response) = try await antigravitySession.bytes(for: request)
         try await checkStreamHTTPResponse(response, bytes: bytes)
 
         return AsyncThrowingStream { continuation in
@@ -207,7 +222,7 @@ final class AntigravityProvider: LLMProvider {
         logFullRequest(request)
         #endif
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await antigravitySession.data(for: request)
         try checkHTTPResponse(response, data: data)
 
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
