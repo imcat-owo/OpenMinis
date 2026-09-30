@@ -552,6 +552,12 @@ final class BrowserTabPool: ObservableObject {
             restoreSavedURL(for: nextId, manager: manager)
         }
         logger.info("Created new tab \(nextId), total: \(self.tabs.count)")
+        // [R3-102] Arm the same post-action grace other actions get: without
+        // it this tab's inUse stayed true forever (execute's .newTab case
+        // returns before the defer that arms grace for content actions), so
+        // idle/memory/registry eviction all skipped it and a pool of
+        // opened-but-unused tabs permanently exhausted the tab slots.
+        armPostActionGrace(tabId: nextId)
         let urlSuffix = (trimmedUrl?.isEmpty == false) ? " at \(trimmedUrl!)" : ""
         return BrowserActionResult(
             text: "Opened new tab \(nextId)\(urlSuffix). You now have \(tabs.count) tab(s). Use tab_id: \(nextId) to target this tab.",
