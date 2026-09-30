@@ -108,13 +108,10 @@ actor ISHExecutionCoordinator {
         perSessionInflight[sessionId, default: []].append(head)
         syncInflightPidSnapshot()
 
-        try Task.checkCancellation()
-
-        mountedSessionId = sessionId
-        ensureStaticMountsInitialized(for: sessionId)
-
-        let fsContext = MinisFsRouter.shared.context(for: sessionId)
-
+        // Install the dequeue defer immediately after the append (AE B-5):
+        // checkCancellation below is the one throw point in this window,
+        // and if it fires before a defer exists the entry stays in the
+        // table as a phantom until the session terminates.
         defer {
             // Dequeue self. No waiters to wake — concurrent dispatch.
             if var queue = perSessionInflight[sessionId],
@@ -124,6 +121,13 @@ actor ISHExecutionCoordinator {
                 syncInflightPidSnapshot()
             }
         }
+
+        try Task.checkCancellation()
+
+        mountedSessionId = sessionId
+        ensureStaticMountsInitialized(for: sessionId)
+
+        let fsContext = MinisFsRouter.shared.context(for: sessionId)
 
         return try await runCommand(
             sessionId: sessionId,
