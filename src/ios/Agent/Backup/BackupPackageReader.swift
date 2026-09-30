@@ -137,20 +137,68 @@ enum BackupPackageReader {
     static func forwardScan(at url: URL, maxBytes: Int = 8 * 1024 * 1024) -> [ScannedEntry] {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return [] }
         defer { try? handle.close() }
-        guard let whole = try? handle.readToEnd() else { return [] }
+        let fileSize = Int((try? handle.seekToEnd()) ?? 0)
+        try? handle.seek(toOffset: 0)
+
+        // Windowed reader: only the not-yet-consumed tail of the file is
+        // kept in memory. This used to `readToEnd()` the ENTIRE package
+        // (up to ~3.84 GB) before scanning a single byte — the bigger and
+        // more damaged the package, the more certainly rescue itself died
+        // of memory pressure before it could recover anything.
+        var window: [UInt8] = []
+        var windowBase = 0   // absolute file offset of window[0]
+
+        func fill(upTo end: Int) {
+            let target = min(end, fileSize)
+            while windowBase + window.count < target {
+                let want = min(1 << 20, target - (windowBase + window.count))
+                guard want > 0, let chunk = try? handle.read(upToCount: want), !chunk.isEmpty
+                else { break }
+                window.append(contentsOf: chunk)
+            }
+        }
+        func byte(_ abs: Int) -> UInt8? {
+            fill(upTo: abs + 1)
+            let idx = abs - windowBase
+            guard idx >= 0, idx < window.count else { return nil }
+            return window[idx]
+        }
+        func slice(_ range: Range<Int>) -> Data {
+            fill(upTo: range.upperBound)
+            let lo = max(range.lowerBound - windowBase, 0)
+            let hi = min(range.upperBound - windowBase, window.count)
+            guard lo <= hi else { return Data() }
+            return Data(window[lo..<hi])
+        }
+        func discard(before abs: Int) {
+            let n = min(abs - windowBase, window.count)
+            if n > 0 { window.removeFirst(n); windowBase += n }
+        }
+        /// Offset of the next `PK\03\04` at or after `from`, if any.
+        func nextLocalHeader(after from: Int) -> Int? {
+            var j = from
+            while j + 4 <= fileSize {
+                if byte(j) == 0x50, byte(j + 1) == 0x4B,
+                   byte(j + 2) == 0x03, byte(j + 3) == 0x04 { return j }
+                j += 1
+                if j - windowBase >= (4 << 20) { discard(before: j) }
+            }
+            return nil
+        }
 
         var out: [ScannedEntry] = []
         var i = 0
         let magic: [UInt8] = [0x50, 0x4B, 0x03, 0x04]   // PK\03\04
 
-        while i + 30 <= whole.count {
+        while i + 30 <= fileSize {
             // Find the next local header.
-            guard whole[i] == magic[0], whole[i + 1] == magic[1],
-                  whole[i + 2] == magic[2], whole[i + 3] == magic[3] else {
+            guard byte(i) == magic[0], byte(i + 1) == magic[1],
+                  byte(i + 2) == magic[2], byte(i + 3) == magic[3] else {
                 i += 1
+                if i - windowBase >= (4 << 20) { discard(before: i) }
                 continue
             }
-            let header = whole.subdata(in: i..<(i + 30))
+            let header = slice(i..<(i + 30))
             let flags = readU16(header, 6)
             let method = readU16(header, 8)
             let compSize = Int(readU32(header, 18))
@@ -159,8 +207,8 @@ enum BackupPackageReader {
             let extraLen = Int(readU16(header, 28))
 
             let nameStart = i + 30
-            guard nameLen > 0, nameStart + nameLen <= whole.count else { break }
-            let name = String(decoding: whole.subdata(in: nameStart..<(nameStart + nameLen)),
+            guard nameLen > 0, nameStart + nameLen <= fileSize else { break }
+            let name = String(decoding: slice(nameStart..<(nameStart + nameLen)),
                               as: UTF8.self)
             let dataStart = nameStart + nameLen + extraLen
 
@@ -180,10 +228,10 @@ enum BackupPackageReader {
             var payloadEnd = dataStart + compSize
             let streamed = (flags & 0x0008) != 0 && compSize == 0
             if streamed {
-                payloadEnd = Self.nextLocalHeader(in: whole, after: dataStart) ?? whole.count
+                payloadEnd = nextLocalHeader(after: dataStart) ?? fileSize
             }
 
-            guard payloadEnd > dataStart, payloadEnd <= whole.count else {
+            guard payloadEnd > dataStart, payloadEnd <= fileSize else {
                 out.append(ScannedEntry(
                     name: name, data: nil,
                     problem: name.hasSuffix("/") ? nil : "payload truncated or size unknown"))
@@ -196,7 +244,7 @@ enum BackupPackageReader {
                 out.append(ScannedEntry(name: name, data: nil,
                                         problem: "member larger than the scan limit"))
             } else {
-                let raw = whole.subdata(in: dataStart..<payloadEnd)
+                let raw = slice(dataStart..<payloadEnd)
                 if method == 0 {
                     out.append(ScannedEntry(name: name, data: raw, problem: nil))
                 } else if let inflated = try? inflate(
@@ -208,18 +256,9 @@ enum BackupPackageReader {
                 }
             }
             i = payloadEnd
+            discard(before: i)
         }
         return out
-    }
-
-    /// Offset of the next `PK\03\04` at or after `from`, if any.
-    private static func nextLocalHeader(in d: Data, after from: Int) -> Int? {
-        var j = from
-        while j + 4 <= d.count {
-            if d[j] == 0x50, d[j + 1] == 0x4B, d[j + 2] == 0x03, d[j + 3] == 0x04 { return j }
-            j += 1
-        }
-        return nil
     }
 
     private static func inflate(_ data: Data, expectedSize: Int) throws -> Data {
