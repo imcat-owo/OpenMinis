@@ -236,6 +236,11 @@ final class FileProviderEnumerator: NSObject, NSFileProviderEnumerator {
         for item in items {
             let mtime = item.contentModificationDate ?? Date.distantPast
             hash = hash &+ UInt64(bitPattern: Int64(mtime.timeIntervalSince1970 * 1000))
+            // Mix in the file size: a content swap that preserves the mtime
+            // (cp -p, touch -r, archive extraction with stored timestamps)
+            // must still change the anchor, or Files keeps showing the old
+            // content as if nothing changed.
+            hash = hash &* 31 &+ (item.documentSize?.uint64Value ?? 0)
             // Mix in the identifier to detect renames
             for byte in item.itemIdentifier.rawValue.utf8 {
                 hash = hash &* 31 &+ UInt64(byte)

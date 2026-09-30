@@ -79,7 +79,12 @@ final class FileProviderItem: NSObject, NSFileProviderItem {
 
     var itemVersion: NSFileProviderItemVersion {
         let modDate = (attrs?[.modificationDate] as? Date) ?? Date()
-        let stamp = "\(modDate.timeIntervalSince1970)".data(using: .utf8) ?? Data()
+        // Include the size alongside the mtime: a same-timestamp content
+        // replacement (cp -p / touch -r / timestamp-preserving extraction)
+        // must still read as a new version, or Files treats the item as
+        // unchanged and keeps serving the old content.
+        let size = (attrs?[.size] as? UInt64) ?? 0
+        let stamp = "\(modDate.timeIntervalSince1970)-\(size)".data(using: .utf8) ?? Data()
         return NSFileProviderItemVersion(contentVersion: stamp, metadataVersion: stamp)
     }
 
