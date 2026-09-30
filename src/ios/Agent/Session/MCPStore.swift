@@ -280,6 +280,19 @@ final class MCPStore: ObservableObject {
         servers = readServersFromDisk()
     }
 
+    /// Names of every entry present in the on-disk `mcpServers` map —
+    /// including entries that fail to decode and are therefore skipped by
+    /// `readServersFromDisk`. Returns nil when the file can't be read or
+    /// parsed at all; callers must not infer deletions from a nil result.
+    private func rawServerNamesOnDisk() -> Set<String>? {
+        guard let data = try? Data(contentsOf: serversFileURL),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let rawServers = root["mcpServers"] as? [String: Any] else {
+            return nil
+        }
+        return Set(rawServers.keys)
+    }
+
     private func readServersFromDisk() -> [MCPServerConfig] {
         guard let data = try? Data(contentsOf: serversFileURL) else {
             AppLogger(category: "MCPStore").info("[Load] no servers.json at \(serversFileURL.path)")
@@ -918,7 +931,16 @@ final class MCPStore: ObservableObject {
             changed.append(s.id)
         }
         let liveNames = Set(servers.map(\.id))
-        let removed = fp.keys.filter { !liveNames.contains($0) }
+        // "Removed" must mean absent from the FILE, not merely absent from
+        // the decoded list: an entry that fails to decode is skipped by
+        // load() but is still on disk — treating it as deleted would
+        // broadcast an op=delete (and an OAuth purge on receiving devices)
+        // for a server that was never removed. If the file can't be parsed
+        // at all, infer no removals this scan.
+        let onDiskNames = rawServerNamesOnDisk()
+        let removed = fp.keys.filter { name in
+            !liveNames.contains(name) && !(onDiskNames?.contains(name) ?? true)
+        }
         for name in removed { fp.removeValue(forKey: name) }
         guard !changed.isEmpty || !removed.isEmpty else { return }
         if stamped { save() }
