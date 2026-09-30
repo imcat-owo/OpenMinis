@@ -71,7 +71,7 @@ static NSString *const HELP_TEXT =
      "                  Prefer --cookies-file: the JSON's quotes/braces survive\n"
      "                  the shell intact — write the array to a temp file first.\n"
      "  scroll_and_collect --scroll-count <n> --item-selector <css> --keywords <list>\n"
-     "  wait_for_dom_stable [--timeout <ms>]\n"
+     "  wait_for_dom_stable [--timeout <seconds>]\n"
      "\n"
      "COMMON OPTIONS:\n"
      "  --tab-id <n>     Route the action to a specific tab (default: active tab)\n"
@@ -320,12 +320,25 @@ static int browser_use_handler(int argc, char **argv,
         dispatch_semaphore_signal(sem);
     }];
     // Navigation alone allows up to 30s; screenshot + snapshot can add more.
-    // Give the bridge a generous window.
-    long waitErr = dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 90 * NSEC_PER_SEC));
+    // Give the bridge a generous window. The window must also cover the
+    // action's own --timeout (SECONDS — the same unit the tool schema and the
+    // implementation use): a legitimate wait_for_dom_stable --timeout 120
+    // runs 120s in-app, and reporting failure at a fixed 90s while the action
+    // keeps occupying the tab's serial slot makes the caller's retry collide
+    // with the still-running original. Cap at the pool's 300s dead ceiling
+    // plus the same overhead margin.
+    long waitSeconds = 90;
+    NSNumber *actionTimeout = inputDict[@"timeout"];
+    if ([actionTimeout isKindOfClass:[NSNumber class]]) {
+        long t = actionTimeout.longValue;
+        if (t + 60 > waitSeconds) waitSeconds = t + 60;
+        if (waitSeconds > 360) waitSeconds = 360;
+    }
+    long waitErr = dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, waitSeconds * NSEC_PER_SEC));
     if (waitErr != 0 || resultDict == nil) {
         NSDictionary *err = noff_json_error(TOOL_NAME, @"execute",
                                             NOFF_ERR_INTERNAL_ERROR,
-                                            @"browser action timed out after 90s");
+                                            [NSString stringWithFormat:@"browser action timed out after %lds", waitSeconds]);
         noff_emit_json(stdout_fd, err, compact, quiet);
         return NOFF_EXIT_ERROR;
     }
