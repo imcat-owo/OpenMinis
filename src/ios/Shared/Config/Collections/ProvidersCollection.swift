@@ -246,6 +246,15 @@ struct ProvidersCollection: ConfigCollection {
             },
             writer: { [self] v in
                 guard case .string(let s) = v else { throw ConfigError.typeMismatch(expected: "string") }
+                // Same two rules as `add`: a label that is blank after trimming
+                // is refused, and no two instances may share a label. The .string
+                // schema only bounds length, so both slipped through here.
+                guard !s.trimmingCharacters(in: .whitespaces).isEmpty else {
+                    throw ConfigError.invalidValue("`label` is required")
+                }
+                if ProviderConfigStore.shared.config.instances.contains(where: { $0.id != id && $0.label == s }) {
+                    throw ConfigError.invalidValue("A provider labelled \"\(s)\" already exists")
+                }
                 try mutate(id) { $0.label = s }
             }
         )
