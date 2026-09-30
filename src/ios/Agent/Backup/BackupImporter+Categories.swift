@@ -16,6 +16,10 @@ struct BackupRollbackSnapshot {
     /// live file → saved copy, for categories backed by a single file rather
     /// than a tree (provider-config.json).
     var files: [(live: URL, saved: URL)] = []
+
+    /// True when nothing was captured, so a rollback would be a no-op and
+    /// must not be reported as one having happened.
+    var isEmpty: Bool { directories.isEmpty && files.isEmpty }
 }
 
 extension BackupImporter {

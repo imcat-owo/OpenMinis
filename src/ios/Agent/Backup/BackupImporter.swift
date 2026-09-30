@@ -253,7 +253,12 @@ actor BackupImporter {
                 var cat = CategoryReport(category: category.rawValue)
                 cat.failed = error.localizedDescription
                 report.categories.append(cat)
-                if let snapshot, (try? rollback(snapshot)) != nil {
+                // Only claim a rollback when the snapshot actually held
+                // something to restore. Categories without a snapshot
+                // (chats, skills, environment variables, …) fail before or
+                // without writing, and reporting "Rolled back" for the
+                // no-op would tell the user an undo happened that didn't.
+                if let snapshot, !snapshot.isEmpty, (try? rollback(snapshot)) != nil {
                     report.rolledBack.append(category.rawValue)
                 }
                 // §8.3: a failed category does not abort the ones already done.
