@@ -184,15 +184,25 @@ struct ProvidersCollection: ConfigCollection {
                 guard case .string(let raw) = v else {
                     throw ConfigError.typeMismatch(expected: "string")
                 }
-                guard instance(id) != nil else { throw ConfigError.unknownPath("providers.\(id)") }
+                guard let inst = instance(id) else { throw ConfigError.unknownPath("providers.\(id)") }
+                // Non-OpenRouter OAuth instances never read this keychain slot —
+                // their request paths authenticate via the OAuth token, so saving a
+                // key here would report success while changing nothing. OpenRouter
+                // is the exception: its OAuth credential IS stored in this slot.
+                if inst.credentialType == .oauth && inst.providerType != .openRouter {
+                    throw ConfigError.invalidValue(
+                        "This instance signs in with OAuth — an API key saved here would never be used. Use OAuth sign-in, or create an API-key instance instead.")
+                }
                 let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else {
                     throw ConfigError.invalidValue("API key cannot be empty")
                 }
                 let resolved = try Self.resolveSecret(trimmed)
                 ProviderKeychainHelper.saveAPIKey(resolved, instanceId: id)
-                // Keep the instance's credentialType consistent with having a key.
-                try? mutate(id) { _ in }   // touch → updateInstance persists/notifies
+                // Touch → updateInstance persists/notifies. (credentialType is a
+                // `let` and cannot be adjusted here; the guard above rejects the
+                // one combination where a key would be meaningless.)
+                try? mutate(id) { _ in }
             }
         )
     }
