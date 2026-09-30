@@ -317,7 +317,7 @@ actor BackupExporter {
             try await exportSkills(dataDir: dataDir, trees: trees)
         }
         try await run(.memory, AppLocalized("Exporting memory…")) {
-            try exportMemory(dataDir: dataDir)
+            try exportMemory(dataDir: dataDir, snapshotAt: options.snapshotAt)
         }
         try await run(.providers, AppLocalized("Exporting providers…")) {
             try await exportProviders(dataDir: dataDir, staging: staging,
@@ -770,7 +770,14 @@ actor BackupExporter {
     /// Note this deliberately does NOT reuse the sync hydrator's daily-memory
     /// path: that one drops anything older than 30 days, which is correct for
     /// sync traffic and wrong for a full backup.
-    private func exportMemory(dataDir: URL) throws -> BackupManifest.CategoryStat {
+    ///
+    /// Snapshot discipline matches chats: the package is a picture of
+    /// `snapshotAt`, so a file whose content changed after that instant does
+    /// not belong in it, and a copy staged by an earlier attempt IS the
+    /// snapshot-time content — a resume must never overwrite it with whatever
+    /// the live file has become since.
+    private func exportMemory(dataDir: URL, snapshotAt: Date) throws
+        -> BackupManifest.CategoryStat {
         let src = AIChatViewModel.minisMemoryPersistentDir
         let dst = dataDir.appendingPathComponent("memory", isDirectory: true)
         try fm.createDirectory(at: dst, withIntermediateDirectories: true)
@@ -783,7 +790,14 @@ actor BackupExporter {
             guard (try? from.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
             else { continue }
             let to = dst.appendingPathComponent(name)
-            try? fm.removeItem(at: to)
+            if fm.fileExists(atPath: to.path) {
+                count += 1
+                bytes += (try? fm.attributesOfItem(atPath: to.path)[.size] as? Int64) ?? 0
+                continue
+            }
+            let mtime = (try? from.resourceValues(
+                forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            if let mtime, mtime > snapshotAt { continue }
             try fm.copyItem(at: from, to: to)
             count += 1
             bytes += (try? fm.attributesOfItem(atPath: from.path)[.size] as? Int64) ?? 0
