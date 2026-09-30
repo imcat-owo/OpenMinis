@@ -2608,6 +2608,25 @@ extension BrowserUseManager: WKDownloadDelegate {
             logger.info("🛑 Download cancelled by user: \(dest.lastPathComponent) — partial file removed")
         }
     }
+
+    /// Tab teardown (close / evict / preempt / dead-tab rebuild): the pool is
+    /// about to drop this manager, which is the only strong owner AND the
+    /// (weakly-held) delegate of its WKDownloads. Without an explicit
+    /// terminal write here, no downloadDidFinish/didFailWithError will ever
+    /// fire again and the download-center entry stays `downloading` forever.
+    /// Cancel every in-flight download and record the terminal state the
+    /// delegate callback can no longer deliver.
+    func cancelAllInflightDownloadsForTeardown() {
+        guard !inflightDownloads.isEmpty else { return }
+        logger.info("Cancelling \(inflightDownloads.count) in-flight download(s) — tab going away")
+        for download in Array(inflightDownloads.values) {
+            let key = ObjectIdentifier(download)
+            if let entryId = downloadCenterIds[key] {
+                BrowserDownloadCenter.shared.failed(id: entryId, reason: "Tab closed before the download finished")
+            }
+            cancelDownload(download)
+        }
+    }
 }
 
 // MARK: - WKUIDelegate (target="_blank" / window.open)

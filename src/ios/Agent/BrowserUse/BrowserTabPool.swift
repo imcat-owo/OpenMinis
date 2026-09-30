@@ -537,6 +537,9 @@ final class BrowserTabPool: ObservableObject {
         }
         // Don't save URL on explicit close — user intentionally closed it
         savedURLs.removeValue(forKey: id)
+        // Terminate any in-flight downloads before the manager goes away —
+        // otherwise their download-center entries stick at `downloading`.
+        tabs[idx].manager.cancelAllInflightDownloadsForTeardown()
         tabs.remove(at: idx)
         logger.info("Closed tab \(id), remaining: \(self.tabs.count)")
 
@@ -1141,6 +1144,7 @@ final class BrowserTabPool: ObservableObject {
         // slot in the registry, which counts live tabs directly (no separate
         // release call). Stash the last-known URL for the model.
         let deadURL = tabs.first(where: { $0.id == oldId })?.manager.currentURL ?? ""
+        tabs.first(where: { $0.id == oldId })?.manager.cancelAllInflightDownloadsForTeardown()
         tabs.removeAll { $0.id == oldId }
         if selectedTabId == oldId { selectedTabId = tabs.first?.id ?? 0 }
 
@@ -1237,6 +1241,7 @@ final class BrowserTabPool: ObservableObject {
                 if !url.isEmpty {
                     savedURLs[tab.id] = url
                 }
+                tab.manager.cancelAllInflightDownloadsForTeardown()
                 logger.info("Evicting idle tab \(tab.id) (idle \(String(format: "%.0f", idle))s, url=\(url.prefix(60)))")
                 evicted += 1
                 return true
@@ -1266,6 +1271,7 @@ final class BrowserTabPool: ObservableObject {
         if !url.isEmpty {
             savedURLs[id] = url
         }
+        tab.manager.cancelAllInflightDownloadsForTeardown()
         tabs.remove(at: idx)
         if selectedTabId == id {
             selectedTabId = tabs.first?.id ?? 0
@@ -1289,6 +1295,7 @@ final class BrowserTabPool: ObservableObject {
             savedURLs[id] = url
         }
         tab.manager.stopLoading()
+        tab.manager.cancelAllInflightDownloadsForTeardown()
         tabs.remove(at: idx)
         preemptedTabIds.insert(id)
         if selectedTabId == id {
@@ -1308,6 +1315,7 @@ final class BrowserTabPool: ObservableObject {
             if !url.isEmpty {
                 savedURLs[tab.id] = url
             }
+            tab.manager.cancelAllInflightDownloadsForTeardown()
             evicted += 1
             return true
         }
