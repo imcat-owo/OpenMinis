@@ -125,6 +125,29 @@ extension AIChatViewModel {
         return needles.contains { text.contains($0) }
     }
 
+    /// [API-9] Heuristic: does this error read like the provider rejected a
+    /// thinking/reasoning PARAMETER it doesn't know — as opposed to a bad
+    /// value, an auth failure, or a quota stop? Deliberately requires BOTH a
+    /// thinking-ish token AND a rejection-ish token (or the verbatim
+    /// `enable_thinking` name), so ordinary 400s (context length, content
+    /// policy, malformed messages) never trigger the strip-retry. Wording
+    /// covered: OpenAI-style validators ("Unknown parameter:
+    /// 'enable_thinking'", "Additional properties are not allowed"),
+    /// Anthropic ("thinking: Extra inputs are not permitted"), Gemini
+    /// ("Unknown name \"thinkingConfig\""), and relay paraphrases.
+    static func errorImplicatesUnknownThinkingParam(_ error: Error) -> Bool {
+        let text = ((error as? LLMError)?.errorDescription ?? error.localizedDescription).lowercased()
+        if text.contains("enable_thinking") { return true }
+        let thinkingTokens = ["thinking", "reasoning_effort", "reasoning effort", "reasoning"]
+        let rejectionTokens = [
+            "unknown", "unrecognized", "unrecognised", "unsupported",
+            "not allowed", "not permitted", "extra inputs", "additional properties",
+            "invalid parameter", "invalid argument",
+        ]
+        return thinkingTokens.contains { text.contains($0) }
+            && rejectionTokens.contains { text.contains($0) }
+    }
+
     /// Resolve the entry and open a stream. This is the entry point for EVERY
     /// LLM request in the agent loop — it tries the current entry first and
     /// returns its stream on success. The `🔀ROUTE start → success with original
@@ -161,6 +184,21 @@ extension AIChatViewModel {
         // offending bytes to every member.
         var effectiveMessages = messages
         var didStripImagesForRetry = false
+        // [API-9] Same idea for thinking parameters: when a provider 400s
+        // over a thinking/reasoning parameter it doesn't know (the Groq
+        // `enable_thinking` case — a fallback member whose rule-table entry
+        // doesn't cover the shape this relay actually accepts), retry ONCE
+        // on the same entry with thinking forced off instead of re-sending
+        // the identical rejected parameter to every group member in turn.
+        // `thinkingOverride` is scoped to the entry that rejected the
+        // parameter (other members resolve their own thinking shape and
+        // keep it); `lastAttemptThinkingLevel` mirrors what the most
+        // recent attempt actually sent (the catch blocks can't see the
+        // do-scope local).
+        var thinkingOverride: ThinkingLevel? = nil
+        var thinkingOverrideEntryId: String? = nil
+        var strippedThinkingEntries: Set<String> = []
+        var lastAttemptThinkingLevel: ThinkingLevel = .off
 
         do {
             let _aeid = activeEntryId; let _agid = activeGroupId
@@ -186,6 +224,11 @@ extension AIChatViewModel {
                 if let eid = currentEntryId, let entry = ProviderConfigStore.shared.entry(for: eid) {
                     thinkLvl = min(thinkLvl, entry.effectiveMaxThinkingLevel)
                 }
+                // [API-9] A previous attempt's self-heal wins over the
+                // session level — but only for the entry that rejected the
+                // parameter; a different member keeps its own thinking.
+                if let thinkingOverride, thinkingOverrideEntryId == currentEntryId { thinkLvl = thinkingOverride }
+                lastAttemptThinkingLevel = thinkLvl
                 let stream = try await currentProvider.streamAgentMessage(
                     messages: effectiveMessages,
                     systemPrompt: currentSystemPrompt,
@@ -235,6 +278,22 @@ extension AIChatViewModel {
                     didStripImagesForRetry = true
                     effectiveMessages = AgentMessage.replacingImagesWithPlaceholders(effectiveMessages)
                     logger.error("🔀ROUTE entry=\(currentEntryId ?? "nil") image-implicated error — stripped image payloads, retrying same entry once: \(error.localizedDescription)")
+                    continue
+                }
+                // [API-9] Thinking-parameter self-heal, BEFORE any group
+                // advance and before the rate-limit rethrow: the provider
+                // rejected a thinking parameter it doesn't know while this
+                // attempt actually sent thinking. Force thinking off for
+                // THIS entry and retry it once; advancing first would send
+                // the same unknown parameter shape down the whole group
+                // (the Groq fallback death in the field report).
+                if !strippedThinkingEntries.contains(currentEntryId ?? ""),
+                   lastAttemptThinkingLevel != .off,
+                   Self.errorImplicatesUnknownThinkingParam(error) {
+                    strippedThinkingEntries.insert(currentEntryId ?? "")
+                    thinkingOverride = .off
+                    thinkingOverrideEntryId = currentEntryId
+                    logger.error("🔀ROUTE entry=\(currentEntryId ?? "nil") unknown-thinking-param error — stripped thinking params, retrying same entry once: \(error.localizedDescription)")
                     continue
                 }
                 // [T-kelivo-retry 09-10] Rate limits no longer switch models
@@ -307,6 +366,17 @@ extension AIChatViewModel {
                     didStripImagesForRetry = true
                     effectiveMessages = AgentMessage.replacingImagesWithPlaceholders(effectiveMessages)
                     logger.error("🔀ROUTE entry=\(currentEntryId ?? "nil") image-implicated error (generic) — stripped image payloads, retrying same entry once: \(error.localizedDescription)")
+                    continue
+                }
+                // [API-9] Same thinking-parameter self-heal for generic
+                // throws (some providers surface the 400 outside LLMError).
+                if !strippedThinkingEntries.contains(currentEntryId ?? ""),
+                   lastAttemptThinkingLevel != .off,
+                   Self.errorImplicatesUnknownThinkingParam(error) {
+                    strippedThinkingEntries.insert(currentEntryId ?? "")
+                    thinkingOverride = .off
+                    thinkingOverrideEntryId = currentEntryId
+                    logger.error("🔀ROUTE entry=\(currentEntryId ?? "nil") unknown-thinking-param error (generic) — stripped thinking params, retrying same entry once: \(error.localizedDescription)")
                     continue
                 }
                 // Check if group uses "always" fallback strategy — if so, treat all
