@@ -167,6 +167,10 @@ enum LLMProviderFactory {
                 model: model
             )
             provider.codexAccountId = CodexOAuthManager.shared.accountId(instanceId: iid)
+            // [T-thinking-rules-phase2] Same binding configure() applies on the
+            // apiKey/manual-token branches — without it this instance's
+            // user-authored thinking rules silently never load.
+            provider.providerInstanceId = instance.id
             return provider
         }
     }
@@ -186,6 +190,7 @@ enum LLMProviderFactory {
             "X-Title": "我的小家 App",
         ]
         provider.useOpenRouterCompat = true
+        provider.providerInstanceId = instance.id
         return applyCustomUserAgent(provider, instance: instance)
     }
 
@@ -203,11 +208,13 @@ enum LLMProviderFactory {
             let key = ProviderKeychainHelper.loadAPIKey(instanceId: instance.id) ?? ""
             let provider = OpenAIProvider(apiKey: key, model: model, customBaseURL: customBase, appendV1Suffix: appendV1)
             provider.forceResponsesAPI = true
+            provider.providerInstanceId = instance.id
             return applyAzure(applyCustomUserAgent(provider, instance: instance), instance: instance)
         case .oauth:
             if let manualToken = ProviderKeychainHelper.loadOAuthString(instanceId: instance.id, account: "manual-oauth-token") {
                 let provider = OpenAIProvider(apiKey: manualToken, model: model, customBaseURL: customBase, appendV1Suffix: appendV1)
                 provider.forceResponsesAPI = true
+                provider.providerInstanceId = instance.id
                 return applyCustomUserAgent(provider, instance: instance)
             }
             let iid = instance.id
@@ -219,6 +226,7 @@ enum LLMProviderFactory {
             provider.appendV1Suffix = appendV1
             provider.forceResponsesAPI = true
             provider.codexAccountId = CodexOAuthManager.shared.accountId(instanceId: iid)
+            provider.providerInstanceId = instance.id
             return provider
         }
     }
@@ -237,7 +245,9 @@ enum LLMProviderFactory {
         switch instance.credentialType {
         case .apiKey:
             let key = ProviderKeychainHelper.loadAPIKey(instanceId: instance.id) ?? ""
-            return applyCustomUserAgent(OpenAIProvider(apiKey: key, model: model, customBaseURL: customBase, appendV1Suffix: appendV1), instance: instance)
+            let provider = OpenAIProvider(apiKey: key, model: model, customBaseURL: customBase, appendV1Suffix: appendV1)
+            provider.providerInstanceId = instance.id
+            return applyCustomUserAgent(provider, instance: instance)
         case .oauth:
             let iid = instance.id
             let provider = OpenAIProvider(
@@ -246,6 +256,7 @@ enum LLMProviderFactory {
             )
             provider.customBaseURL = customBase
             provider.appendV1Suffix = appendV1
+            provider.providerInstanceId = instance.id
             return provider
         }
     }
@@ -257,10 +268,14 @@ enum LLMProviderFactory {
         switch instance.credentialType {
         case .apiKey:
             let key = ProviderKeychainHelper.loadAPIKey(instanceId: instance.id) ?? ""
-            return applyCustomUserAgent(OpenAIProvider(apiKey: key, model: model, customBaseURL: customBase, appendV1Suffix: appendV1), instance: instance)
+            let provider = OpenAIProvider(apiKey: key, model: model, customBaseURL: customBase, appendV1Suffix: appendV1)
+            provider.providerInstanceId = instance.id
+            return applyCustomUserAgent(provider, instance: instance)
         case .oauth:
             if let manualToken = ProviderKeychainHelper.loadOAuthString(instanceId: instance.id, account: "manual-oauth-token") {
-                return applyCustomUserAgent(OpenAIProvider(apiKey: manualToken, model: model, customBaseURL: customBase, appendV1Suffix: appendV1), instance: instance)
+                let provider = OpenAIProvider(apiKey: manualToken, model: model, customBaseURL: customBase, appendV1Suffix: appendV1)
+                provider.providerInstanceId = instance.id
+                return applyCustomUserAgent(provider, instance: instance)
             }
             let iid = instance.id
             let provider = OpenAIProvider(
@@ -269,6 +284,7 @@ enum LLMProviderFactory {
             )
             provider.customBaseURL = customBase
             provider.appendV1Suffix = appendV1
+            provider.providerInstanceId = instance.id
             return provider
         }
     }
