@@ -157,6 +157,19 @@ final class CacheKeepAliveManager {
                 logger.warning("🔥 cache keep-alive: LOW cache hit — cache_create(\(cacheCreate)) >= cache_read(\(cacheRead)). The prefix may have changed or cache already expired.")
             }
 
+            // The success path needs the same chain check handleFailure
+            // already does: while this warmup was in flight, a newer real
+            // request may have replaced the session state (recordRequest
+            // installs a fresh state with a new timer). A late success from
+            // the OLD chain must not clear the new chain's failure count
+            // nor invalidate/reschedule its timer — rescheduling from the
+            // stale completion time can push the new chain's next warmup
+            // past the cache TTL.
+            guard sessions[sessionId]?.lastRequestTime == chainLastRequestTime else {
+                logger.info("🔥 cache keep-alive: warmup succeeded for a superseded chain — leaving the current chain's state untouched session=\(sessionId.prefix(8))")
+                return
+            }
+
             // A successful warmup clears the consecutive-failure count.
             if var state = sessions[sessionId], state.consecutiveFailures != 0 {
                 state.consecutiveFailures = 0
