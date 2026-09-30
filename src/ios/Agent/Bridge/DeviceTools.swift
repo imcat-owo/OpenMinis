@@ -11,5 +11,6 @@ import BridgeCore
 enum DeviceTools {
     static func registerAll(into registry: ToolRegistry) async throws {
         try await ClipboardDeviceTool.register(into: registry)
+        try await LocationDeviceTool.register(into: registry)
     }
 }
