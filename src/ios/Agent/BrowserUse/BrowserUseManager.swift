@@ -1748,9 +1748,10 @@ final class BrowserUseManager: NSObject, ObservableObject {
         if let cdFilename = Self.parseContentDispositionFilename(contentDisposition) {
             let timestamp = Int(Date().timeIntervalSince1970)
             filename = "\(timestamp)_\(cdFilename)"
-        } else if let urlObj = URL(string: finalURL), !urlObj.lastPathComponent.isEmpty, urlObj.lastPathComponent != "/" {
+        } else if let urlObj = URL(string: finalURL),
+                  let urlName = Self.sanitizedFetchedFileName(urlObj.lastPathComponent) {
             let timestamp = Int(Date().timeIntervalSince1970)
-            filename = "\(timestamp)_\(urlObj.lastPathComponent)"
+            filename = "\(timestamp)_\(urlName)"
         } else {
             let ext = Self.extensionForMimeType(contentType)
             filename = "fetch_\(Int(Date().timeIntervalSince1970)).\(ext)"
@@ -1791,10 +1792,23 @@ final class BrowserUseManager: NSObject, ObservableObject {
                match.numberOfRanges > 1,
                let range = Range(match.range(at: 1), in: cd) {
                 let name = String(cd[range]).removingPercentEncoding ?? String(cd[range])
-                if !name.isEmpty { return name }
+                if let safe = Self.sanitizedFetchedFileName(name) { return safe }
             }
         }
         return nil
+    }
+
+    /// A server-supplied filename is a NAME, never a path: the
+    /// percent-decoded Content-Disposition value (and a URL's last path
+    /// component) can contain "/" — "%2e%2e%2f" decodes to "../" — and
+    /// every persistence call site appends this name to a directory and
+    /// writes there. Keep only the final path component; reject names
+    /// that reduce to nothing or to a dot path.
+    private static func sanitizedFetchedFileName(_ raw: String) -> String? {
+        let last = (raw as NSString).lastPathComponent
+            .trimmingCharacters(in: .whitespaces)
+        guard !last.isEmpty, last != ".", last != ".." else { return nil }
+        return last
     }
 
     /// Map common MIME types to file extensions.
