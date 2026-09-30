@@ -2563,14 +2563,14 @@ static BOOL resolveCategoryValue(NSDictionary *info, NSString *valueStr, NSInteg
         return YES;
     }
 
-    // Try exact string match first
     NSString *lower = [valueStr lowercaseString];
-    for (NSUInteger i = 0; i < validValues.count; i++) {
-        if ([[validValues[i] lowercaseString] isEqualToString:lower]) {
-            *outValue = (NSInteger)i;
-            return YES;
-        }
-    }
+
+    // NOTE: the declared value list's INDEX is not the HK enum value for
+    // most types (severity "mild" is index 1 but HKCategoryValueSeverityMild
+    // is 2; pregnancy "positive" is index 1 but the Positive enum is 2;
+    // sleep stages are rotated outright). Named values therefore resolve
+    // through the per-type maps below FIRST; the index is only a last-resort
+    // fallback after them, for unmapped types declared in enum order.
 
     // Try integer value
     NSInteger intVal = [valueStr integerValue];
@@ -2743,6 +2743,16 @@ static BOOL resolveCategoryValue(NSDictionary *info, NSString *valueStr, NSInteg
     if (mapped) {
         *outValue = [mapped integerValue];
         return YES;
+    }
+
+    // Last resort: exact string match against the declared list, valued by
+    // index (see note at the top of this function — only sound for unmapped
+    // types whose value list is declared in enum order).
+    for (NSUInteger i = 0; i < validValues.count; i++) {
+        if ([[validValues[i] lowercaseString] isEqualToString:lower]) {
+            *outValue = (NSInteger)i;
+            return YES;
+        }
     }
 
     *outError = [NSString stringWithFormat:@"Invalid --value '%@'. Valid values: %@",
