@@ -505,7 +505,7 @@ struct ToolLiveSheet: View {
                 if let pool = browserPool {
                     BrowserSheetView(pool: pool,
                                      isAgentBusy: pool.isAgentBrowsing,
-                                     onTakeover: {
+                                     onTakeover: onBrowserTakeover == nil ? nil : {
                                          onBrowserTakeover?()
                                          takeoverMode = true
                                      },
