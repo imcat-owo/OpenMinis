@@ -225,13 +225,24 @@ final class AudioSessionCoordinator {
     /// Set by subsystems so the coordinator can resume them after an interruption.
     var onInterruptionEnded: (() -> Void)?
 
-    /// True while TTS was paused by us because external audio took priority
-    /// (interruption or secondary-audio-silence hint). Guards the resume so we
-    /// never resume playback the USER paused.
-    private var pausedByExternalAudio = false
+    /// Independent external-audio conditions that can each hold the TTS
+    /// pause. The silence-hint NOTIFICATION and the route-change poll of
+    /// `secondaryAudioShouldBeSilencedHint` are two deliveries of the SAME
+    /// condition, so they share one token; a system interruption is a
+    /// genuinely separate condition with its own begin/end pair.
+    private enum ExternalAudioSource {
+        case interruption
+        case secondarySilence
+    }
+
+    /// Sources currently holding the external-audio pause. TTS resumes only
+    /// when this empties: previously a single shared Bool let ANY source's
+    /// end clear every other source's pause (e.g. a phone call ending
+    /// resumed TTS while another app still held the mic).
+    private var externalAudioSources: Set<ExternalAudioSource> = []
     /// Whether the user had already paused cloud TTS before the external-audio
-    /// latch. Recorded at latch time so the matching resume can leave a
-    /// user-owned pause alone instead of undoing it.
+    /// latch. Recorded when the FIRST source latches so the matching resume
+    /// can leave a user-owned pause alone instead of undoing it.
     private var userPausedBeforeExternalAudio = false
 
     private func registerInterruptionObserver() {
@@ -268,9 +279,9 @@ final class AudioSessionCoordinator {
     @objc private func handleRouteChange(_ note: Notification) {
         let shouldSilence = AVAudioSession.sharedInstance().secondaryAudioShouldBeSilencedHint
         if shouldSilence {
-            pauseTTSForExternalAudio(reason: "route-change(secondary-silence)")
+            pauseTTSForExternalAudio(reason: "route-change(secondary-silence)", source: .secondarySilence)
         } else {
-            resumeTTSAfterExternalAudio(reason: "route-change(secondary-clear)")
+            resumeTTSAfterExternalAudio(reason: "route-change(secondary-clear)", source: .secondarySilence)
         }
     }
 
@@ -278,30 +289,36 @@ final class AudioSessionCoordinator {
     /// another app) needs to dominate. `pause()` keeps the synthesis queue so
     /// playback can pick up where it left off — deliberately NOT stopAll().
     ///
-    /// The intent flag `pausedByExternalAudio` is latched INDEPENDENTLY of the
+    /// The pause intent is latched INDEPENDENTLY of the
     /// player's physical `isPaused`: an external recording frequently stops our
     /// AVAudioPlayer BEFORE the pause signal arrives, so at this point there may
     /// be no live player to physically pause — but we still must remember that
     /// WE own the pause, or the matching `.end` won't resume. `pause()` now
     /// latches `isPaused` even with no live player and gates `pumpPlayback`, so
     /// the queue can't sneak a unit out under the recorder.
-    private func pauseTTSForExternalAudio(reason: String) {
-        // Idempotent: repeated BEGIN signals (interruption + secondary-hint can
-        // both fire) must not clear an already-recorded pause intent.
-        guard !pausedByExternalAudio else { return }
+    private func pauseTTSForExternalAudio(reason: String, source: ExternalAudioSource) {
+        // Idempotent per source: repeated BEGIN signals from the same source
+        // must not re-record (and thereby clear) the pause intent.
+        guard !externalAudioSources.contains(source) else { return }
+        let isFirstSource = externalAudioSources.isEmpty
+        externalAudioSources.insert(source)
+        guard isFirstSource else { return }
         // Record whether the USER already paused before we latch — the matching
         // resume must not undo a user-owned pause (cloud TTS only; System
         // AVSpeechSynthesizer is not driven through this player).
         userPausedBeforeExternalAudio = VoiceOutputPlayer.shared.isPaused
-        pausedByExternalAudio = true
         VoiceOutputPlayer.shared.pause()
         logger.info("[AudioSession] \(reason) → TTS paused (external audio)")
     }
 
-    /// Resume reply TTS if (and only if) WE paused it for external audio.
-    private func resumeTTSAfterExternalAudio(reason: String) {
-        guard pausedByExternalAudio else { return }
-        pausedByExternalAudio = false
+    /// Resume reply TTS if (and only if) WE paused it for external audio and
+    /// every source that latched the pause has released it.
+    private func resumeTTSAfterExternalAudio(reason: String, source: ExternalAudioSource) {
+        guard externalAudioSources.remove(source) != nil else { return }
+        guard externalAudioSources.isEmpty else {
+            logger.info("[AudioSession] \(reason) → TTS stays paused (other external audio still active)")
+            return
+        }
         let wasUserPaused = userPausedBeforeExternalAudio
         userPausedBeforeExternalAudio = false
         guard !wasUserPaused else {
@@ -322,11 +339,11 @@ final class AudioSessionCoordinator {
             // Previously we only flagged the session inactive; the TTS queue
             // kept "playing" into a dead session. Pause it so the queue
             // survives and can resume when the interruption ends.
-            pauseTTSForExternalAudio(reason: "interruption-began")
+            pauseTTSForExternalAudio(reason: "interruption-began", source: .interruption)
         case .ended:
             logger.info("[AudioSession] interruption ended → re-asserting")
             apply(reason: "interruption-ended")
-            resumeTTSAfterExternalAudio(reason: "interruption-ended")
+            resumeTTSAfterExternalAudio(reason: "interruption-ended", source: .interruption)
             onInterruptionEnded?()
         @unknown default:
             break
@@ -339,10 +356,10 @@ final class AudioSessionCoordinator {
         switch type {
         case .begin:
             logger.info("[AudioSession] silence-secondary-audio hint BEGIN")
-            pauseTTSForExternalAudio(reason: "secondary-audio-hint")
+            pauseTTSForExternalAudio(reason: "secondary-audio-hint", source: .secondarySilence)
         case .end:
             logger.info("[AudioSession] silence-secondary-audio hint END")
-            resumeTTSAfterExternalAudio(reason: "secondary-audio-hint-end")
+            resumeTTSAfterExternalAudio(reason: "secondary-audio-hint-end", source: .secondarySilence)
         @unknown default:
             break
         }
