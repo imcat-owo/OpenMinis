@@ -878,7 +878,18 @@ final class ICloudSharedZoneTransport: NSObject, SyncTransport {
                 continue
             }
         }
-        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.recentFetchLastKey)
+        // Advance the shared fast-path cursor ONLY on a fully clean run.
+        // The cursor is global but failures are per-type: advancing after a
+        // partial failure shrinks every failed type's next-run window to
+        // max(lastTs - 300, now - 24h) — the 5-minute slack is all it gets,
+        // and older changes are permanently skipped on this channel. The
+        // config-type anchoring below already refuses to advance past a
+        // type in `typesWithError`; the global cursor follows the same rule.
+        if fetchHadError {
+            logger.warning("[iCloudTrace] fetchRecentV2 NOT advancing recent-fetch cursor — errored types: \(typesWithError.sorted().joined(separator: ",")); their windows stay open for the next run")
+        } else {
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.recentFetchLastKey)
+        }
         // [T-icloud-fresh-restore-provider-groups] Anchor each full-history
         // config type so it stops re-pulling its whole history — but ONLY once
         // its consumer is actually ready to APPLY what we fetched. The V3
