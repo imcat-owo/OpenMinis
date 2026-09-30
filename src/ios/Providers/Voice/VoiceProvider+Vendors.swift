@@ -201,8 +201,16 @@ final class MiniMaxVoiceProvider: VoiceProvider {
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         applyVoiceAuth(&urlRequest)  // Bearer {apiKey}, from base class
 
-        // MiniMax-specific shape: speed becomes an integer 0~200.
-        let speedInt = Int((request.speed ?? 1.0) * 100)
+        // MiniMax t2a_v2 shape: speed and vol are DECIMAL multipliers —
+        // speed ∈ [0.5, 2], vol ∈ (0, 10] — and only pitch is an integer
+        // ([-12, 12]). Every value arriving here is already on that scale
+        // (request.speed is a multiplier; the service knobs are labelled
+        // 0.5–2.0 / 0.1–10.0), so they go out as-is, clamped to the
+        // documented ranges. The old ×100 "percent" conversion sent
+        // speed=100 / vol=100 for untouched defaults — far out of range,
+        // so the settings were rejected or clamped server-side.
+        let speedRaw = request.extraDouble("speed") ?? Double(request.speed ?? 1.0)
+        let speed = min(2.0, max(0.5, speedRaw))
         // [T-voice-minimax-quicktest-2054] Quick Test (and any caller whose
         // model entries double as voices) passes the MODEL id in `voice`.
         // MiniMax voice ids are a separate namespace — sending the model id
@@ -211,8 +219,8 @@ final class MiniMaxVoiceProvider: VoiceProvider {
         let requestedVoice = (request.voice == request.model) ? nil : request.voice
         // [T-tts-services 09-11] Service-layer tuning. Absent keys keep the
         // historical constants so the Model-Group path is byte-identical.
-        let speed = request.extraDouble("speed").map { Int($0 * 100) } ?? speedInt
-        let volume = request.extraDouble("volume").map { Int($0 * 100) } ?? 100
+        let volumeRaw = request.extraDouble("volume") ?? 1.0
+        let volume = min(10.0, max(0.1, volumeRaw))
         let pitch = request.extraInt("pitch") ?? 0
         var voiceSetting: [String: Any] = [
             "voice_id": requestedVoice ?? defaultVoiceOutputVoice(),  // voice -> voice_id
