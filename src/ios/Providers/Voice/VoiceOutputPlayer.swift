@@ -745,7 +745,7 @@ final class VoiceOutputPlayer: NSObject, ObservableObject {
             }
             guard ok else { throw lastError ?? VoiceProviderError.parseError("chunk synth failed") }
         }
-        return concatWav(pieces)
+        return concatPieces(pieces)
     }
 
     /// Split text into ≤`synthSplitChunkChars` chunks on sentence/pause boundaries.
@@ -761,6 +761,28 @@ final class VoiceOutputPlayer: NSObject, ObservableObject {
         }
         if !cur.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { out.append(cur) }
         return out.isEmpty ? [text] : out
+    }
+
+    /// Join synthesized pieces into one playable blob. Only genuine WAV
+    /// pieces may go through the header surgery in `concatWav` — the default
+    /// request format is MP3, and stripping 44 "header" bytes off MP3 frames
+    /// corrupts the audio. Frame-based formats (mp3/opus/aac) join correctly
+    /// by plain concatenation. Sniff the actual bytes rather than trusting
+    /// the requested format, so a vendor that ignores the request can't
+    /// corrupt the join.
+    nonisolated private static func concatPieces(_ pieces: [Data]) -> Data {
+        guard let first = pieces.first else { return Data() }
+        guard pieces.count > 1 else { return first }
+        if isWAV(first) { return concatWav(pieces) }
+        var out = Data()
+        for p in pieces { out.append(p) }
+        return out
+    }
+
+    nonisolated private static func isWAV(_ data: Data) -> Bool {
+        guard data.count >= 12 else { return false }
+        return data.subdata(in: 0..<4) == Data("RIFF".utf8)
+            && data.subdata(in: 8..<12) == Data("WAVE".utf8)
     }
 
     /// Concatenate multiple WAV blobs into one (uses the first header, sums data).
