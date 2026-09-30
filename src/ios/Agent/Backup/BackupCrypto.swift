@@ -50,6 +50,13 @@ enum BackupCrypto {
     /// decrypt, and so truncating or reordering segments is detectable.
     static let segmentSize = 4 * 1024 * 1024
 
+    /// Largest legitimate sealed segment on disk: a full `segmentSize` of
+    /// plaintext plus the AES-GCM nonce (12) and tag (16). decryptFile
+    /// rejects any length header above this BEFORE reading the segment —
+    /// the header is package-controlled, and an unbounded one (up to ~4GB)
+    /// would be read whole into memory before authentication can fail.
+    static let maxSealedSegmentSize = segmentSize + 28
+
     /// `MBK1` — lets a reader identify an encrypted member before trying to
     /// parse it as JSON.
     static let magic = Data([0x4D, 0x42, 0x4B, 0x31])
@@ -250,6 +257,9 @@ enum BackupCrypto {
                 guard let lenData = try input.read(upToCount: 4), !lenData.isEmpty else { return true }
                 guard lenData.count == 4 else { throw CryptoError.corruptMember(path) }
                 let length = Int(lenData.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self).bigEndian })
+                guard length <= maxSealedSegmentSize else {
+                    throw CryptoError.corruptMember(path)
+                }
                 guard let body = try input.read(upToCount: length), body.count == length else {
                     throw CryptoError.corruptMember(path)
                 }
