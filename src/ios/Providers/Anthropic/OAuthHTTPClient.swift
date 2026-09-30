@@ -522,7 +522,12 @@ private final class TokenBoxRegistry: @unchecked Sendable {
 private final class OAuthURLProtocol: URLProtocol, URLSessionDataDelegate {
 
     private lazy var innerSession: URLSession = {
-        URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+        // The inner task is the one actually on the wire — the outer client's
+        // 600s never governs it. Match the outer timeout or long SSE streams
+        // get killed by the 60s default.
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 600
+        return URLSession(configuration: config, delegate: self, delegateQueue: nil)
     }()
     private var innerTask: URLSessionDataTask?
     #if DEBUG
@@ -1416,7 +1421,12 @@ enum RequestBodyPatcher {
 private final class EagerStreamingURLProtocol: URLProtocol, URLSessionDataDelegate {
 
     private lazy var innerSession: URLSession = {
-        URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+        // The inner task is the one actually on the wire — the outer client's
+        // 600s never governs it. Match the outer timeout or long SSE streams
+        // get killed by the 60s default.
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 600
+        return URLSession(configuration: config, delegate: self, delegateQueue: nil)
     }()
     private var innerTask: URLSessionDataTask?
     #if DEBUG
@@ -1600,7 +1610,12 @@ final class DualAuthHTTPClient: HTTPClient {
 private final class DualAuthURLProtocol: URLProtocol, URLSessionDataDelegate {
 
     private lazy var innerSession: URLSession = {
-        URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+        // The inner task is the one actually on the wire — the outer client's
+        // 600s never governs it. Match the outer timeout or long SSE streams
+        // get killed by the 60s default.
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 600
+        return URLSession(configuration: config, delegate: self, delegateQueue: nil)
     }()
     private var innerTask: URLSessionDataTask?
     #if DEBUG
