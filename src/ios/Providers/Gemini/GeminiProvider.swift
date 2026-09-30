@@ -347,6 +347,11 @@ final class GeminiProvider: LLMProvider {
                     ]
                 ])
             }
+            // Audio attachments ride the same inlineData shape; skipping them
+            // here silently dropped voice-pipeline audio (GH#67 attachments).
+            for audio in msg.audios {
+                parts.append(GeminiWireFormat.audioPart(audio))
+            }
             if !msg.content.isEmpty {
                 parts.append(["text": msg.content])
             }

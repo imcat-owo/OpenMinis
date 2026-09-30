@@ -282,9 +282,11 @@ final class AntigravityProvider: LLMProvider {
         var contents: [[String: Any]] = []
         for msg in messages {
             let role = msg.role == .user ? "user" : "model"
+            var parts: [[String: Any]] = msg.audios.map(GeminiWireFormat.audioPart)
+            parts.append(GeminiWireFormat.textPart(msg.content))
             contents.append([
                 "role": role,
-                "parts": [GeminiWireFormat.textPart(msg.content)]
+                "parts": parts
             ])
         }
         body["contents"] = contents
