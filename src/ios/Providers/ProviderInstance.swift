@@ -315,13 +315,19 @@ struct ProviderInstance: Identifiable, Codable, Hashable {
             return ProviderKeychainHelper.loadOAuthToken(
                 instanceId: id, as: KimiTokenStorage.self, caller: "hasAnyCredential"
             ) != nil
-        case .antigravity, .openRouter, .unsupported:
+        case .antigravity:
+            // Antigravity is pure OAuth: its login state is the token stored
+            // by AntigravityOAuthManager. Mirror the manager's own
+            // isAuthenticated check, or a logged-in Antigravity instance is
+            // judged credential-less and never becomes a group candidate.
+            return ProviderKeychainHelper.loadOAuthToken(
+                instanceId: id, as: AntigravityTokenStorage.self, caller: "hasAnyCredential"
+            )?.accessToken != nil
+        case .openRouter, .unsupported:
             // unsupported = synced from a newer build; no usable credential here.
-            // antigravity stores its token via AntigravityOAuthManager (no
-            // standalone Codable used by the diagnostic); OpenRouter is
-            // API-key only in practice. If a manual token is missing, treat
-            // as no-credential — the router will skip the entry and the
-            // factory's empty-key branch can no longer fire.
+            // OpenRouter is API-key only in practice. If a manual token is
+            // missing, treat as no-credential — the router will skip the entry
+            // and the factory's empty-key branch can no longer fire.
             return false
         }
     }
