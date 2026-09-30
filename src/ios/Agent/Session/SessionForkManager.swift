@@ -42,7 +42,12 @@ final class SessionForkManager {
                 createdAt: msg.createdAt,
                 tokenUsage: msg.tokenUsage,
                 reasoningContent: msg.reasoningContent,
-                streamInterruptCount: msg.streamInterruptCount
+                streamInterruptCount: msg.streamInterruptCount,
+                errorInfo: msg.errorInfo,
+                modelId: msg.modelId,
+                modelDisplayName: msg.modelDisplayName,
+                providerType: msg.providerType,
+                providerInstanceId: msg.providerInstanceId
             )
             await store.appendMessage(newMsg)
         }
@@ -88,7 +93,12 @@ final class SessionForkManager {
                 createdAt: msg.createdAt,
                 tokenUsage: msg.tokenUsage,
                 reasoningContent: msg.reasoningContent,
-                streamInterruptCount: msg.streamInterruptCount
+                streamInterruptCount: msg.streamInterruptCount,
+                errorInfo: msg.errorInfo,
+                modelId: msg.modelId,
+                modelDisplayName: msg.modelDisplayName,
+                providerType: msg.providerType,
+                providerInstanceId: msg.providerInstanceId
             )
             await store.appendMessage(newMsg)
         }
