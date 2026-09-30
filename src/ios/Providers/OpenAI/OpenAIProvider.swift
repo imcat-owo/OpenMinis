@@ -594,6 +594,12 @@ final class OpenAIProvider: LLMProvider {
             let task = Task {
                 do {
                     continuation.yield(.started)
+                    // Chat-completions reports the end reason on the final
+                    // choice chunk (`finish_reason`), not on [DONE]; capture
+                    // it so `.finished` can carry it like the non-streaming
+                    // parser does. Without this the caller can never tell a
+                    // truncated ("length") reply from a natural stop.
+                    var chatFinishReason: String? = nil
                     for try await line in byteStream.lines {
                         // Tolerate `data:` with or without the optional space
                         // — see OpenAIAgentProvider.ssePayload for context
@@ -602,7 +608,7 @@ final class OpenAIProvider: LLMProvider {
                         let after = line.dropFirst(5)
                         let payload = after.first == " " ? String(after.dropFirst()) : String(after)
                         if payload == "[DONE]" {
-                            continuation.yield(.finished(stopReason: nil))
+                            continuation.yield(.finished(stopReason: chatFinishReason))
                             break
                         }
                         guard let eventData = payload.data(using: .utf8),
@@ -613,6 +619,11 @@ final class OpenAIProvider: LLMProvider {
                                let delta = choices.first?["delta"] as? [String: Any],
                                let text = delta["content"] as? String {
                                 continuation.yield(.text(text))
+                            }
+                            if let choices = event["choices"] as? [[String: Any]],
+                               let reason = choices.first?["finish_reason"] as? String,
+                               !reason.isEmpty {
+                                chatFinishReason = reason
                             }
                             if let usage = event["usage"] as? [String: Any] {
                                 continuation.yield(.usage(self.parseChatCompletionsUsage(usage)))
