@@ -62,6 +62,12 @@ class GlobalAudioPlayer: ObservableObject {
     private var timer: Timer?
     private var seekWorkItem: DispatchWorkItem?
 
+    /// Generation counter for in-flight loads. `play` loads off-thread and
+    /// the detached task cannot be cancelled, so completion instead checks
+    /// that its request is still the current one: bumped by every new
+    /// `play` and by `stopInternal` (i.e. stop()).
+    private var playRequestId = 0
+
     /// Whether the given URL is the currently active audio file.
     func isActive(url: URL) -> Bool {
         activeFileURL == url
@@ -81,6 +87,10 @@ class GlobalAudioPlayer: ObservableObject {
         }
         // Stop any current playback
         stopInternal()
+        // Claim a new load generation (stopInternal bumped it, staling any
+        // load still in flight from a previous play).
+        playRequestId += 1
+        let requestId = playRequestId
         // Suspend silent audio so media gets full volume
         let preCount = BackgroundKeepAliveManager.shared.silentAudioSuspendCount
         logger.info("[AudioPlayback] play: url=\(url.lastPathComponent) suspendSilentAudio → count will be \(preCount + 1)")
@@ -99,6 +109,17 @@ class GlobalAudioPlayer: ObservableObject {
             let dur = p.duration
             await MainActor.run { [weak self] in
                 guard let self else { return }
+                guard self.playRequestId == requestId else {
+                    // Superseded by a newer play() or cancelled by stop()
+                    // while this load was in flight. Do NOT install/play —
+                    // and hand back the silent-audio suspension THIS request
+                    // took: stopInternal can never return it, because this
+                    // load never became `isLoaded`. (Without this, rapid
+                    // play→play leaves the keep-alive suspend count +1
+                    // forever, and the stale player starts playing anyway.)
+                    BackgroundKeepAliveManager.shared.resumeSilentAudioForMedia()
+                    return
+                }
                 self.player = p
                 self.activeFileURL = loadURL
                 self.fileName = loadURL.deletingPathExtension().lastPathComponent
@@ -178,6 +199,10 @@ class GlobalAudioPlayer: ObservableObject {
     }
 
     private func stopInternal() {
+        // Stale any load still in flight: its completion now drops itself
+        // (and returns its own silent-audio suspension) instead of
+        // starting playback after the user already stopped.
+        playRequestId += 1
         let wasLoaded = isLoaded
         timer?.invalidate()
         timer = nil
