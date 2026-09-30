@@ -402,6 +402,12 @@ static int32_t _sweptContexts = 0;
             [ctx cleanup];
             return ISHShellExecutorErrorProcessCreationFailed;
         }
+        // The write end is fed by a blocking write loop (below) that can
+        // outlive the guest shell — if the shell dies with script bytes
+        // still unwritten, the next write() hits a readerless pipe and the
+        // default SIGPIPE disposition kills the whole app. Make this fd
+        // return EPIPE instead so the loop just stops.
+        fcntl(stdinPipe[1], F_SETNOSIGPIPE, 1);
         NSLog(@"ISHShellExecutor[stdin]: pipe created (read=%d, write=%d), stdinData=%lu bytes",
               stdinPipe[0], stdinPipe[1], (unsigned long)stdinData.length);
     } else {
