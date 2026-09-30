@@ -906,6 +906,11 @@ final class CloudSyncEngine: ObservableObject {
             }
         } catch {
             logger.error("[CloudSync] Delete iCloud Data: failed to list zones: \(error)")
+            // Step 1 already tore the engine down. Restart it before
+            // bailing, or sync stays dead for the rest of this launch
+            // while the settings toggle still shows it on — foreground
+            // resume and the periodic timer both no-op on syncEngine == nil.
+            await start()
             syncStatus = .error("Failed to list iCloud zones")
             throw error
         }
