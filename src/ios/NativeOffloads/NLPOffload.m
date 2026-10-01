@@ -18,6 +18,9 @@ static NSString *const TOOL_NAME = @"apple-nlp";
 static NSString *const HELP_TEXT =
     @"apple-nlp - Natural language processing using Apple NaturalLanguage framework\n"
      "\n"
+     "NOTE: Sentiment and named-entity results for Chinese text are unreliable\n"
+     "with this framework — do not trust them or present them as fact.\n"
+     "\n"
      "USAGE:\n"
      "  apple-nlp <command> [options]\n"
      "\n"
