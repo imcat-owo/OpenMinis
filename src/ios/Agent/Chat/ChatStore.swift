@@ -4924,6 +4924,9 @@ extension RawMessage {
                 case "memory_write", "memory_get":
                     kind = .memoryTool(action: tu.name)
                     content = tu.name == "memory_write" ? "Writing memory..." : "Reading memory..."
+                case "ask_user_input_v0":
+                    kind = .askUserTool
+                    content = "向用户提问…"
                 default:
                     kind = .shellTool(command: tu.name)
                     content = tu.name

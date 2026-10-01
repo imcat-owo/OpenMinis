@@ -877,6 +877,14 @@ extension AIChatViewModel {
             toolOutput = memResult.output
             toolSuccess = memResult.success
 
+        case "ask_user_input_v0":
+            let askResult = await handleAskUser(toolArgs: toolArgs, toolId: tu.id)
+            if msgIdx < messages.count, blockIdx < messages[msgIdx].blocks.count {
+                messages[msgIdx].blocks[blockIdx].content = askResult.summary
+            }
+            toolOutput = askResult.output
+            toolSuccess = askResult.success
+
         default:
             toolOutput = "Error: Unknown tool '\(tu.name)'"
             toolSuccess = false

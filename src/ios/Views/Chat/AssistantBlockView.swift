@@ -118,6 +118,10 @@ struct AssistantBlockView: View {
             ToolCapsuleView(block: block, icon: "brain.head.profile", accentColor: ChatColors.accent,
                             commandStartTime: commandStartTime, onStop: onStop,
                             toolSnapshots: toolSnapshots, detailBlock: $detailBlock)
+        case .askUserTool:
+            ToolCapsuleView(block: block, icon: "questionmark.circle", accentColor: ChatColors.accent,
+                            commandStartTime: commandStartTime, onStop: onStop,
+                            toolSnapshots: toolSnapshots, detailBlock: $detailBlock)
         case .info:
             let allLines = block.content.components(separatedBy: "\n").filter { !$0.isEmpty }
             // Separate reason lines (⚠️) from the final switched line (✅)

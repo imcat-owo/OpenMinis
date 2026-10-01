@@ -4729,6 +4729,7 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
                 case .browserTool: return "browser"
                 case .readImageTool: return "readImage"
                 case .memoryTool: return "memory"
+                case .askUserTool: return "askUser"
                 case .info: return "info"
                 }
             }()

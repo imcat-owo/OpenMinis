@@ -202,6 +202,20 @@ extension AIChatViewModel {
             ))
         }
 
+        // [s2-askuser] 让 AI 中途停下来问她问题再继续：一次最多 4 道题，单选/多选；
+        // 界面自动给每题补"其他（自填）/跳过"，AI 不用自己加。答案以 JSON 回 AI，
+        // 跳过的题是 null。只在用户正聊着的时候用，别拿它问你自己能定的事。
+        tools.append(AgentToolDefinition(
+            name: "ask_user_input_v0",
+            description: "Ask the user questions and wait for their answers before continuing. Use this when you need the user to make a choice or provide information only they know (e.g. which option to pick, a missing detail, confirmation of an ambiguous request). At most 4 questions per call — keep it to the minimum you truly need. Each question has an id, the question text, a type ('single' for single-choice, 'multi' for multiple-choice), and a list of candidate options. The UI automatically adds 'Other (type your own)' and 'Skip' to every question — do NOT include them in options yourself. Answers come back as JSON mapping question id to the chosen option string, an array of option strings for multi-choice, a custom string for 'Other', or null when skipped. A skipped question means the user didn't answer — proceed with your best judgment for those. Only call this when the user is actively in the conversation; never use it to ask something you could reasonably decide yourself.",
+            parameters: [
+                "tool_title": AgentToolParam(type: .string, description: "A concise 5-10 word summary of what you're asking about, shown to the user (e.g. 'Confirm deployment target'). Use the same language as the user."),
+                "questions": AgentToolParam(type: .string, description: "JSON array of question objects, at most 4. Each object: {\"id\": \"q1\", \"question\": \"...\", \"type\": \"single\"|\"multi\", \"options\": [\"option A\", \"option B\"]}. Keep options short (a few words each). The UI adds 'Other' and 'Skip' automatically."),
+            ],
+            required: ["tool_title", "questions"],
+            propertyOrdering: ["tool_title", "questions"]
+        ))
+
         return tools
     }
 

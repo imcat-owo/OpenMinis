@@ -716,6 +716,8 @@ struct ToolLiveSheet: View {
             return "read_image(\(truncateParam(path)))"
         case .memoryTool(let action):
             return "\(truncateParam(action))"
+        case .askUserTool:
+            return "ask_user_input_v0"
         case .info:
             return ""
         }
@@ -735,6 +737,7 @@ struct ToolLiveSheet: View {
         case .browserTool: Image(systemName: "globe")
         case .readImageTool: Image(systemName: "photo")
         case .memoryTool: Image(systemName: "brain.head.profile")
+        case .askUserTool: Image(systemName: "questionmark.circle")
         case .info: Image(systemName: "arrow.triangle.2.circlepath")
         case .text: Image(systemName: "text.alignleft")
         case .thinking: Image("ThinkingIcon")

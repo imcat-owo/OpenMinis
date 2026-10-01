@@ -109,9 +109,29 @@ final class ToolSuspensionService: ObservableObject {
     private let logger = AppLogger(category: "ToolSuspension")
 
     private init() {
-        restoredAsks = loadPersistedAsks()
-        if !restoredAsks.isEmpty {
-            logger.info("Restored \(restoredAsks.count) unanswered ask(s) from previous run")
+        var asks = loadPersistedAsks()
+        // sessionId 为空的问询找不到原会话投回去，直接清掉，不让它占住排队。
+        let validAsks = asks.filter { !$0.sessionId.isEmpty }
+        if validAsks.count != asks.count {
+            persistAsks(validAsks)
+            asks = validAsks
+        }
+        restoredAsks = asks
+        if !asks.isEmpty {
+            logger.info("Restored \(asks.count) unanswered ask(s) from previous run")
+            // [s2-askuser] 恢复的问题只进排队、不占 current（占住 current 会堵住
+            // 后面其他会话的审批/问询）。呈现时按会话过滤（见 askRequestForSession），
+            // 答案投回原会话（见 respond 的 restored 分支）。
+            for ask in asks {
+                queue.append(SuspendedRequest(
+                    id: ask.id,
+                    tag: "ask-user-restored",
+                    kind: .askUser(ask.payload),
+                    sessionId: ask.sessionId,
+                    createdAt: ask.createdAt,
+                    timeoutSeconds: nil
+                ))
+            }
         }
     }
 
@@ -132,14 +152,7 @@ final class ToolSuspensionService: ObservableObject {
             createdAt: Date(),
             timeoutSeconds: timeoutSeconds
         )
-        return await withCheckedContinuation { continuation in
-            continuations[request.id] = continuation
-            if current == nil {
-                activate(request)
-            } else {
-                queue.append(request)
-            }
-        }
+        return await wait(for: request)
     }
 
     /// 审批类挂起的便捷入口。
@@ -190,20 +203,53 @@ final class ToolSuspensionService: ObservableObject {
             createdAt: ask.createdAt,
             timeoutSeconds: nil
         )
-        return await withCheckedContinuation { continuation in
-            continuations[request.id] = continuation
-            if current == nil {
-                activate(request)
-            } else {
-                queue.append(request)
+        return await wait(for: request)
+    }
+
+    /// 入队并等用户点按。调用方 Task 被取消时（如用户点了停止），
+    /// 按跳过解决，避免 checked continuation 永远泄漏。
+    private func wait(for request: SuspendedRequest) async -> SuspensionDecision {
+        // 任务进 wait 之前已经取消：直接按跳过回（不入队、不弹窗）。
+        // 注意：此时 suspendAsk 已持久化了这条问询——它会变成"没答完的问题"，
+        // 下次打开 App 时用户仍可回答并让 AI 从断点继续，这是符合预期的。
+        if Task.isCancelled { return .skipped }
+        return await withTaskCancellationHandler(operation: {
+            await withCheckedContinuation { continuation in
+                continuations[request.id] = continuation
+                if current == nil {
+                    activate(request)
+                } else {
+                    queue.append(request)
+                }
             }
-        }
+        }, onCancel: {
+            // onCancel 是 @Sendable：不抓 self，只带走 id，用 shared 回。
+            let requestID = request.id
+            Task { @MainActor in
+                ToolSuspensionService.shared.respond(id: requestID, decision: .skipped)
+            }
+        })
     }
 
     // MARK: - 解决
 
     /// 用户点按后调用。
     func respond(id: String, decision: SuspensionDecision) {
+        // [s2-askuser] 恢复的问询没有等待中的 Task：答案/跳过直接投回原会话，
+        // 不走 continuation。投完再 finish 清掉呈现、顶起排队的下一条。
+        if let request = requestFor(id: id), request.tag == "ask-user-restored",
+           let ask = restoredAsks.first(where: { $0.id == id }) {
+            switch decision {
+            case .answered(let json):
+                answerRestoredAsk(ask, answerJSON: json)
+            case .skipped:
+                skipRestoredAsk(ask)
+            default:
+                removePersistedAsk(id: id)
+            }
+            finish(id: id, decision: decision)
+            return
+        }
         // 问用户一旦有了答案/跳过，持久化记录就不再需要。
         if case .askUser = requestFor(id: id)?.kind {
             switch decision {
@@ -214,6 +260,31 @@ final class ToolSuspensionService: ObservableObject {
             }
         }
         finish(id: id, decision: decision)
+    }
+
+    // MARK: - 按会话呈现问询
+
+    /// 当前会话可呈现的问询请求。恢复的问题只在它自己的会话里呈现
+    /// （避免答案投错会话）；实时问询 sessionId 为空或一致时呈现。
+    /// 正在呈现非问询的挂起（审批等）时返回 nil——一次只呈现一条，
+    /// 问询等它解决；跨会话的问询不抢占，用户切到那个会话时再呈现。
+    func askRequestForSession(_ sessionId: String?) -> SuspendedRequest? {
+        if let cur = current, cur.tag != "ask-user", cur.tag != "ask-user-restored" {
+            return nil
+        }
+        var candidates: [SuspendedRequest] = []
+        if let cur = current { candidates.append(cur) }
+        candidates.append(contentsOf: queue)
+        for req in candidates {
+            guard req.tag == "ask-user" || req.tag == "ask-user-restored" else { continue }
+            if req.tag == "ask-user-restored" {
+                // sessionId 为空的恢复问询投不回去（answerRestoredAsk 会清掉），不呈现。
+                if req.sessionId != nil, req.sessionId == sessionId { return req }
+            } else if req.sessionId == nil || req.sessionId == sessionId {
+                return req
+            }
+        }
+        return nil
     }
 
     // MARK: - 会话放行
@@ -238,17 +309,31 @@ final class ToolSuspensionService: ObservableObject {
 
     // MARK: - 恢复的问询
 
-    /// 回答一条恢复出来的问题：清掉持久化，把答案投回原会话继续跑。
-    func answerRestoredAsk(_ ask: PersistedAsk, answerJSON: String) {
-        removePersistedAsk(id: ask.id)
-        guard !ask.sessionId.isEmpty else { return }
+    /// 回答一条恢复出来的问题：把答案投回原会话继续跑。
+    /// 返回 true 表示答案已投递；会话正忙时返回 false，持久化保留、
+    /// 下次启动重新呈现（往跑着的 turn 里硬塞 tool_result 会把配对搞乱）。
+    @discardableResult
+    func answerRestoredAsk(_ ask: PersistedAsk, answerJSON: String, summary: String? = nil) -> Bool {
+        // sessionId 为空说明当初问的时候会话还没落盘，找不到原会话——
+        // 清掉持久化，不让它每次启动都冒出来。
+        guard !ask.sessionId.isEmpty else {
+            logger.warning("answerRestoredAsk: empty sessionId, dropping ask \(ask.id.prefix(8))")
+            removePersistedAsk(id: ask.id)
+            return true
+        }
         let vm = ViewModelCache.shared.getOrCreate(for: ask.sessionId).0
+        guard !vm.isProcessing else {
+            logger.info("answerRestoredAsk: session busy, keep persisted ask for later")
+            return false
+        }
+        removePersistedAsk(id: ask.id)
         vm.continueAfterRestoredAsk(
             toolCallId: ask.toolCallId,
             toolName: ask.toolName,
             answerJSON: answerJSON,
-            summary: "之前没答完的问题已回答（\(ask.payload.questions.count) 道），继续之前的操作。"
+            summary: summary ?? "之前没答完的问题已回答（\(ask.payload.questions.count) 道），继续之前的操作。"
         )
+        return true
     }
 
     /// 跳过一条恢复出来的问题：每道题都记为 null，让 AI 自己拿主意继续。
@@ -256,7 +341,11 @@ final class ToolSuspensionService: ObservableObject {
         let nulls = Dictionary(uniqueKeysWithValues: ask.payload.questions.map { ($0.id, NSNull()) })
         let data = try? JSONSerialization.data(withJSONObject: nulls, options: [])
         let json = data.flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-        answerRestoredAsk(ask, answerJSON: json)
+        answerRestoredAsk(
+            ask,
+            answerJSON: json,
+            summary: "之前没答完的问题已跳过（\(ask.payload.questions.count) 道），按你的判断继续之前的操作。"
+        )
     }
 
     // MARK: - 查询（供调用方去重/映射）
