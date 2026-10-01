@@ -1954,6 +1954,65 @@ static NSDictionary *makeQEntry(HKQuantityTypeIdentifier ident, HKUnit *u, NSStr
     return @{@"id": ident, @"unit": u, @"label": label, @"scale": @(scale), @"desc": desc ?: @""};
 }
 
+// [s2-27] Metric-name normalization + alias table.
+// Canonical registry names are kebab-case but not uniform — `steps` is a
+// plain word while its sibling is `walking-step-length`, and the registry
+// name for variability is `hrv-sdnn` while the subcommand is `hrv`.
+// Models guess variants (walking_step_length, step-count, stepCount,
+// spo2, …) and previously only `batch` had a 4-entry alias table; every
+// other entry point (log, delete, …) answered "unknown type" on the first
+// guess. Normalization + aliases now live in the two registry lookups
+// themselves, so EVERY caller resolves names the same way. Canonical
+// names pass through unchanged (normalization is the identity on them),
+// so the name enumeration in allQuantityTypeNames/allCategoryTypeNames
+// is unaffected.
+static NSString *hkNormalizeMetricName(NSString *name) {
+    if (name.length == 0) return name;
+    NSString *n = [name stringByTrimmingCharactersInSet:
+                   [NSCharacterSet whitespaceCharacterSet]];
+    n = [n lowercaseString];
+    n = [n stringByReplacingOccurrencesOfString:@"_" withString:@"-"];
+    n = [n stringByReplacingOccurrencesOfString:@" " withString:@"-"];
+    while ([n containsString:@"--"]) {
+        n = [n stringByReplacingOccurrencesOfString:@"--" withString:@"-"];
+    }
+    static NSDictionary<NSString *, NSString *> *aliases = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        aliases = @{
+            // Steps family — the irregular names the audit called out.
+            @"step":                    @"steps",
+            @"step-count":              @"steps",
+            @"stepcount":               @"steps",
+            @"step-length":             @"walking-step-length",
+            @"walkingsteplength":       @"walking-step-length",
+            // Heart / oxygen — subcommand vocabulary vs registry vocabulary.
+            @"hrv":                     @"hrv-sdnn",
+            @"heart-rate-variability":  @"hrv-sdnn",
+            @"heartrate":               @"heart-rate",
+            @"blood-oxygen":            @"oxygen-saturation",
+            @"blood-oxygen-saturation": @"oxygen-saturation",
+            @"spo2":                    @"oxygen-saturation",
+            @"oxygen":                  @"oxygen-saturation",
+            @"blood-sugar":             @"blood-glucose",
+            // Compact spellings models reach for.
+            @"vo2max":                  @"vo2-max",
+            @"body-fat-percentage":     @"body-fat",
+            @"bodyfat":                 @"body-fat",
+            @"body-weight":             @"weight",
+            @"body-mass":               @"weight",
+            // Activity rings / energy.
+            @"calories-burned":         @"active-energy",
+            @"energy-burned":           @"active-energy",
+            @"stand-time":              @"apple-stand-time",
+            @"exercise-time":           @"apple-exercise-time",
+            @"move-time":               @"apple-move-time",
+            @"distance":                @"distance-walking-running",
+        };
+    });
+    return aliases[n] ?: n;
+}
+
 static NSDictionary *logQuantityTypeInfo(NSString *name) {
     static NSMutableDictionary<NSString *, NSDictionary *> *table = nil;
     static dispatch_once_t onceToken;
@@ -2257,7 +2316,7 @@ static NSDictionary *logQuantityTypeInfo(NSString *name) {
         }
 #undef E
     });
-    return table[[name lowercaseString]];
+    return table[hkNormalizeMetricName(name)];
 }
 
 // All valid quantity type names (sorted) for error messages & types output.
@@ -2504,7 +2563,7 @@ static NSDictionary *logCategoryTypeInfo(NSString *name) {
                                         @"Hypertension notification — iOS 26.2+.");
         }
     });
-    return table[[name lowercaseString]];
+    return table[hkNormalizeMetricName(name)];
 }
 
 static NSArray<NSString *> *allCategoryTypeNames(void) {
@@ -3915,23 +3974,16 @@ static int cmd_batch(int argc, char **argv, int stdout_fd, BOOL compact, BOOL qu
         return NOFF_EXIT_INVALID_ARGS;
     }
 
-    // [GH#106 Phase 2a] Alias table: every per-metric SUBCOMMAND name is a
-    // valid --types token too, resolved to its registry name. The two
-    // vocabularies previously diverged exactly here — `hrv` was a working
-    // subcommand but an "unknown type" in batch (registry: hrv-sdnn), same
-    // for blood-oxygen (registry: oxygen-saturation). Common synonyms ride
-    // along. Composite subcommands that have no single backing sample type
-    // are announced as unsupported_in_batch instead of "unknown + typo hint".
-    static NSDictionary<NSString *, NSString *> *batchAliases = nil;
+    // [GH#106 Phase 2a] Every per-metric SUBCOMMAND name is a valid
+    // --types token too. Name resolution (subcommand vocabulary, synonyms,
+    // underscore/camelCase variants) now lives in the registry lookups
+    // themselves — see hkNormalizeMetricName [s2-27] — so batch no longer
+    // keeps a private alias table. Composite subcommands that have no
+    // single backing sample type are still announced as
+    // unsupported_in_batch instead of "unknown + typo hint".
     static NSSet<NSString *> *batchUnsupported = nil;
     static dispatch_once_t aliasOnce;
     dispatch_once(&aliasOnce, ^{
-        batchAliases = @{
-            @"hrv": @"hrv-sdnn",
-            @"heart-rate-variability": @"hrv-sdnn",
-            @"blood-oxygen": @"oxygen-saturation",
-            @"spo2": @"oxygen-saturation",
-        };
         batchUnsupported = [NSSet setWithArray:@[
             @"cadence", @"elevation", @"workouts", @"nutrition", @"summary",
             @"ecg", @"audiogram", @"vision-rx", @"assessment", @"state-of-mind",
@@ -3956,7 +4008,10 @@ static int cmd_batch(int argc, char **argv, int stdout_fd, BOOL compact, BOOL qu
             [unsupportedNames addObject:name];
             continue;
         }
-        NSString *resolved = batchAliases[name] ?: name;
+        // Canonical name via the shared resolver (hkNormalizeMetricName);
+        // keeping it in resolvedNames preserves the `alias_resolved`
+        // announcements and per-entry `resolved_as` below.
+        NSString *resolved = hkNormalizeMetricName(name);
         resolvedNames[name] = resolved;
         NSDictionary *qInfo = logQuantityTypeInfo(resolved);
         if (qInfo) {

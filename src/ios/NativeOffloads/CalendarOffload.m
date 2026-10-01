@@ -17,6 +17,25 @@
 static NSString *const TOOL_NAME = @"apple-calendar";
 static const NSInteger DEFAULT_LIMIT = 100;
 
+// [s2-27] The reminder subcommands in this file are shared between two
+// tools: apple-calendar exposes them itself (reminders / remind /
+// update-reminder / …), and apple-reminders delegates here wholesale.
+// Every envelope/error used to be stamped with TOOL_NAME, so a call made
+// through apple-reminders reported `tool: "apple-calendar"` — the wrong
+// identity. The offload dispatcher routes by basename(argv[0]), so the
+// invoked name is recoverable from argv; whitelist the two known callers
+// and fall back to TOOL_NAME for anything unexpected (old behaviour).
+static NSString *caller_tool_name(int argc, char **argv) {
+    if (argc > 0 && argv[0]) {
+        NSString *base = [[NSString stringWithUTF8String:argv[0]] lastPathComponent];
+        if ([base isEqualToString:@"apple-reminders"] ||
+            [base isEqualToString:@"apple-calendar"]) {
+            return base;
+        }
+    }
+    return TOOL_NAME;
+}
+
 @class EKReminder;
 /// [T-reminders-location-alarm] Defined next to the location-alarm helpers
 /// below; forward-declared so the reminder LIST command (which appears earlier
@@ -410,7 +429,7 @@ static int cmd_list(int argc, char **argv, int stdout_fd, BOOL compact, BOOL qui
 int calendar_cmd_reminders(int argc, char **argv, int stdout_fd, BOOL compact, BOOL quiet) {
     NSString *authErr = nil;
     if (!requestRemindersAccess(&authErr)) {
-        NSDictionary *err = noff_json_error(TOOL_NAME, @"reminders",
+        NSDictionary *err = noff_json_error(caller_tool_name(argc, argv), @"reminders",
                                              NOFF_ERR_AUTHORIZATION_DENIED, authErr);
         noff_emit_json(stdout_fd, err, compact, quiet);
         return NOFF_EXIT_AUTH_DENIED;
@@ -496,7 +515,7 @@ int calendar_cmd_reminders(int argc, char **argv, int stdout_fd, BOOL compact, B
             (long)limit, (long)totalCount];
         data[@"total_available"] = @(totalCount);
     }
-    noff_emit_json(stdout_fd, noff_json_envelope(TOOL_NAME, @"reminders", data), compact, quiet);
+    noff_emit_json(stdout_fd, noff_json_envelope(caller_tool_name(argc, argv), @"reminders", data), compact, quiet);
     return NOFF_EXIT_SUCCESS;
 }
 
@@ -1242,7 +1261,7 @@ static int apply_location_alarm_args(int argc, char **argv, EKReminder *reminder
     // A location alarm needs coordinates; anything else present without them
     // is a mistake worth failing loudly on rather than half-applying.
     if (!latStr || !lngStr) {
-        *errOut = noff_json_error(TOOL_NAME, subcmd, NOFF_ERR_INVALID_ARGS,
+        *errOut = noff_json_error(caller_tool_name(argc, argv), subcmd, NOFF_ERR_INVALID_ARGS,
             @"Location reminders need both --lat and --lng (WGS-84 decimal degrees). "
              "Optional: --location-name <text>, --radius <meters>, --proximity enter|leave.");
         return NOFF_EXIT_INVALID_ARGS;
@@ -1253,7 +1272,7 @@ static int apply_location_alarm_args(int argc, char **argv, EKReminder *reminder
     NSScanner *lngScan = [NSScanner scannerWithString:lngStr];
     if (![latScan scanDouble:&lat] || !latScan.isAtEnd || lat < -90.0 || lat > 90.0 ||
         ![lngScan scanDouble:&lng] || !lngScan.isAtEnd || lng < -180.0 || lng > 180.0) {
-        *errOut = noff_json_error(TOOL_NAME, subcmd, NOFF_ERR_INVALID_ARGS,
+        *errOut = noff_json_error(caller_tool_name(argc, argv), subcmd, NOFF_ERR_INVALID_ARGS,
             [NSString stringWithFormat:
                 @"Invalid coordinates: --lat '%@' --lng '%@'. Expect WGS-84 decimal "
                  "degrees, lat in [-90,90], lng in [-180,180].", latStr, lngStr]);
@@ -1264,7 +1283,7 @@ static int apply_location_alarm_args(int argc, char **argv, EKReminder *reminder
     if (radStr) {
         NSScanner *radScan = [NSScanner scannerWithString:radStr];
         if (![radScan scanDouble:&radius] || !radScan.isAtEnd || radius < 0) {
-            *errOut = noff_json_error(TOOL_NAME, subcmd, NOFF_ERR_INVALID_ARGS,
+            *errOut = noff_json_error(caller_tool_name(argc, argv), subcmd, NOFF_ERR_INVALID_ARGS,
                 [NSString stringWithFormat:
                     @"Invalid --radius '%@'. Expect a non-negative number of meters.", radStr]);
             return NOFF_EXIT_INVALID_ARGS;
@@ -1280,7 +1299,7 @@ static int apply_location_alarm_args(int argc, char **argv, EKReminder *reminder
                    [proxStr caseInsensitiveCompare:@"exit"] == NSOrderedSame) {
             proximity = EKAlarmProximityLeave;
         } else {
-            *errOut = noff_json_error(TOOL_NAME, subcmd, NOFF_ERR_INVALID_ARGS,
+            *errOut = noff_json_error(caller_tool_name(argc, argv), subcmd, NOFF_ERR_INVALID_ARGS,
                 [NSString stringWithFormat:
                     @"Invalid --proximity '%@'. Use 'enter' (arrive) or 'leave'.", proxStr]);
             return NOFF_EXIT_INVALID_ARGS;
@@ -1289,7 +1308,7 @@ static int apply_location_alarm_args(int argc, char **argv, EKReminder *reminder
 
     NSString *authErr = nil;
     if (!reminders_location_auth(&authErr)) {
-        *errOut = noff_json_error(TOOL_NAME, subcmd, NOFF_ERR_AUTHORIZATION_DENIED, authErr);
+        *errOut = noff_json_error(caller_tool_name(argc, argv), subcmd, NOFF_ERR_AUTHORIZATION_DENIED, authErr);
         return NOFF_EXIT_AUTH_DENIED;
     }
 
@@ -1315,7 +1334,7 @@ static int apply_location_alarm_args(int argc, char **argv, EKReminder *reminder
 int calendar_cmd_remind(int argc, char **argv, int stdout_fd, int stderr_fd, BOOL compact, BOOL quiet) {
     NSString *authErr = nil;
     if (!requestRemindersAccess(&authErr)) {
-        NSDictionary *err = noff_json_error(TOOL_NAME, @"remind",
+        NSDictionary *err = noff_json_error(caller_tool_name(argc, argv), @"remind",
                                              NOFF_ERR_AUTHORIZATION_DENIED, authErr);
         noff_emit_json(stdout_fd, err, compact, quiet);
         return NOFF_EXIT_AUTH_DENIED;
@@ -1324,7 +1343,7 @@ int calendar_cmd_remind(int argc, char **argv, int stdout_fd, int stderr_fd, BOO
     NSString *title = noff_find_arg(argc, argv, "--title");
     if (!title) {
         noff_emit_help(stderr_fd, HELP_TEXT);
-        NSDictionary *err = noff_json_error(TOOL_NAME, @"remind",
+        NSDictionary *err = noff_json_error(caller_tool_name(argc, argv), @"remind",
                                              NOFF_ERR_INVALID_ARGS,
                                              @"Required: --title");
         noff_emit_json(stdout_fd, err, compact, quiet);
@@ -1339,7 +1358,7 @@ int calendar_cmd_remind(int argc, char **argv, int stdout_fd, int stderr_fd, BOO
     if (dueStr) {
         NSDate *due = noff_parse_date(dueStr);
         if (!due) {
-            NSDictionary *err = noff_json_error(TOOL_NAME, @"remind",
+            NSDictionary *err = noff_json_error(caller_tool_name(argc, argv), @"remind",
                                                  NOFF_ERR_INVALID_ARGS,
                                                  [NSString stringWithFormat:@"Invalid date format for --due: '%@'", dueStr]);
             noff_emit_json(stdout_fd, err, compact, quiet);
@@ -1365,13 +1384,13 @@ int calendar_cmd_remind(int argc, char **argv, int stdout_fd, int stderr_fd, BOO
     NSString *recurErr = nil;
     EKRecurrenceRule *recurRule = build_recurrence_rule(argc, argv, dueDate, &recurErr);
     if (recurErr) {
-        NSDictionary *err = noff_json_error(TOOL_NAME, @"remind",
+        NSDictionary *err = noff_json_error(caller_tool_name(argc, argv), @"remind",
                                              NOFF_ERR_INVALID_ARGS, recurErr);
         noff_emit_json(stdout_fd, err, compact, quiet);
         return NOFF_EXIT_INVALID_ARGS;
     }
     if (recurRule && !dueDate) {
-        NSDictionary *err = noff_json_error(TOOL_NAME, @"remind",
+        NSDictionary *err = noff_json_error(caller_tool_name(argc, argv), @"remind",
                                              NOFF_ERR_INVALID_ARGS,
                                              @"--recur requires --due: a repeating reminder needs a due date to repeat from.");
         noff_emit_json(stdout_fd, err, compact, quiet);
@@ -1396,7 +1415,7 @@ int calendar_cmd_remind(int argc, char **argv, int stdout_fd, int stderr_fd, BOO
     // orphan reminder, rather than silently creating a non-nested one.
     NSString *parentId = noff_find_arg(argc, argv, "--parent-id");
     if (parentId) {
-        NSDictionary *err = noff_json_error(TOOL_NAME, @"remind",
+        NSDictionary *err = noff_json_error(caller_tool_name(argc, argv), @"remind",
                                              NOFF_ERR_NOT_AVAILABLE,
                                              @"Reminder subtasks are not supported: iOS (through 26.5) provides no public EventKit API to set a parent/child relationship, so --parent-id cannot be honored. Create the reminder without --parent-id, or nest it manually in the Reminders app.");
         noff_emit_json(stdout_fd, err, compact, quiet);
@@ -1430,7 +1449,7 @@ int calendar_cmd_remind(int argc, char **argv, int stdout_fd, int stderr_fd, BOO
     NSError *saveErr = nil;
     BOOL saved = [eventStore() saveReminder:reminder commit:YES error:&saveErr];
     if (!saved) {
-        NSDictionary *err = noff_json_error(TOOL_NAME, @"remind",
+        NSDictionary *err = noff_json_error(caller_tool_name(argc, argv), @"remind",
                                              NOFF_ERR_INTERNAL_ERROR,
                                              saveErr.localizedDescription ?: @"Failed to save reminder");
         noff_emit_json(stdout_fd, err, compact, quiet);
@@ -1450,7 +1469,7 @@ int calendar_cmd_remind(int argc, char **argv, int stdout_fd, int stderr_fd, BOO
     if (reminder.hasRecurrenceRules && reminder.recurrenceRules.count > 0) {
         data[@"recurrence"] = recurrence_to_dict(reminder.recurrenceRules.firstObject);
     }
-    noff_emit_json(stdout_fd, noff_json_envelope(TOOL_NAME, @"remind", data), compact, quiet);
+    noff_emit_json(stdout_fd, noff_json_envelope(caller_tool_name(argc, argv), @"remind", data), compact, quiet);
     return NOFF_EXIT_SUCCESS;
 }
 
@@ -1476,7 +1495,7 @@ static EKReminder *fetch_reminder_by_id(NSString *reminderId) {
 int calendar_cmd_update_reminder(int argc, char **argv, int stdout_fd, BOOL compact, BOOL quiet) {
     NSString *authErr = nil;
     if (!requestRemindersAccess(&authErr)) {
-        NSDictionary *err = noff_json_error(TOOL_NAME, @"update",
+        NSDictionary *err = noff_json_error(caller_tool_name(argc, argv), @"update",
                                              NOFF_ERR_AUTHORIZATION_DENIED, authErr);
         noff_emit_json(stdout_fd, err, compact, quiet);
         return NOFF_EXIT_AUTH_DENIED;
@@ -1484,7 +1503,7 @@ int calendar_cmd_update_reminder(int argc, char **argv, int stdout_fd, BOOL comp
 
     NSString *reminderId = noff_find_arg(argc, argv, "--id");
     if (!reminderId) {
-        NSDictionary *err = noff_json_error(TOOL_NAME, @"update",
+        NSDictionary *err = noff_json_error(caller_tool_name(argc, argv), @"update",
                                              NOFF_ERR_INVALID_ARGS,
                                              @"Required: --id <reminder_id>");
         noff_emit_json(stdout_fd, err, compact, quiet);
@@ -1493,7 +1512,7 @@ int calendar_cmd_update_reminder(int argc, char **argv, int stdout_fd, BOOL comp
 
     EKReminder *reminder = fetch_reminder_by_id(reminderId);
     if (!reminder) {
-        NSDictionary *err = noff_json_error(TOOL_NAME, @"update",
+        NSDictionary *err = noff_json_error(caller_tool_name(argc, argv), @"update",
                                              NOFF_ERR_NO_DATA,
                                              [NSString stringWithFormat:@"Reminder not found with id '%@'", reminderId]);
         noff_emit_json(stdout_fd, err, compact, quiet);
@@ -1507,7 +1526,7 @@ int calendar_cmd_update_reminder(int argc, char **argv, int stdout_fd, BOOL comp
     if (dueStr) {
         NSDate *due = noff_parse_date(dueStr);
         if (!due) {
-            NSDictionary *err = noff_json_error(TOOL_NAME, @"update",
+            NSDictionary *err = noff_json_error(caller_tool_name(argc, argv), @"update",
                                                  NOFF_ERR_INVALID_ARGS,
                                                  [NSString stringWithFormat:@"Invalid date format for --due: '%@'", dueStr]);
             noff_emit_json(stdout_fd, err, compact, quiet);
@@ -1546,13 +1565,13 @@ int calendar_cmd_update_reminder(int argc, char **argv, int stdout_fd, BOOL comp
     NSString *updRecurErr = nil;
     EKRecurrenceRule *updRecurRule = build_recurrence_rule(argc, argv, effectiveDue, &updRecurErr);
     if (updRecurErr) {
-        NSDictionary *err = noff_json_error(TOOL_NAME, @"update",
+        NSDictionary *err = noff_json_error(caller_tool_name(argc, argv), @"update",
                                              NOFF_ERR_INVALID_ARGS, updRecurErr);
         noff_emit_json(stdout_fd, err, compact, quiet);
         return NOFF_EXIT_INVALID_ARGS;
     }
     if (updRecurRule && !effectiveDue) {
-        NSDictionary *err = noff_json_error(TOOL_NAME, @"update",
+        NSDictionary *err = noff_json_error(caller_tool_name(argc, argv), @"update",
                                              NOFF_ERR_INVALID_ARGS,
                                              @"--recur requires the reminder to have a due date: pass --due, or set one first.");
         noff_emit_json(stdout_fd, err, compact, quiet);
@@ -1583,7 +1602,7 @@ int calendar_cmd_update_reminder(int argc, char **argv, int stdout_fd, BOOL comp
     NSError *saveErr = nil;
     BOOL saved = [eventStore() saveReminder:reminder commit:YES error:&saveErr];
     if (!saved) {
-        NSDictionary *err = noff_json_error(TOOL_NAME, @"update",
+        NSDictionary *err = noff_json_error(caller_tool_name(argc, argv), @"update",
                                              NOFF_ERR_INTERNAL_ERROR,
                                              saveErr.localizedDescription ?: @"Failed to update reminder");
         noff_emit_json(stdout_fd, err, compact, quiet);
@@ -1607,14 +1626,14 @@ int calendar_cmd_update_reminder(int argc, char **argv, int stdout_fd, BOOL comp
     if (reminder.hasRecurrenceRules && reminder.recurrenceRules.count > 0) {
         data[@"recurrence"] = recurrence_to_dict(reminder.recurrenceRules.firstObject);
     }
-    noff_emit_json(stdout_fd, noff_json_envelope(TOOL_NAME, @"update", data), compact, quiet);
+    noff_emit_json(stdout_fd, noff_json_envelope(caller_tool_name(argc, argv), @"update", data), compact, quiet);
     return NOFF_EXIT_SUCCESS;
 }
 
 int calendar_cmd_complete_reminder(int argc, char **argv, int stdout_fd, BOOL compact, BOOL quiet) {
     NSString *authErr = nil;
     if (!requestRemindersAccess(&authErr)) {
-        NSDictionary *err = noff_json_error(TOOL_NAME, @"complete",
+        NSDictionary *err = noff_json_error(caller_tool_name(argc, argv), @"complete",
                                              NOFF_ERR_AUTHORIZATION_DENIED, authErr);
         noff_emit_json(stdout_fd, err, compact, quiet);
         return NOFF_EXIT_AUTH_DENIED;
@@ -1622,7 +1641,7 @@ int calendar_cmd_complete_reminder(int argc, char **argv, int stdout_fd, BOOL co
 
     NSString *reminderId = noff_find_arg(argc, argv, "--id");
     if (!reminderId) {
-        NSDictionary *err = noff_json_error(TOOL_NAME, @"complete",
+        NSDictionary *err = noff_json_error(caller_tool_name(argc, argv), @"complete",
                                              NOFF_ERR_INVALID_ARGS,
                                              @"Required: --id <reminder_id>");
         noff_emit_json(stdout_fd, err, compact, quiet);
@@ -1633,7 +1652,7 @@ int calendar_cmd_complete_reminder(int argc, char **argv, int stdout_fd, BOOL co
 
     EKReminder *reminder = fetch_reminder_by_id(reminderId);
     if (!reminder) {
-        NSDictionary *err = noff_json_error(TOOL_NAME, @"complete",
+        NSDictionary *err = noff_json_error(caller_tool_name(argc, argv), @"complete",
                                              NOFF_ERR_NO_DATA,
                                              [NSString stringWithFormat:@"Reminder not found with id '%@'", reminderId]);
         noff_emit_json(stdout_fd, err, compact, quiet);
@@ -1645,7 +1664,7 @@ int calendar_cmd_complete_reminder(int argc, char **argv, int stdout_fd, BOOL co
     NSError *saveErr = nil;
     BOOL saved = [eventStore() saveReminder:reminder commit:YES error:&saveErr];
     if (!saved) {
-        NSDictionary *err = noff_json_error(TOOL_NAME, @"complete",
+        NSDictionary *err = noff_json_error(caller_tool_name(argc, argv), @"complete",
                                              NOFF_ERR_INTERNAL_ERROR,
                                              saveErr.localizedDescription ?: @"Failed to update reminder");
         noff_emit_json(stdout_fd, err, compact, quiet);
@@ -1658,14 +1677,14 @@ int calendar_cmd_complete_reminder(int argc, char **argv, int stdout_fd, BOOL co
         @"completed": @(reminder.isCompleted),
         @"list": reminder.calendar.title ?: @"",
     };
-    noff_emit_json(stdout_fd, noff_json_envelope(TOOL_NAME, @"complete", data), compact, quiet);
+    noff_emit_json(stdout_fd, noff_json_envelope(caller_tool_name(argc, argv), @"complete", data), compact, quiet);
     return NOFF_EXIT_SUCCESS;
 }
 
 int calendar_cmd_delete_reminder(int argc, char **argv, int stdout_fd, BOOL compact, BOOL quiet) {
     NSString *authErr = nil;
     if (!requestRemindersAccess(&authErr)) {
-        NSDictionary *err = noff_json_error(TOOL_NAME, @"delete",
+        NSDictionary *err = noff_json_error(caller_tool_name(argc, argv), @"delete",
                                              NOFF_ERR_AUTHORIZATION_DENIED, authErr);
         noff_emit_json(stdout_fd, err, compact, quiet);
         return NOFF_EXIT_AUTH_DENIED;
@@ -1673,7 +1692,7 @@ int calendar_cmd_delete_reminder(int argc, char **argv, int stdout_fd, BOOL comp
 
     NSString *reminderId = noff_find_arg(argc, argv, "--id");
     if (!reminderId) {
-        NSDictionary *err = noff_json_error(TOOL_NAME, @"delete",
+        NSDictionary *err = noff_json_error(caller_tool_name(argc, argv), @"delete",
                                              NOFF_ERR_INVALID_ARGS,
                                              @"Required: --id <reminder_id>");
         noff_emit_json(stdout_fd, err, compact, quiet);
@@ -1682,7 +1701,7 @@ int calendar_cmd_delete_reminder(int argc, char **argv, int stdout_fd, BOOL comp
 
     EKReminder *reminder = fetch_reminder_by_id(reminderId);
     if (!reminder) {
-        NSDictionary *err = noff_json_error(TOOL_NAME, @"delete",
+        NSDictionary *err = noff_json_error(caller_tool_name(argc, argv), @"delete",
                                              NOFF_ERR_NO_DATA,
                                              [NSString stringWithFormat:@"Reminder not found with id '%@'", reminderId]);
         noff_emit_json(stdout_fd, err, compact, quiet);
@@ -1695,7 +1714,7 @@ int calendar_cmd_delete_reminder(int argc, char **argv, int stdout_fd, BOOL comp
     NSError *removeErr = nil;
     BOOL removed = [eventStore() removeReminder:reminder commit:YES error:&removeErr];
     if (!removed) {
-        NSDictionary *err = noff_json_error(TOOL_NAME, @"delete",
+        NSDictionary *err = noff_json_error(caller_tool_name(argc, argv), @"delete",
                                              NOFF_ERR_INTERNAL_ERROR,
                                              removeErr.localizedDescription ?: @"Failed to delete reminder");
         noff_emit_json(stdout_fd, err, compact, quiet);
@@ -1708,7 +1727,7 @@ int calendar_cmd_delete_reminder(int argc, char **argv, int stdout_fd, BOOL comp
         @"list": list,
         @"deleted": @YES,
     };
-    noff_emit_json(stdout_fd, noff_json_envelope(TOOL_NAME, @"delete", data), compact, quiet);
+    noff_emit_json(stdout_fd, noff_json_envelope(caller_tool_name(argc, argv), @"delete", data), compact, quiet);
     return NOFF_EXIT_SUCCESS;
 }
 
@@ -1725,7 +1744,7 @@ static int calendar_handler(int argc, char **argv,
     NSString *subcmd = noff_get_subcommand(argc, argv);
     if (!subcmd) {
         noff_emit_help(stderr_fd, HELP_TEXT);
-        NSDictionary *err = noff_json_error(TOOL_NAME, @"unknown",
+        NSDictionary *err = noff_json_error(caller_tool_name(argc, argv), @"unknown",
                                              NOFF_ERR_INVALID_ARGS,
                                              @"No command specified. Use --help for usage.");
         noff_emit_json(stdout_fd, err, compact, quiet);

@@ -142,6 +142,63 @@ NSDictionary *noff_json_envelope(NSString *tool, NSString *action, id data) {
     };
 }
 
+// ── Error message humanizer [s2-27] ──
+//
+// Tool handlers frequently surface `error.localizedDescription` verbatim.
+// For system-framework failures that text is an opaque Cocoa dump —
+// "The operation couldn't be completed. (kCLErrorDomain error 0.)",
+// WeatherKit JWT complaints, daemon/XPC wording — which tells the calling
+// model neither what KIND of problem occurred nor what to do next.
+// Translate the recognizable raw-system signatures into a plain-language
+// category plus a next step, keeping the original text appended for
+// debugging. Messages the tools wrote themselves don't carry these
+// signatures and pass through untouched.
+static NSString *noff_humanized_error_message(NSString *message) {
+    if (message.length == 0) return message;
+    NSString *lower = [message lowercaseString];
+
+    NSString *category = nil;
+    if ([lower containsString:@"jwt"] || [lower containsString:@"weatherkit"]) {
+        category = @"天气服务（WeatherKit）在系统侧校验或调用失败：多半是苹果服务端"
+                    "或设备登录状态的问题，不是参数写错。等一两分钟重试；若一直"
+                    "失败，检查系统时间是否准确、设备是否登录了 Apple ID。";
+    } else if ([lower containsString:@"kclerrordomain"] ||
+               [lower containsString:@"core location"]) {
+        category = @"定位服务报错：系统没能给出位置。确认定位权限已开启、稍等片刻"
+                    "重试；急用时可直接传经纬度参数绕过定位。";
+    } else if ([lower containsString:@"nsurlerrordomain"] ||
+               [lower containsString:@"appears to be offline"] ||
+               [lower containsString:@"not connected to the internet"] ||
+               [lower containsString:@"network connection was lost"]) {
+        category = @"网络不通：设备当前连不上网或连接中断。检查网络后重试。";
+    } else if ([lower containsString:@"ekerrordomain"] ||
+               [lower containsString:@"eventkit"]) {
+        category = @"日历/提醒事项服务（EventKit）报错：多半是权限或系统数据问题。"
+                    "检查对应权限是否开启后重试。";
+    } else if ([lower containsString:@"hkerrordomain"] ||
+               [lower containsString:@"healthkit"]) {
+        category = @"健康数据服务（HealthKit）报错：多半是权限或数据类型问题。"
+                    "检查健康权限是否开启、指标名是否正确后重试。";
+    } else if ([lower containsString:@"daemon"] ||
+               [lower containsString:@"xpc"]) {
+        category = @"系统后台服务（守护进程）暂时没响应：这是设备系统侧的问题，"
+                    "不是参数写错。稍等片刻重试；持续失败可重启 App 或设备。";
+    } else if ([lower containsString:@"couldn't be completed"] ||
+               ([message containsString:@"("] &&
+                [lower containsString:@" error "] &&
+                [message containsString:@")."])) {
+        // Generic opaque Cocoa dump: "(SomeDomain error 123.)"
+        category = @"系统返回了一条原始错误（不是参数写错）：先按原样重试一次；"
+                    "若反复出现，把下面的原始报错原文反馈给用户排查。";
+    }
+
+    if (!category) return message;
+    NSString *orig = message.length > 300
+        ? [[message substringToIndex:300] stringByAppendingString:@"…"]
+        : message;
+    return [NSString stringWithFormat:@"%@（系统原始报错：%@）", category, orig];
+}
+
 NSDictionary *noff_json_error(NSString *tool, NSString *action,
                                NSString *code, NSString *message) {
     return @{
@@ -150,7 +207,7 @@ NSDictionary *noff_json_error(NSString *tool, NSString *action,
         @"action": action,
         @"error": @{
             @"code": code,
-            @"message": message,
+            @"message": noff_humanized_error_message(message),
         },
         @"timestamp": noff_format_date([NSDate date]),
     };
