@@ -919,9 +919,9 @@ extension AIChatViewModel {
                 if msgIdx < messages.count, blockIdx < messages[msgIdx].blocks.count {
                     messages[msgIdx].blocks[blockIdx].content = toolOutput
                 }
-            } catch is CancellationError {
+            } catch let cancel as CancellationError {
                 // 取消必须透传出去，不能吞成"搜索失败"（外层 do/catch 负责收）。
-                throw
+                throw cancel
             } catch {
                 toolOutput = "Error: 搜索失败：\(error.localizedDescription)"
                 toolSuccess = false
