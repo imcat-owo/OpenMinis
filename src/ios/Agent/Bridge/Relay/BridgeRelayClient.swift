@@ -332,6 +332,15 @@ final class BridgeRelayClient: NSObject, ObservableObject {
         try await task.send(.string(text))
     }
 
+    /// 在当前连接上发一帧，代次在调用瞬间（主 actor 上）取最新值。
+    /// 给「请求到达后连接被换过」的转发收尾补发用：中继按帧编号认
+    /// 响应、不认是哪条连接送来的（pending 表按编号索引），所以把
+    /// 已记账的响应送上当前连接，重投挂在中继那头的等待者立刻能
+    /// 拿到，不必等它超时后再投一次才触发台账回放。
+    private func sendOnCurrentConnection(frame: RelayFrame) async throws {
+        try await send(frame: frame, generation: generation)
+    }
+
     // MARK: - 本地转发（req → 127.0.0.1:<port>/mcp → res/err）
 
     private enum LocalForwardError: Error {
@@ -351,6 +360,15 @@ final class BridgeRelayClient: NSObject, ObservableObject {
     /// 连接被换掉也不丢帧，同号重投时台账会把这一帧回放出去（五-1）。
     /// 因此发送失败不再补发 err 帧：活已经干完，补 err 只会让中继
     /// 把「其实成功了」误报成失败，回放才是正解。
+    /// 一个时序补丁（s2-r1fix）：请求到达后连接被换掉、本地活还没
+    /// 干完时，中继会在新连接上同号重投，台账按「处理中」把重投丢弃
+    /// （对——活只干一遍）；等活干完，原代次发送必然过期。若就这样
+    /// 静默收尾，响应只能躺在台账里等中继那头超时后再投第三次才被
+    /// 回放，调用方白等一整轮中继超时。所以原代次发送因过期失败时，
+    /// 在当前连接把这份已记账的响应补发一次：中继按编号认响应，
+    /// 挂在新连接背后的等待者立刻能拿到。补发再失败（新连接也断了）
+    /// 就收尾，帧在账里，下次同号重投照常回放。补发的是原响应帧
+    /// 本身，不是新编的 err 帧，「干成的活不许误报失败」不变。
     private nonisolated func forwardToLocalMCP(id: String, headers: [String: String], bodyBase64: String, generation gen: Int) async {
         let frame: RelayFrame
         do {
@@ -373,7 +391,16 @@ final class BridgeRelayClient: NSObject, ObservableObject {
         do {
             try await send(frame: frame, generation: gen)
         } catch is SendError {
-            // 连接已被新连接取代：帧已入账，同号重投时会回放，静默收尾。
+            // 连接已被新连接取代，原代次发不出去（s2-r1fix）：帧已
+            // 入账，在当前连接补发一次原帧，让新连接上同号重投的
+            // 等待者直接拿到，别白等一轮中继超时。补发再失败就
+            // 靠台账回放兜底（下次同号重投），只记一笔。
+            do {
+                try await sendOnCurrentConnection(frame: frame)
+                relayLog.info("relay response for req id=\(id) delivered on current connection after reconnect")
+            } catch {
+                relayLog.warning("relay response resend on current connection failed for req id=\(id): \(error.localizedDescription)")
+            }
         } catch {
             // 其他发送失败同样靠台账回放兜底（帧已入账），只记一笔。
             relayLog.warning("relay response send failed for req id=\(id): \(error.localizedDescription)")
