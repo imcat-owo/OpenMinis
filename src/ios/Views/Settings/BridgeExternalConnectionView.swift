@@ -3,6 +3,11 @@ import SwiftUI
 /// 「桥·对外连接」设置页（合并第 17、18(a) 条的设置 UI 统一在此）：
 ///
 ///   ① 「MCP 对外服务」开关 —— 驱动 BridgeExternalMCPService 起/停；
+///      开关值直接读持久化的期望状态（BridgeRelayPreferences，
+///      五-3 唯一事实源），页面不自己再存一份；关它时中继同步关
+///      （中继靠本地服务转发，服务关了中继必然断），开中继时它
+///      同步亮——两个开关永远同源，不再出现「显示关着、服务却
+///      被下一个转发请求偷偷拉起来」的假象；
 ///   ② 「中继连接」开关 —— 开 = 先起本地对外服务、再连 Cloudflare 中继；
 ///   ③ 中继地址输入框（host，存 UserDefaults）；
 ///   ④ 口令安全输入框（默认遮住，只存 iOS 钥匙串，见 BridgeRelayTokenStore）；
@@ -22,7 +27,6 @@ struct BridgeExternalConnectionView: View {
     @State private var tokenInput: String = ""
     @State private var showTokenPlaintext = false
 
-    @State private var mcpExternalOn: Bool = BridgeRelayPreferences.externalMCPEnabled
     @State private var mcpStatusText: String = ""
     @State private var mcpError: String?
 
@@ -39,14 +43,14 @@ struct BridgeExternalConnectionView: View {
         Form {
             Section {
                 Toggle(AppLocalized("MCP 对外服务"), isOn: Binding(
-                    get: { mcpExternalOn },
+                    get: { BridgeRelayPreferences.externalMCPEnabled },
                     set: { setMCPExternal($0) }
                 ))
                 LabeledContent(AppLocalized("运行状态")) {
                     Text(mcpStatusText)
                         .foregroundStyle(.secondary)
                 }
-                if mcpExternalOn {
+                if BridgeRelayPreferences.externalMCPEnabled {
                     LabeledContent(AppLocalized("小管家")) {
                         Text(stewardStatusText)
                             .foregroundStyle(.secondary)
@@ -204,17 +208,20 @@ struct BridgeExternalConnectionView: View {
         if on {
             do {
                 try BridgeExternalMCPService.shared.ensureRunning()
-                mcpExternalOn = true
                 BridgeRelayPreferences.externalMCPEnabled = true
             } catch {
-                mcpExternalOn = false
                 BridgeRelayPreferences.externalMCPEnabled = false
                 mcpError = error.localizedDescription
             }
         } else {
             BridgeExternalMCPService.shared.stop()
-            mcpExternalOn = false
             BridgeRelayPreferences.externalMCPEnabled = false
+            // 五-3 同源：中继靠本地服务转发，服务关了中继必然断，
+            // 中继开关同步关——不再留「服务显示关着、中继还连着、
+            // 下一个请求又把服务偷偷拉起来」的两套状态。
+            if relay.isEnabled {
+                relay.setEnabled(false)
+            }
         }
         refreshMCPStatus()
     }
@@ -231,8 +238,12 @@ struct BridgeExternalConnectionView: View {
                 mcpError = error.localizedDescription
                 return // 本地服务都没起来，不开中继开关
             }
+            // 五-3 同源：本地服务是为中继起的，对外服务开关（读的
+            // 是同一份持久化状态）同步亮，不再显示关着。
+            BridgeRelayPreferences.externalMCPEnabled = true
         }
         relay.setEnabled(on)
+        refreshMCPStatus()
     }
 
     /// 地址/口令改完提交：先落盘，开着中继就用新配置重连。
@@ -246,11 +257,10 @@ struct BridgeExternalConnectionView: View {
 
     /// App 重启后回到本页时：开关期望值是开、服务却没在跑，就补起一次。
     private func restoreMCPExternal() {
-        if mcpExternalOn, !BridgeExternalMCPService.shared.isRunning {
+        if BridgeRelayPreferences.externalMCPEnabled, !BridgeExternalMCPService.shared.isRunning {
             do {
                 try BridgeExternalMCPService.shared.ensureRunning()
             } catch {
-                mcpExternalOn = false
                 BridgeRelayPreferences.externalMCPEnabled = false
             }
         }
