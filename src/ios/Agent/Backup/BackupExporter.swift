@@ -324,7 +324,8 @@ actor BackupExporter {
                                       includeCredentials: options.includeCredentials)
         }
         try await run(.mcpServers, AppLocalized("Exporting MCP servers…")) {
-            try exportMCPServers(dataDir: dataDir)
+            try exportMCPServers(dataDir: dataDir,
+                                 includeCredentials: options.includeCredentials)
         }
         try await run(.environmentVariables,
                       AppLocalized("Exporting environment variables…")) {
@@ -918,19 +919,30 @@ actor BackupExporter {
 
     // MARK: - MCP servers
 
-    /// `servers.json` is copied verbatim.
+    /// `servers.json` is copied verbatim — but only when the package is
+    /// allowed to carry credentials.
     ///
     /// Caveat worth carrying forward: this file can hold Authorization headers
     /// and API keys inline, which is why it lives under the hidden config root
-    /// rather than the FileProvider-visible one. Stage 3 must decide whether it
-    /// belongs behind the credential subkey; for now it is exported as-is and
-    /// the whole package is expected to be treated as sensitive.
-    private func exportMCPServers(dataDir: URL) throws -> BackupManifest.CategoryStat? {
+    /// rather than the FileProvider-visible one. When `includeCredentials` is
+    /// false (§3.3 "export copy without credentials", which is what automatic
+    /// snapshots use — an unencrypted package in user-visible storage), the
+    /// copy is REDACTED instead: every server's `headers` and `env` are
+    /// dropped, the structure (url / command / args) survives. The importer
+    /// tolerates a file with optional headers / env absent, so a snapshot
+    /// restores as servers with empty secrets — same policy as env vars
+    /// ("visible in the list, waiting to be filled in").
+    private func exportMCPServers(dataDir: URL, includeCredentials: Bool) throws -> BackupManifest.CategoryStat? {
         let src = MCPStore.syncFileURL
         guard fm.fileExists(atPath: src.path) else { return nil }
         let dst = dataDir.appendingPathComponent("mcp_servers.json")
         try? fm.removeItem(at: dst)
-        try fm.copyItem(at: src, to: dst)
+        if includeCredentials {
+            try fm.copyItem(at: src, to: dst)
+        } else {
+            try writeRedactedMCPServers(from: src, to: dst)
+            logger.info("[Backup] MCP servers exported without credentials (redacted headers/env)")
+        }
         let bytes = (try? fm.attributesOfItem(atPath: dst.path)[.size] as? Int64) ?? 0
         // [T-backup-category-counts] Count the SERVERS, not the file. This used
         // to report `entries: 1` for any number of servers, so a user with
@@ -942,6 +954,31 @@ actor BackupExporter {
         // exists.
         let serverCount = Self.mcpServerCount(at: dst) ?? 1
         return BackupManifest.CategoryStat(entries: serverCount, bytes: bytes, encrypted: false)
+    }
+
+    /// Redacted variant of the servers file for credential-free packages:
+    /// strips every server's `headers` (HTTP Authorization lives there) and
+    /// `env` (STDIO API keys live there), keeps everything else byte-shape.
+    /// Lenient JSONSerialization rather than the typed decoder, so an
+    /// externally-authored config with unknown fields keeps them. If the file
+    /// isn't the `{"mcpServers": {…}}` shape MCPStore reads, it can't load as
+    /// servers anyway — copy as-is rather than inventing content.
+    private func writeRedactedMCPServers(from src: URL, to dst: URL) throws {
+        let data = try Data(contentsOf: src)
+        guard var root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              var servers = root["mcpServers"] as? [String: Any] else {
+            try fm.copyItem(at: src, to: dst)
+            return
+        }
+        for (id, entry) in servers {
+            guard var dict = entry as? [String: Any] else { continue }
+            dict.removeValue(forKey: "headers")
+            dict.removeValue(forKey: "env")
+            servers[id] = dict
+        }
+        root["mcpServers"] = servers
+        let out = try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys])
+        try out.write(to: dst, options: .atomic)
     }
 
     /// Number of servers declared in a `servers.json`, or nil if it cannot be
