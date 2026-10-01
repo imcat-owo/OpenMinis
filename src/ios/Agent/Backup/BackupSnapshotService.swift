@@ -220,7 +220,7 @@ final class BackupSnapshotService {
         // it can't start a second export that only collides with the export
         // lock and leaves a bogus "manual backup failed" history entry.
         let export = Task { [weak self] in
-            await self?.takeSnapshot(in: dir)
+            _ = await self?.takeSnapshot(in: dir)
         }
         snapshotTask = export
         defer { snapshotTask = nil }
