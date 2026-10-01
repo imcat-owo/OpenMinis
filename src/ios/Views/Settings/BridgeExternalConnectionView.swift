@@ -102,7 +102,8 @@ struct BridgeExternalConnectionView: View {
                 SecureField(AppLocalized("粘贴令牌"), text: $githubTokenInput)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-                    .textContentType(.oneTimeCode)
+                    // 这是 GitHub PAT（不是短信验证码），用 .password 语义才对。
+                    .textContentType(.password)
                     .submitLabel(.done)
                     .onSubmit { saveGitHubToken() }
                 if hasGitHubToken {

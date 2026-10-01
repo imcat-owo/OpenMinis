@@ -80,7 +80,11 @@ enum ReportIssueTool {
                 isError: true)
         }
 
-        let body = await composeBody(title: title, detail: detail, steward: steward)
+        // 标题既进 Issue 正文又进 POST 的 title 字段：先消毒再往下传。
+        let safeTitle = sanitize(title)
+        let safeDetail = detail.map(sanitize)
+
+        let body = await composeBody(title: safeTitle, detail: safeDetail, steward: steward)
 
         var request = URLRequest(url: URL(string: issuesEndpoint)!)
         request.httpMethod = "POST"
@@ -92,7 +96,7 @@ enum ReportIssueTool {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         do {
             request.httpBody = try JSONSerialization.data(
-                withJSONObject: ["title": title, "body": body])
+                withJSONObject: ["title": safeTitle, "body": body])
         } catch {
             return ToolOutput(text: "发送失败：问题内容打包出错，没能发出去。", isError: true)
         }
@@ -146,7 +150,9 @@ enum ReportIssueTool {
 
     /// 组装 Issue 正文。只有三部分：主人原话、当时情况（版本/时间/
     /// 小管家在忙什么）、最近共享事件日志片段。日志落盘时已脱敏，
-    /// 这里再限长；任何情况下都不附令牌/口令。
+    /// 这里再限长；正文里一切主人侧的自由文本（title/detail/
+    /// 其他任务的 instruction）先过 sanitize 消毒；任何情况下
+    /// 都不附令牌/口令。
     private static func composeBody(title: String, detail: String?, steward: Steward) async -> String {
         let info = Bundle.main.infoDictionary
         let appVersion = info?["CFBundleShortVersionString"] as? String ?? "?"
@@ -166,7 +172,7 @@ enum ReportIssueTool {
         } else {
             taskText = otherTasks.map { task in
                 let name = task.toolName ?? "未定工具"
-                let instruction = String(task.instruction.prefix(80))
+                let instruction = sanitize(String(task.instruction.prefix(80)))
                 return "\(name)：\(instruction)"
             }.joined(separator: "；")
         }
@@ -190,6 +196,24 @@ enum ReportIssueTool {
         sections.append("```\n\(logText)\n```")
         sections.append("（由桥内「报问题」自动打包发送，正文不含任何令牌/口令。）")
         return sections.joined(separator: "\n\n")
+    }
+
+    /// 本文件内的正文消毒：先过共享事件日志现成的脱敏（key=value
+    /// 秘钥模式 + data URI），再把裸 http(s) 网址也遮掉。只用在
+    /// 本文件的 Issue 正文组装里——不许动 SharedEventLog.redact
+    /// 本体（它是全 App 共享的，动它等于改所有事件日志的行为）。
+    private static let bareURLPattern: NSRegularExpression? = {
+        try? NSRegularExpression(
+            pattern: "https?://[^\\s)\"<>\\]]+",
+            options: [.caseInsensitive])
+    }()
+
+    private static func sanitize(_ s: String) -> String {
+        let redacted = SharedEventLog.redact(s)
+        guard let pattern = bareURLPattern else { return redacted }
+        let range = NSRange(redacted.startIndex..., in: redacted)
+        return pattern.stringByReplacingMatches(
+            in: redacted, range: range, withTemplate: "<url>")
     }
 
     /// GitHub 状态码 → 中文人话。GitHub 原话（message 字段）只在需要

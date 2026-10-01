@@ -56,10 +56,11 @@ final class BridgeKernelAssembly {
         for task in tasks {
             await steward.interruptByOwner(task.id)
             let instruction = String(task.instruction.prefix(80))
+            // 注：task.id 是任务 UUID，不是会话 id，不往事件的 session
+            // 字段里填；任务归属在 summary 的工具/指令里已说明。
             SharedEventLog.shared.emit(
                 event: "bridge.task_interrupted",
-                summary: "主人打断了小管家任务（工具：\(task.toolName ?? "未定")，指令：\(instruction)）",
-                sessionId: task.id.uuidString)
+                summary: "主人打断了小管家任务（工具：\(task.toolName ?? "未定")，指令：\(instruction)）")
         }
         return tasks
     }
