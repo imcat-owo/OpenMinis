@@ -70,10 +70,20 @@ final class BackupSnapshotService {
     func scheduleForegroundCheck() { scheduleCheck(after: 3) }
 
     private func scheduleCheck(after delay: TimeInterval) {
+        // P2-2: never touch a snapshot that is already running. The old code
+        // used one handle for both the scheduled wait and the export, so a
+        // fresh trigger during a long export cancelled it mid-flight — and
+        // the replacement check then died on the isSnapshotting guard,
+        // silently losing the round. While an export runs, a new trigger is
+        // simply ignored; the export itself will satisfy freshness.
+        guard !isSnapshotting else { return }
         pendingCheck?.cancel()
         pendingCheck = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             guard !Task.isCancelled else { return }
+            // Fired: drop the handle so a later scheduleCheck can't cancel a
+            // task that already did its job.
+            self?.pendingCheck = nil
             await self?.checkAndSnapshotIfDue()
         }
     }
