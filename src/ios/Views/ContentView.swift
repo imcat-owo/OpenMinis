@@ -3549,6 +3549,33 @@ struct ContentView: View {
                 .clipped()
                 .overlay(studio.color(.canvas, scope: .bottomBar).opacity(studio.wallpaperShade))
                 .ignoresSafeArea(edges: .bottom)
+        } else if let hp = studio.wallpaper(for: .home) {
+            // [T-home-wallpaper-bottom-strip] The home backdrop is the
+            // session list's background: it paints behind this bar but
+            // stops short of the bottom safe-area strip, and this bar
+            // background is the only layer that reaches that strip (#8).
+            // It used to stay clear unless a dedicated bottom-bar image
+            // was set, so a home-only wallpaper left the strip
+            // unpainted and the stack container's white showed through
+            // under the bar. Fall back to the home wallpaper, rendered
+            // full-width and anchored to the image's own bottom edge,
+            // so the strip shows the wallpaper's actual bottom at the
+            // same width scale as the backdrop behind the list.
+            GeometryReader { proxy in
+                let width = proxy.size.width
+                let imageHeight = width * hp.size.height / max(hp.size.width, 1)
+                ZStack(alignment: .bottom) {
+                    studio.color(.canvas, scope: .home)
+                    Image(uiImage: hp)
+                        .resizable()
+                        .frame(width: width, height: imageHeight)
+                    studio.color(.canvas, scope: .home)
+                        .opacity(studio.wallpaperShade)
+                }
+                .frame(width: proxy.size.width, height: proxy.size.height)
+                .clipped()
+            }
+            .ignoresSafeArea(edges: .bottom)
         } else {
             Color.clear
         }
