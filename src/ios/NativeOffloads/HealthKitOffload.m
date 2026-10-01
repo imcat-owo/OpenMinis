@@ -4004,14 +4004,18 @@ static int cmd_batch(int argc, char **argv, int stdout_fd, BOOL compact, BOOL qu
     for (NSString *raw in rawNames) {
         NSString *name = [[raw stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]] lowercaseString];
         if (name.length == 0) continue;
-        if ([batchUnsupported containsObject:name]) {
-            [unsupportedNames addObject:name];
-            continue;
-        }
         // Canonical name via the shared resolver (hkNormalizeMetricName);
         // keeping it in resolvedNames preserves the `alias_resolved`
         // announcements and per-entry `resolved_as` below.
         NSString *resolved = hkNormalizeMetricName(name);
+        // [s2-27fix] The unsupported check must run on the NORMALIZED
+        // name: the set holds canonical kebab-case forms, so raw variants
+        // ("state_of_mind", "vision rx") used to slip past this check and
+        // land in unknownNames with a misleading "typo?" hint.
+        if ([batchUnsupported containsObject:resolved]) {
+            [unsupportedNames addObject:name];
+            continue;
+        }
         resolvedNames[name] = resolved;
         NSDictionary *qInfo = logQuantityTypeInfo(resolved);
         if (qInfo) {
