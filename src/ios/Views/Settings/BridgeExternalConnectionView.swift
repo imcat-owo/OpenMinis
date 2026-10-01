@@ -6,7 +6,10 @@ import SwiftUI
 ///   ② 「中继连接」开关 —— 开 = 先起本地对外服务、再连 Cloudflare 中继；
 ///   ③ 中继地址输入框（host，存 UserDefaults）；
 ///   ④ 口令安全输入框（默认遮住，只存 iOS 钥匙串，见 BridgeRelayTokenStore）；
-///   ⑤ 中继状态行（在线 / 离线 / 连接中 / 口令错误）。
+///   ⑤ 中继状态行（在线 / 离线 / 连接中 / 口令错误）；
+///   ⑥ 「小管家」状态行 + 打断按钮（第 20 条）：服务开着时显示小管家
+///      正在执行的任务，有任务在跑/排队时可一键打断，外部 AI 会收到
+///      「主人打断」专属报错。
 ///
 /// 口令与完整中继地址不进日志；口令在界面上默认只以 •••• 出现，
 /// 与本 App 其他凭据输入框（如 API Key）同一套交互：眼睛按钮才明文。
@@ -21,6 +24,10 @@ struct BridgeExternalConnectionView: View {
     @State private var mcpStatusText: String = ""
     @State private var mcpError: String?
 
+    /// 小管家当前任务状态（第 20 条）：页面在屏时轮询刷新。
+    @State private var stewardStatusText: String = ""
+    @State private var hasActiveStewardTask: Bool = false
+
     var body: some View {
         Form {
             Section {
@@ -31,6 +38,19 @@ struct BridgeExternalConnectionView: View {
                 LabeledContent(AppLocalized("运行状态")) {
                     Text(mcpStatusText)
                         .foregroundStyle(.secondary)
+                }
+                if mcpExternalOn {
+                    LabeledContent(AppLocalized("小管家")) {
+                        Text(stewardStatusText)
+                            .foregroundStyle(.secondary)
+                    }
+                    if hasActiveStewardTask {
+                        Button(role: .destructive) {
+                            Task { await interruptSteward() }
+                        } label: {
+                            Text(AppLocalized("打断小管家"))
+                        }
+                    }
                 }
             } header: {
                 Text(AppLocalized("本地服务"))
@@ -73,6 +93,14 @@ struct BridgeExternalConnectionView: View {
             tokenInput = BridgeRelayTokenStore.load() ?? ""
             relay.restoreFromPreferences()
             restoreMCPExternal()
+        }
+        // 小管家任务状态轮询：页面在屏时每 2 秒刷新一次，离屏自动停
+        // （.task 随视图消失取消），不留后台计时器。
+        .task {
+            while !Task.isCancelled {
+                await refreshStewardStatus()
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
         }
         .alert(AppLocalized("MCP 对外服务启动失败"), isPresented: Binding(
             get: { mcpError != nil },
@@ -207,5 +235,27 @@ struct BridgeExternalConnectionView: View {
         } else {
             mcpStatusText = AppLocalized("未运行")
         }
+    }
+
+    // MARK: 小管家任务状态与打断（第 20 条）
+
+    private func refreshStewardStatus() async {
+        let tasks = await BridgeExternalMCPService.shared.activeStewardTasks()
+        hasActiveStewardTask = !tasks.isEmpty
+        guard let first = tasks.first else {
+            stewardStatusText = AppLocalized("空闲")
+            return
+        }
+        let name = first.toolName ?? "…"
+        stewardStatusText = tasks.count > 1
+            ? AppLocalized("正在执行：\(name)（另有 \(tasks.count - 1) 个排队）")
+            : AppLocalized("正在执行：\(name)")
+    }
+
+    /// 主人打断：停掉在跑与排队的全部任务（外部 AI 会收到「主人打断」
+    /// 专属报错），打完立刻刷新状态行。
+    private func interruptSteward() async {
+        _ = await BridgeExternalMCPService.shared.interruptStewardTasksByOwner()
+        await refreshStewardStatus()
     }
 }

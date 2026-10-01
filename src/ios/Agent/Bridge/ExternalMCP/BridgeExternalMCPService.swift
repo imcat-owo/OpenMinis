@@ -95,4 +95,21 @@ public final class BridgeExternalMCPService: @unchecked Sendable {
             Task { await sessionManager.shutdown() }
         }
     }
+
+    // MARK: - 主人打断（第 20 条，设置页用）
+
+    /// 小管家当前在跑/排队的任务；服务未运行时为空。
+    public func activeStewardTasks() async -> [StewardTaskSummary] {
+        let current: BridgeKernelAssembly? = lock.withLock { assembly }
+        guard let current else { return [] }
+        return await current.activeStewardTasks()
+    }
+
+    /// 主人打断小管家当前全部任务，返回被打断的任务数；未运行时为 0。
+    @discardableResult
+    public func interruptStewardTasksByOwner() async -> Int {
+        let current: BridgeKernelAssembly? = lock.withLock { assembly }
+        guard let current else { return 0 }
+        return await current.interruptStewardTasksByOwner().count
+    }
 }
