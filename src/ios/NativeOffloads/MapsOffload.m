@@ -35,8 +35,8 @@ static NSString *const HELP_TEXT =
      "\n"
      "SEARCH OPTIONS:\n"
      "  --query <text>       Search query (required)\n"
-     "  --lat <degrees>      Center latitude (required)\n"
-     "  --lon <degrees>      Center longitude (required)\n"
+     "  --lat <degrees>      Center latitude (optional; default: current location)\n"
+     "  --lon <degrees>      Center longitude (optional; default: current location)\n"
      "  --radius <m>         Search radius in meters (default 1000)\n"
      "  --limit <N>          Maximum results (default 10)\n"
      "\n"
@@ -112,6 +112,86 @@ static MKDirectionsTransportType transport_type_for_mode(NSString *mode) {
     return MKDirectionsTransportTypeAutomobile; // default: driving
 }
 
+// ── Current location (search center fallback) [s2-29] ──
+//
+// Same one-shot fix pattern as WeatherOffload's get_location_sync /
+// LocationOffload: manager retained in a __block variable (CLLocationManager
+// holds its delegate weakly), authorization handled inline, 15s semaphore.
+
+@interface NoffMapsLocationDelegate : NSObject <CLLocationManagerDelegate>
+@property (nonatomic, strong) CLLocation *location;
+@property (nonatomic, strong) NSError *error;
+@property (nonatomic, strong) dispatch_semaphore_t semaphore;
+@end
+
+@implementation NoffMapsLocationDelegate
+- (instancetype)init {
+    self = [super init];
+    if (self) _semaphore = dispatch_semaphore_create(0);
+    return self;
+}
+- (void)locationManager:(CLLocationManager *)manager didUpdateLocations:(NSArray<CLLocation *> *)locations {
+    self.location = locations.lastObject;
+    dispatch_semaphore_signal(self.semaphore);
+}
+- (void)locationManager:(CLLocationManager *)manager didFailWithError:(NSError *)error {
+    self.error = error;
+    dispatch_semaphore_signal(self.semaphore);
+}
+@end
+
+/// One-shot current location. On failure returns nil and sets *outError to
+/// a plain-language explanation (never a guessed coordinate).
+static CLLocation *current_location_sync(NSError **outError) {
+    __block NoffMapsLocationDelegate *delegate = [[NoffMapsLocationDelegate alloc] init];
+    __block CLLocationManager *manager = nil;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        manager = [[CLLocationManager alloc] init];
+        manager.delegate = delegate;
+        manager.desiredAccuracy = kCLLocationAccuracyKilometer;
+
+        CLAuthorizationStatus status = manager.authorizationStatus;
+        if (status == kCLAuthorizationStatusNotDetermined) {
+            [manager requestWhenInUseAuthorization];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC),
+                           dispatch_get_main_queue(), ^{
+                [manager requestLocation];
+            });
+        } else if (status == kCLAuthorizationStatusAuthorizedWhenInUse ||
+                   status == kCLAuthorizationStatusAuthorizedAlways) {
+            [manager requestLocation];
+        } else {
+            delegate.error = [NSError errorWithDomain:@"NativeOffload" code:3
+                               userInfo:@{NSLocalizedDescriptionKey:
+                                   @"Location access denied. To grant access, open "
+                                    "Settings > Privacy & Security > Location Services "
+                                    "and enable 我的小家 — or pass --lat/--lon to search "
+                                    "around a specific point."}];
+            dispatch_semaphore_signal(delegate.semaphore);
+        }
+    });
+
+    long waitResult = dispatch_semaphore_wait(delegate.semaphore,
+                            dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
+    if (delegate.location) return delegate.location;
+    if (outError) {
+        if (delegate.error) {
+            *outError = delegate.error;
+        } else {
+            NSString *why = waitResult != 0
+                ? @"timed out waiting for a location fix"
+                : @"location services returned no fix";
+            *outError = [NSError errorWithDomain:@"NativeOffload" code:4
+                               userInfo:@{NSLocalizedDescriptionKey:
+                                   [NSString stringWithFormat:
+                                       @"Could not determine your current location (%@). "
+                                        "Pass --lat/--lon to search around a specific point.", why]}];
+        }
+    }
+    return nil;
+}
+
 // ── Subcommands ──
 
 static int cmd_search(int argc, char **argv, int stdout_fd, int stderr_fd, BOOL compact, BOOL quiet) {
@@ -134,16 +214,35 @@ static int cmd_search(int argc, char **argv, int stdout_fd, int stderr_fd, BOOL 
     NSInteger limit = limitStr ? [limitStr integerValue] : 10;
     if (limit <= 0) limit = 10;
 
-    if (!latStr || !lonStr) {
+    CLLocationCoordinate2D center;
+    NSString *centerSource = @"provided";
+    if (!latStr && !lonStr) {
+        // [s2-29] No center given: use the current location as the search
+        // center (the HELP_TEXT examples always promised this worked).
+        // If no fix can be obtained, fail with a plain-language error —
+        // never invent a center coordinate.
+        NSError *locError = nil;
+        CLLocation *current = current_location_sync(&locError);
+        if (!current) {
+            NSDictionary *err = noff_json_error(TOOL_NAME, @"search",
+                                                 NOFF_ERR_NOT_AVAILABLE,
+                                                 locError.localizedDescription ?:
+                                                 @"Could not determine your current location. Pass --lat/--lon to search around a specific point.");
+            noff_emit_json(stdout_fd, err, compact, quiet);
+            return NOFF_EXIT_NOT_AVAILABLE;
+        }
+        center = current.coordinate;
+        centerSource = @"current_location";
+    } else if (!latStr || !lonStr) {
         noff_emit_help(stderr_fd, HELP_TEXT);
         NSDictionary *err = noff_json_error(TOOL_NAME, @"search",
                                              NOFF_ERR_INVALID_ARGS,
-                                             @"Required: --lat and --lon");
+                                             @"--lat and --lon must be given together — pass both, or neither to search around your current location.");
         noff_emit_json(stdout_fd, err, compact, quiet);
         return NOFF_EXIT_INVALID_ARGS;
+    } else {
+        center = CLLocationCoordinate2DMake([latStr doubleValue], [lonStr doubleValue]);
     }
-
-    CLLocationCoordinate2D center = CLLocationCoordinate2DMake([latStr doubleValue], [lonStr doubleValue]);
 
     // MapKit objects (MKMapItem, MKLocalSearch, etc.) must be created and
     // released on the main thread to avoid crashes in NSNotificationCenter
@@ -220,6 +319,9 @@ static int cmd_search(int argc, char **argv, int stdout_fd, int stderr_fd, BOOL 
                 @"results": results,
                 @"count": @(results.count),
                 @"query": query,
+                @"center_lat": @(center.latitude),
+                @"center_lon": @(center.longitude),
+                @"center_source": centerSource,
             };
             dispatch_semaphore_signal(mainSem);
         }];
