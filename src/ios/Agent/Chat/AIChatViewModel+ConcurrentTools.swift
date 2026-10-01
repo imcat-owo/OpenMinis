@@ -787,8 +787,13 @@ extension AIChatViewModel {
                         // candidate, so a switch is visible as it occurs.
                         let groupLabel = VisionGroupResolver.groupName()
                         let pathForUI = pathArg
-                        let outcome = try await VisionGroupResolver.describe(
-                            imageData: inferenceData,
+                        // [s2-ocr] OCR ladder (IMG-9): image-hash cache →
+                        // free on-device OCR → Vision Group describe. Only the
+                        // last tier spends model quota; repeat reads of the
+                        // same image cost nothing. See ImageOCRTier.
+                        let tierOutcome = try await ImageOCRTier.textForImage(
+                            originalData: fileData,
+                            preparedData: inferenceData,
                             mimeType: gated.mimeType,
                             customPrompt: visionPrompt,
                             seed: abs(tu.id.hashValue),
@@ -803,14 +808,10 @@ extension AIChatViewModel {
                                     "Reading image \(pathForUI) via \(attempt.modelName)\(via)\(retry)…"
                             }
                         )
-                        let framed = VisionGroupResolver.framedDescription(
-                            outcome,
-                            groupName: groupLabel,
-                            question: visionPrompt
-                        )
-                        toolOutput = meta + "\n\n" + framed
+                        toolOutput = meta + "\n\n" + tierOutcome.framedText
                         toolSuccess = true
-                        ctLogger.info("[read_image] vision-group described image (\(outcome.description.count) chars) via \(outcome.modelName), priorFailures=\(outcome.priorFailures.count)")
+                        let viaName = tierOutcome.modelName.map { " via \($0)" } ?? ""
+                        ctLogger.info("[read_image] ocr-tier source=\(tierOutcome.source.rawValue)\(viaName) cached=\(tierOutcome.fromCache)")
                     } catch {
                         // Deliberately a SUCCESSFUL result carrying failure text:
                         // an errored tool result tends to make models retry in a

@@ -233,6 +233,8 @@
 		E5D00099 /* ProviderConfigDB.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5D00199 /* ProviderConfigDB.swift */; };
 		E5D0A101 /* ModelReleaseIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5D0A102 /* ModelReleaseIndex.swift */; };
 		E5DA0001 /* VisionGroupResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5DA0002 /* VisionGroupResolver.swift */; };
+		E5DAC0010000000000000002 /* ImageOCRTier.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5DAC0010000000000000001 /* ImageOCRTier.swift */; };
+		E5DAC0020000000000000002 /* ImageTextCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5DAC0020000000000000001 /* ImageTextCache.swift */; };
 		E5DRC0010 /* DebugRPCConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5DRC0020 /* DebugRPCConfig.swift */; };
 		E5DVO0001 /* DebugViewOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5DVO0011 /* DebugViewOverlay.swift */; };
 		E5E000001 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5E000011 /* ShareViewController.swift */; };
@@ -924,6 +926,8 @@
 		E5D00199 /* ProviderConfigDB.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderConfigDB.swift; sourceTree = "<group>"; };
 		E5D0A102 /* ModelReleaseIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelReleaseIndex.swift; sourceTree = "<group>"; };
 		E5DA0002 /* VisionGroupResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionGroupResolver.swift; sourceTree = "<group>"; };
+		E5DAC0010000000000000001 /* ImageOCRTier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageOCRTier.swift; sourceTree = "<group>"; };
+		E5DAC0020000000000000001 /* ImageTextCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageTextCache.swift; sourceTree = "<group>"; };
 		E5DRC0020 /* DebugRPCConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugRPCConfig.swift; sourceTree = "<group>"; };
 		E5DVO0011 /* DebugViewOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugViewOverlay.swift; sourceTree = "<group>"; };
 		E5E000010 /* MinisShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = MinisShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -1617,6 +1621,8 @@
 				E5D00199 /* ProviderConfigDB.swift */,
 				E5D00016 /* ModelGroupRouter.swift */,
 				E5DA0002 /* VisionGroupResolver.swift */,
+				E5DAC0010000000000000001 /* ImageOCRTier.swift */,
+				E5DAC0020000000000000001 /* ImageTextCache.swift */,
 				E5D00017 /* ProviderMigration.swift */,
 				E5D0A102 /* ModelReleaseIndex.swift */,
 				E5D00018 /* ModelsDevAPI.swift */,
@@ -3108,6 +3114,8 @@
 				E5D00099 /* ProviderConfigDB.swift in Sources */,
 				E5D00006 /* ModelGroupRouter.swift in Sources */,
 				E5DA0001 /* VisionGroupResolver.swift in Sources */,
+				E5DAC0010000000000000002 /* ImageOCRTier.swift in Sources */,
+				E5DAC0020000000000000002 /* ImageTextCache.swift in Sources */,
 				E5D00007 /* ProviderMigration.swift in Sources */,
 				E5D0A101 /* ModelReleaseIndex.swift in Sources */,
 				E5D00008 /* ModelsDevAPI.swift in Sources */,
