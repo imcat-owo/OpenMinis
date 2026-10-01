@@ -146,6 +146,64 @@ final class StewardTests: XCTestCase {
         XCTAssertEqual(slowResult.state, .finished, "取消排队任务不影响正在跑的")
     }
 
+    func testInterruptRunningTaskByOwner() async throws {
+        let steward = try await makeSteward()
+        let id = await steward.submit(
+            StewardRequest(
+                instruction: "等很久",
+                toolName: FakeTools.delayName,
+                arguments: try StrictJSON.parseObject(#"{"ms":30000}"#),
+                timeoutSeconds: 60))
+        try await Task.sleep(nanoseconds: 200_000_000)
+        let started = Date()
+        await steward.interruptByOwner(id)
+        let result = await steward.waitForCompletion(id)
+        let elapsed = Date().timeIntervalSince(started)
+        XCTAssertEqual(result.state, .interruptedByOwner, "主人打断必须单列终态，不能混进一般取消")
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(
+            result.cleanedText?.contains("主人打断") ?? false,
+            "回给外部调用方的文案必须能区分主人打断：\(result.cleanedText ?? "nil")")
+        XCTAssertLessThan(elapsed, 5, "主人打断应很快收尾，不该等满 30 秒")
+    }
+
+    func testInterruptQueuedTaskByOwner() async throws {
+        let steward = try await makeSteward()
+        let slowID = await steward.submit(
+            StewardRequest(
+                instruction: "等一下",
+                toolName: FakeTools.delayName,
+                arguments: try StrictJSON.parseObject(#"{"ms":600}"#),
+                timeoutSeconds: 10))
+        let queuedID = await steward.submit(
+            StewardRequest(instruction: "复述", toolName: FakeTools.echoName))
+        await steward.interruptByOwner(queuedID)
+        let queuedResult = await steward.waitForCompletion(queuedID)
+        XCTAssertEqual(queuedResult.state, .interruptedByOwner)
+        let slowResult = await steward.waitForCompletion(slowID)
+        XCTAssertEqual(slowResult.state, .finished, "打断排队任务不影响正在跑的")
+    }
+
+    func testActiveTaskSummaries() async throws {
+        let steward = try await makeSteward()
+        let slowID = await steward.submit(
+            StewardRequest(
+                instruction: "等一下",
+                toolName: FakeTools.delayName,
+                arguments: try StrictJSON.parseObject(#"{"ms":800}"#),
+                timeoutSeconds: 10))
+        let queuedID = await steward.submit(
+            StewardRequest(instruction: "复述一下", toolName: FakeTools.echoName))
+        let summaries = await steward.activeTaskSummaries()
+        XCTAssertEqual(summaries.map(\.id), [slowID, queuedID], "在跑的在前、排队的在后")
+        XCTAssertEqual(summaries.first?.toolName, FakeTools.delayName)
+        XCTAssertEqual(summaries.first?.instruction, "等一下")
+        _ = await steward.waitForCompletion(slowID)
+        _ = await steward.waitForCompletion(queuedID)
+        let after = await steward.activeTaskSummaries()
+        XCTAssertTrue(after.isEmpty, "全部终结后不应再有活动任务")
+    }
+
     func testTimeoutFuse() async throws {
         let steward = try await makeSteward()
         let started = Date()

@@ -1,7 +1,10 @@
 import Foundation
 
 /// 管家任务状态机：排队 → 派发 → 执行 → 清洗 → 完成，
-/// 异常分支：失败（带原因）/ 已取消 / 超时熔断。终态不可再变。
+/// 异常分支：失败（带原因）/ 已取消 / 主人打断 / 超时熔断。终态不可再变。
+/// 「主人打断」单列一态：它和一般取消的收尾动作相同（停任务），但回给
+/// 外部调用方的文案必须能明确区分——外部 AI 收到后应先去问主人原因，
+/// 而不是把打断当普通失败自行重试。
 public enum StewardState: Sendable, Equatable {
     case queued
     case dispatched(toolName: String)
@@ -10,11 +13,12 @@ public enum StewardState: Sendable, Equatable {
     case finished
     case failed(reason: String)
     case cancelled
+    case interruptedByOwner
     case timedOut
 
     public var isTerminal: Bool {
         switch self {
-        case .finished, .failed, .cancelled, .timedOut:
+        case .finished, .failed, .cancelled, .interruptedByOwner, .timedOut:
             return true
         case .queued, .dispatched, .executing, .cleaning:
             return false
@@ -73,15 +77,38 @@ public struct StewardResult: Sendable, Equatable {
     }
 }
 
+/// 一个未终结任务的摘要（宿主 UI 展示「小管家正在干什么」用）。
+public struct StewardTaskSummary: Sendable, Equatable {
+    public var id: UUID
+    public var state: StewardState
+    public var toolName: String?
+    public var instruction: String
+
+    public init(id: UUID, state: StewardState, toolName: String?, instruction: String) {
+        self.id = id
+        self.state = state
+        self.toolName = toolName
+        self.instruction = instruction
+    }
+}
+
 /// 小管家调度：串行队列接单，逐个走完状态机。
 ///
 /// - 队列：一台在跑时后面的排队，不并发抢工具；
 /// - 取消：排队中的直接取消，运行中的取消其任务，收尾为 .cancelled；
+///   主人在 App 里手动打断走 `interruptByOwner`，动作相同但收尾为
+///   .interruptedByOwner 并回专属文案，让外部 AI 能区分并先来问主人；
 /// - 超时熔断：执行与睡眠赛跑，先到者定性。熔断靠协作式取消——工具处理
 ///   函数必须响应 Task 取消（桥自己的工具都响应）；不理取消的工具会继续
 ///   占着队列直到自然结束，其结果被丢弃（这一条写死在语义里，不假装能强杀）。
 /// - 错误：工具抛错/返回错误都收尾为 .failed，原因原文保留进结果，不吞。
 public actor Steward {
+    /// 主人打断时回给外部调用方的文案。与一般取消（「任务已取消」）、
+    /// 超时、失败明确区分：点明是主人在 App 里手动打断，并要求外部 AI
+    /// 先向主人询问原因、不许自行重试。
+    public static let ownerInterruptedText =
+        "【主人打断】这次任务被主人在 App 里手动打断，已经停止。主人可能有新的安排或对执行方式不满意；请先向主人询问打断的原因和下一步，不要把这当成普通失败自行重试。"
+
     private let registry: ToolRegistry
     private let cleaner: ResultCleaner
 
@@ -93,6 +120,7 @@ public actor Steward {
     private var runningID: UUID?
     private var runningTask: Task<Void, Never>?
     private var cancelRequested: Set<UUID> = []
+    private var ownerInterruptRequested: Set<UUID> = []
 
     public init(registry: ToolRegistry, cleaner: ResultCleaner = ResultCleaner()) {
         self.registry = registry
@@ -157,6 +185,38 @@ public actor Steward {
         }
     }
 
+    /// 主人打断（App 内主人手动触发）：停任务的动作与 `cancel` 相同，
+    /// 但终态是 `.interruptedByOwner`、回给外部调用方的是
+    /// `ownerInterruptedText`，与一般取消/超时/失败明确区分。
+    public func interruptByOwner(_ id: UUID) {
+        guard let result = results[id], !result.state.isTerminal else { return }
+        ownerInterruptRequested.insert(id)
+        if runningID == id {
+            runningTask?.cancel()
+        } else if queue.contains(id) {
+            queue.removeAll { $0 == id }
+            finish(
+                id: id, state: .interruptedByOwner, toolName: result.toolName,
+                rawText: nil, cleanedText: Self.ownerInterruptedText, isError: true)
+        }
+    }
+
+    /// 当前未终结的任务摘要：正在跑的在前，排队的按提交顺序。
+    /// 宿主（App 设置页）靠它展示「小管家正在干什么」并提供打断入口。
+    public func activeTaskSummaries() -> [StewardTaskSummary] {
+        var ids: [UUID] = []
+        if let runningID, results[runningID]?.state.isTerminal == false {
+            ids.append(runningID)
+        }
+        ids.append(contentsOf: queue)
+        return ids.compactMap { id in
+            guard let result = results[id], !result.state.isTerminal else { return nil }
+            return StewardTaskSummary(
+                id: id, state: result.state, toolName: result.toolName,
+                instruction: requests[id]?.instruction ?? "")
+        }
+    }
+
     // MARK: - 内部流程
 
     private func startNextIfIdle() {
@@ -215,9 +275,29 @@ public actor Steward {
             return
         }
 
+        // 主人若在派发阶段就打断了（运行任务已被 cancel，但派发校验是
+        // 同步走完的），别再进执行段，直接按主人打断收尾。
+        if ownerInterruptRequested.contains(id) {
+            finish(
+                id: id, state: .interruptedByOwner, toolName: toolName,
+                rawText: nil, cleanedText: Self.ownerInterruptedText, isError: true)
+            completeRun(id: id)
+            return
+        }
+
         // —— 执行（带超时熔断）——
         transition(id: id, to: .executing(toolName: toolName))
         let outcome = await executeWithTimeout(toolName: toolName, request: request)
+
+        // 主人打断优先于一般取消定性：两者都会取消运行任务，但回给
+        // 外部调用方的文案必须能区分（主人打断要让对方先来问主人）。
+        if ownerInterruptRequested.contains(id) {
+            finish(
+                id: id, state: .interruptedByOwner, toolName: toolName,
+                rawText: nil, cleanedText: Self.ownerInterruptedText, isError: true)
+            completeRun(id: id)
+            return
+        }
 
         if cancelRequested.contains(id) {
             finish(
@@ -328,6 +408,7 @@ public actor Steward {
             runningTask = nil
         }
         cancelRequested.remove(id)
+        ownerInterruptRequested.remove(id)
         startNextIfIdle()
     }
 }
