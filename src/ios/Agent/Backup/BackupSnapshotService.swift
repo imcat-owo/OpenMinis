@@ -157,7 +157,7 @@ final class BackupSnapshotService {
     }
 
     private func takeSnapshot(in dir: URL) async {
-        let categories = BackupCategory.backupable
+        let categories = Set(BackupCategory.backupable)
         let options = BackupExporter.Options(
             categories: categories,
             maxFileBytes: nil,
@@ -181,8 +181,8 @@ final class BackupSnapshotService {
                 runId, totalBytes: summary.totalBytes,
                 skippedFiles: summary.skippedFiles,
                 packageName: snapURL.lastPathComponent, destinations: [],
-                skippedEntries: summary.skippedPaths.map {
-                    .init(path: $0.path, size: $0.size, sessionTitle: nil)
+                skippedEntries: summary.skippedPaths.map { skipped -> BackupHistory.SkippedEntry in
+                    BackupHistory.SkippedEntry(path: skipped.path, size: skipped.size, sessionTitle: nil)
                 })
             logger.info("[Backup] snapshot written: \(snapURL.lastPathComponent) (\(summary.totalBytes) bytes)")
             pruneSnapshots(in: dir)
