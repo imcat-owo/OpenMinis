@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import SwiftUI
 
@@ -23,13 +24,13 @@ enum PermissionResult {
 }
 
 struct PermissionRequest: Identifiable {
+    /// 底座挂起 id（OffloadPermissionDialog 用它调 respond）。
     let id: String
     let commandName: String
     let displayLabel: String
     let description: String
     /// The full shell command string, e.g. "apple-healthkit query --type steps"
     let fullCommand: String
-    let continuation: CheckedContinuation<Bool, Never>
 
     /// Parse the command arguments into displayable key-value pairs.
     /// Handles patterns like: `command subcommand --key value --flag`.
@@ -155,21 +156,34 @@ final class OffloadPermissionManager: ObservableObject {
     /// showing the level seeded when the page was opened.
     @Published private(set) var levelsRevision = 0
 
-    /// Requests waiting behind `pendingRequest`. Concurrent tool calls can
-    /// ask at the same time (TaskGroup fan-out); with a single slot the
-    /// second ask overwrote the first, whose continuation then had no path
-    /// back — respond() and the timeout both key off the current slot — so
-    /// the first caller hung forever. Excess asks now queue FIFO and are
-    /// presented one at a time.
-    private var pendingQueue: [PermissionRequest] = []
-
-    /// Per-session "Ask Once" grants: [sessionId: Set<commandName>]
-    private var sessionGrants: [String: Set<String>] = [:]
+    /// [s2-suspend-base] 挂起底座：排队、超时、会话放行都由它管，
+    /// 本类只负责 offload 审批语义（权限等级 → 挂起/放行/拒绝）与弹窗映射。
+    private let suspension = ToolSuspensionService.shared
+    private var cancellables = Set<AnyCancellable>()
 
     private let defaults = UserDefaults.standard
     private let logger = AppLogger(category: "OffloadPermission")
 
-    private init() {}
+    private init() {
+        // 底座当前呈现的是 offload 审批 → 映射成 PermissionRequest 给弹窗；
+        // 其他 tag（工具审批/问用户）各自由自己的弹窗消费，这里映射成 nil。
+        suspension.$current
+            .map { [weak self] req -> PermissionRequest? in
+                guard let self, let req, req.tag == "offload",
+                      case .approval(let payload) = req.kind
+                else { return nil }
+                let ctx = payload.context
+                guard let commandName = ctx["commandName"] else { return nil }
+                return PermissionRequest(
+                    id: req.id,
+                    commandName: commandName,
+                    displayLabel: ctx["displayLabel"] ?? commandName,
+                    description: ctx["description"] ?? "",
+                    fullCommand: ctx["fullCommand"] ?? ""
+                )
+            }
+            .assign(to: &$pendingRequest)
+    }
 
     // MARK: - Storage
 
@@ -191,7 +205,7 @@ final class OffloadPermissionManager: ObservableObject {
         for cmd in Self.allCommands {
             setPermissionLevel(.bypass, for: cmd.name)
         }
-        sessionGrants.removeAll()
+        suspension.clearAllSessionGrants()
     }
 
     // MARK: - Command Extraction
@@ -257,88 +271,64 @@ final class OffloadPermissionManager: ObservableObject {
             return .denied("Permission denied: the user has disabled '\(command)'. To enable it, go to Settings > Permissions or tap: [Open Permissions](minis-clone://settings/permissions)")
 
         case .askOnce:
-            // Check session grant
-            if sessionGrants[sessionId]?.contains(command) == true {
+            // 本次会话已放行（"Allow in Session" 点过）
+            if suspension.hasSessionGrant("offload:\(command)", sessionId: sessionId) {
                 return .allowed
             }
 
             let cmdInfo = Self.allCommands.first(where: { $0.name == command })
-            let displayLabel = cmdInfo?.displayLabel ?? command
-            let description = cmdInfo?.description ?? ""
+            // 挂起到底座：排队/30 秒超时/弹窗都由底座管。
+            // "Allow in Session" 点了就记会话放行，所以 allowSessionGrant 不用
+            // 再给开关——approve 固定带 grantSession: true（见 respond）。
+            let decision = await suspension.suspendApproval(
+                tag: "offload",
+                title: cmdInfo?.displayLabel ?? command,
+                description: cmdInfo?.description ?? "",
+                grantKey: "offload:\(command)",
+                allowSessionGrant: false,
+                approveLabel: "Allow in Session",
+                denyLabel: "Deny in Session",
+                denyMessage: "",
+                context: [
+                    "commandName": command,
+                    "displayLabel": cmdInfo?.displayLabel ?? command,
+                    "description": cmdInfo?.description ?? "",
+                    "fullCommand": fullCommand,
+                ],
+                sessionId: sessionId,
+                timeoutSeconds: 30
+            )
 
-            let allowed = await withCheckedContinuation { continuation in
-                let request = PermissionRequest(
-                    id: UUID().uuidString,
-                    commandName: command,
-                    displayLabel: displayLabel,
-                    description: description,
-                    fullCommand: fullCommand,
-                    continuation: continuation
-                )
-                self.enqueue(request)
-            }
-
-            if allowed {
-                sessionGrants[sessionId, default: []].insert(command)
+            switch decision {
+            case .approved:
                 logger.info("Permission granted (Ask Once): \(command)")
                 return .allowed
-            } else {
+            case .timedOut:
+                logger.info("Permission timed out (Ask Once): \(command)")
+                return .denied("Permission denied: authorization for '\(command)' timed out. To change permissions: [Open Permissions](minis-clone://settings/permissions)")
+            case .denied:
                 logger.info("Permission denied (Ask Once): \(command)")
-                if sessionGrants[sessionId]?.contains(command) == true {
-                    // Was granted via timeout race — treat as denied
-                    return .denied("Permission denied: authorization for '\(command)' timed out. To change permissions: [Open Permissions](minis-clone://settings/permissions)")
-                }
+                return .denied("Permission denied: the user declined '\(command)' for this session. To change permissions: [Open Permissions](minis-clone://settings/permissions)")
+            default:
+                // 问用户/跳过这类决策不会出现在审批挂起里，防御性地按拒绝处理。
+                logger.info("Permission denied (Ask Once, unexpected decision): \(command)")
                 return .denied("Permission denied: the user declined '\(command)' for this session. To change permissions: [Open Permissions](minis-clone://settings/permissions)")
             }
-        }
-    }
-
-    // MARK: - Request Queue
-
-    /// Present `request` now if no prompt is up, else park it behind the
-    /// current one. The 30s timeout starts when a request is PRESENTED, not
-    /// when it is enqueued — a queued request the user hasn't seen yet must
-    /// not time out unseen.
-    private func enqueue(_ request: PermissionRequest) {
-        guard pendingRequest == nil else {
-            pendingQueue.append(request)
-            return
-        }
-        present(request)
-    }
-
-    private func present(_ request: PermissionRequest) {
-        pendingRequest = request
-
-        // 30s timeout
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 30_000_000_000)
-            if self.pendingRequest?.id == request.id {
-                self.finishCurrent(resumingWith: false)
-            }
-        }
-    }
-
-    /// Resolve the presented request and promote the next queued one, if any.
-    private func finishCurrent(resumingWith allowed: Bool) {
-        guard let request = pendingRequest else { return }
-        pendingRequest = nil
-        request.continuation.resume(returning: allowed)
-        if !pendingQueue.isEmpty {
-            present(pendingQueue.removeFirst())
         }
     }
 
     // MARK: - UI Response
 
     func respond(to requestId: String, allowed: Bool) {
-        guard let request = pendingRequest, request.id == requestId else { return }
-        finishCurrent(resumingWith: allowed)
+        guard pendingRequest?.id == requestId else { return }
+        // "Allow in Session"：点了就放行本会话（grantSession: true），
+        // 与旧逻辑"允许即记 sessionGrants"一致。
+        suspension.respond(id: requestId, decision: allowed ? .approved(grantSession: true) : .denied)
     }
 
     // MARK: - Session Reset
 
     func resetSessionGrants(for sessionId: String) {
-        sessionGrants.removeValue(forKey: sessionId)
+        suspension.clearSessionGrants(sessionId: sessionId)
     }
 }

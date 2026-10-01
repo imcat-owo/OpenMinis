@@ -487,6 +487,7 @@
 		E5VMC0005 /* AIChatViewModel+Persistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5VMC0015 /* AIChatViewModel+Persistence.swift */; };
 		E5VMC0006 /* AIChatViewModel+BackgroundTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5VMC0016 /* AIChatViewModel+BackgroundTask.swift */; };
 		E5VMC0007 /* AIChatViewModel+ConcurrentTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5VMC0017 /* AIChatViewModel+ConcurrentTools.swift */; };
+		E5VMC0008 /* AIChatViewModel+SuspensionResume.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5VMC0018 /* AIChatViewModel+SuspensionResume.swift */; };
 		E5VMD0001 /* MinisURLPathDecoding.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5VMD0011 /* MinisURLPathDecoding.swift */; };
 		E5VTS1001 /* VoiceTextSanitizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7656F4130247E4002A3AC0C /* VoiceTextSanitizer.swift */; };
 		E5W000001 /* PortableRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5W000011 /* PortableRecord.swift */; };
@@ -520,6 +521,7 @@
 		E7A000001 /* OpenRouterModelsAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7A000011 /* OpenRouterModelsAPI.swift */; };
 		E7A000002 /* OpenRouterOAuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7A000012 /* OpenRouterOAuthManager.swift */; };
 		E8A000001 /* OffloadPermissionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A000011 /* OffloadPermissionManager.swift */; };
+		E8A000004 /* ToolSuspensionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A000014 /* ToolSuspensionService.swift */; };
 		E8A000002 /* OffloadPermissionDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A000012 /* OffloadPermissionDialog.swift */; };
 		E8A000003 /* OffloadPermissionSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A000013 /* OffloadPermissionSettingsView.swift */; };
 		EAB000051 /* SyncMigrationDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAB000050 /* SyncMigrationDetailView.swift */; };
@@ -1203,6 +1205,7 @@
 		E5VMC0015 /* AIChatViewModel+Persistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatViewModel+Persistence.swift"; sourceTree = "<group>"; };
 		E5VMC0016 /* AIChatViewModel+BackgroundTask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatViewModel+BackgroundTask.swift"; sourceTree = "<group>"; };
 		E5VMC0017 /* AIChatViewModel+ConcurrentTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatViewModel+ConcurrentTools.swift"; sourceTree = "<group>"; };
+		E5VMC0018 /* AIChatViewModel+SuspensionResume.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatViewModel+SuspensionResume.swift"; sourceTree = "<group>"; };
 		E5VMD0011 /* MinisURLPathDecoding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MinisURLPathDecoding.swift; sourceTree = "<group>"; };
 		E5W000011 /* PortableRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortableRecord.swift; sourceTree = "<group>"; };
 		E5W000012 /* Syncable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Syncable.swift; sourceTree = "<group>"; };
@@ -1228,6 +1231,7 @@
 		E7A000011 /* OpenRouterModelsAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenRouterModelsAPI.swift; sourceTree = "<group>"; };
 		E7A000012 /* OpenRouterOAuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenRouterOAuthManager.swift; sourceTree = "<group>"; };
 		E8A000011 /* OffloadPermissionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OffloadPermissionManager.swift; sourceTree = "<group>"; };
+		E8A000014 /* ToolSuspensionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolSuspensionService.swift; sourceTree = "<group>"; };
 		E8A000012 /* OffloadPermissionDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OffloadPermissionDialog.swift; sourceTree = "<group>"; };
 		E8A000013 /* OffloadPermissionSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OffloadPermissionSettingsView.swift; sourceTree = "<group>"; };
 		E8AB343B6D865C37CC5E9EDB /* VoiceInputPanel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VoiceInputPanel.swift; sourceTree = "<group>"; };
@@ -2188,6 +2192,7 @@
 				E5VMC0015 /* AIChatViewModel+Persistence.swift */,
 				E5VMC0016 /* AIChatViewModel+BackgroundTask.swift */,
 				E5VMC0017 /* AIChatViewModel+ConcurrentTools.swift */,
+				E5VMC0018 /* AIChatViewModel+SuspensionResume.swift */,
 				E53000014 /* ChatStore.swift */,
 				BB1000110F700000000000AA /* ContextPolicy.swift */,
 				E5FMI0011 /* FileMentionIndex.swift */,
@@ -2264,6 +2269,7 @@
 			isa = PBXGroup;
 			children = (
 				E8A000011 /* OffloadPermissionManager.swift */,
+				E8A000014 /* ToolSuspensionService.swift */,
 			);
 			path = Offload;
 			sourceTree = "<group>";
@@ -2938,6 +2944,7 @@
 				E5VMC0005 /* AIChatViewModel+Persistence.swift in Sources */,
 				E5VMC0006 /* AIChatViewModel+BackgroundTask.swift in Sources */,
 				E5VMC0007 /* AIChatViewModel+ConcurrentTools.swift in Sources */,
+				E5VMC0008 /* AIChatViewModel+SuspensionResume.swift in Sources */,
 				E5LD00001 /* ToolLoopDetector.swift in Sources */,
 				E53000002 /* AIChatView.swift in Sources */,
 				E5CAL0001 /* CookieAuditLogger.swift in Sources */,
@@ -3277,6 +3284,7 @@
 				E5W00000D /* ChatStoreSyncHydrators.swift in Sources */,
 				E5W00003A /* SessionFileChangeTracker.swift in Sources */,
 				E8A000001 /* OffloadPermissionManager.swift in Sources */,
+				E8A000004 /* ToolSuspensionService.swift in Sources */,
 				E8A000002 /* OffloadPermissionDialog.swift in Sources */,
 				E8A000003 /* OffloadPermissionSettingsView.swift in Sources */,
 				52535805A60BA4B26902EAFA /* VoiceInputModels.swift in Sources */,
