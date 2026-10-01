@@ -2748,7 +2748,12 @@ struct ContentView: View {
         // container covered the wallpaper — the "首页壁纸不显示" report.
         // Painting the backdrop on the CONTENT root (inside the stack, like
         // AIChatView does for .chat) makes it the list's direct background.
-        .background(AppearanceBackdrop(scope: .home))
+        // [T-home-wallpaper-fullbleed][10-02 醒醒改口径] 主页壁纸靠自己铺满
+        // 到物理底边（穿过底部栏、盖住 home indicator 那一条），底部栏不再
+        // 替它补画。挂载处这层 ignoresSafeArea(.bottom) 不能省：组件内部那
+        // 层隔着 .background 边界传不出来，实测 backdrop 只盖到列表区和栏
+        // 的 44pt，最底部一条没图层、露栈容器的白。
+        .background(AppearanceBackdrop(scope: .home).ignoresSafeArea(edges: .bottom))
         // Wallpaper fullscreen: transparent nav bar over the home backdrop,
         // so the wallpaper runs under the soul-name title + search strip.
         .toolbarBackground(.hidden, for: .navigationBar)
@@ -3538,44 +3543,24 @@ struct ContentView: View {
     }
 
     /// [T-home-bottom-bar-skin] #2 醒醒: 默认完全透明（无底色）；只有放了壁纸才出图。
-    /// 壁纸 scaledToFit + clipped 不撑满遮挡内容；图延伸到 home indicator（贴底，#8）。
+    /// [10-02 醒醒改口径，废除 #8 的整条贴底] 没放底部栏壁纸 = 纯透明，透出
+    /// 全屏到底的主页壁纸（主页壁纸自己铺到物理底边，见 sessionList 的
+    /// backdrop 挂载处）；放了底部栏壁纸 = 只盖一条：高 24pt（= homeBottomTab
+    /// 图标设计框高，见下方 .frame(width: 24, height: 24)），贴栏顶，
+    /// scaledToFit 语义不变；条下方和 home indicator 那一条透出的都是主页壁纸。
     @ViewBuilder private var homeBottomBarBackground: some View {
         let studio = AppearanceStudio.shared
         if let wp = studio.wallpaper(for: .bottomBar) {
-            Image(uiImage: wp)
-                .resizable()
-                .scaledToFit()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipped()
-                .overlay(studio.color(.canvas, scope: .bottomBar).opacity(studio.wallpaperShade))
-                .ignoresSafeArea(edges: .bottom)
-        } else if let hp = studio.wallpaper(for: .home) {
-            // [T-home-wallpaper-bottom-strip] The home backdrop is the
-            // session list's background: it paints behind this bar but
-            // stops short of the bottom safe-area strip, and this bar
-            // background is the only layer that reaches that strip (#8).
-            // It used to stay clear unless a dedicated bottom-bar image
-            // was set, so a home-only wallpaper left the strip
-            // unpainted and the stack container's white showed through
-            // under the bar. Fall back to the home wallpaper, rendered
-            // full-width and anchored to the image's own bottom edge,
-            // so the strip shows the wallpaper's actual bottom at the
-            // same width scale as the backdrop behind the list.
-            GeometryReader { proxy in
-                let width = proxy.size.width
-                let imageHeight = width * hp.size.height / max(hp.size.width, 1)
-                ZStack(alignment: .bottom) {
-                    studio.color(.canvas, scope: .home)
-                    Image(uiImage: hp)
-                        .resizable()
-                        .frame(width: width, height: imageHeight)
-                    studio.color(.canvas, scope: .home)
-                        .opacity(studio.wallpaperShade)
-                }
-                .frame(width: proxy.size.width, height: proxy.size.height)
-                .clipped()
+            VStack(spacing: 0) {
+                Image(uiImage: wp)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 24)
+                    .clipped()
+                    .overlay(studio.color(.canvas, scope: .bottomBar).opacity(studio.wallpaperShade))
+                Spacer(minLength: 0)
             }
-            .ignoresSafeArea(edges: .bottom)
         } else {
             Color.clear
         }
