@@ -7451,6 +7451,17 @@ private struct SettingsSheet: View {
                             QuietAppIcon(id: QuietIconSlot.bridgeRelay.id, systemName: QuietIconSlot.bridgeRelay.systemName)
                         }
                     }
+                    // [s2-search] 第 18 条联网搜索：服务商选择 + key 录入
+                    // （WebSearchSettingsView）。
+                    NavigationLink {
+                        WebSearchSettingsView()
+                    } label: {
+                        Label {
+                            Text("联网搜索")
+                        } icon: {
+                            QuietAppIcon(id: QuietIconSlot.webSearch.id, systemName: QuietIconSlot.webSearch.systemName)
+                        }
+                    }
                     NavigationLink {
                         EnvironmentVariablesView()
                     } label: {

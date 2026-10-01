@@ -527,6 +527,12 @@
 		E8A000006 /* ToolApprovalDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A000016 /* ToolApprovalDialog.swift */; };
 		E8A000007 /* AIChatViewModel+AskUser.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A000017 /* AIChatViewModel+AskUser.swift */; };
 		E8A000008 /* AskUserDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A000018 /* AskUserDialog.swift */; };
+		S2WSSETT00000000000002 /* WebSearchSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = S2WSSETT00000000000001 /* WebSearchSettingsView.swift */; };
+		S2WSSERV00000000000002 /* WebSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = S2WSSERV00000000000001 /* WebSearchService.swift */; };
+		S2WSKEYS00000000000002 /* WebSearchKeys.swift in Sources */ = {isa = PBXBuildFile; fileRef = S2WSKEYS00000000000001 /* WebSearchKeys.swift */; };
+		S2WSTAVL00000000000002 /* TavilySearchProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = S2WSTAVL00000000000001 /* TavilySearchProvider.swift */; };
+		S2WSBRAV00000000000002 /* BraveSearchProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = S2WSBRAV00000000000001 /* BraveSearchProvider.swift */; };
+		S2WSPROV00000000000002 /* WebSearchProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = S2WSPROV00000000000001 /* WebSearchProvider.swift */; };
 		E8A000003 /* OffloadPermissionSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A000013 /* OffloadPermissionSettingsView.swift */; };
 		EAB000051 /* SyncMigrationDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAB000050 /* SyncMigrationDetailView.swift */; };
 		EAB000071 /* UploadPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAB000070 /* UploadPolicy.swift */; };
@@ -1241,6 +1247,12 @@
 		E8A000016 /* ToolApprovalDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolApprovalDialog.swift; sourceTree = "<group>"; };
 		E8A000017 /* AIChatViewModel+AskUser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatViewModel+AskUser.swift"; sourceTree = "<group>"; };
 		E8A000018 /* AskUserDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserDialog.swift; sourceTree = "<group>"; };
+		S2WSSETT00000000000001 /* WebSearchSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchSettingsView.swift; sourceTree = "<group>"; };
+		S2WSSERV00000000000001 /* WebSearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchService.swift; sourceTree = "<group>"; };
+		S2WSKEYS00000000000001 /* WebSearchKeys.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchKeys.swift; sourceTree = "<group>"; };
+		S2WSTAVL00000000000001 /* TavilySearchProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TavilySearchProvider.swift; sourceTree = "<group>"; };
+		S2WSBRAV00000000000001 /* BraveSearchProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BraveSearchProvider.swift; sourceTree = "<group>"; };
+		S2WSPROV00000000000001 /* WebSearchProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchProvider.swift; sourceTree = "<group>"; };
 		E8A000013 /* OffloadPermissionSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OffloadPermissionSettingsView.swift; sourceTree = "<group>"; };
 		E8AB343B6D865C37CC5E9EDB /* VoiceInputPanel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VoiceInputPanel.swift; sourceTree = "<group>"; };
 		EAB00001A /* WebAppShortcut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAppShortcut.swift; sourceTree = "<group>"; };
@@ -1711,6 +1723,18 @@
 			path = Relay;
 			sourceTree = "<group>";
 		};
+		S2WBSRCH00000000000001 /* Search */ = {
+			isa = PBXGroup;
+			children = (
+				S2WSPROV00000000000001 /* WebSearchProvider.swift */,
+				S2WSBRAV00000000000001 /* BraveSearchProvider.swift */,
+				S2WSTAVL00000000000001 /* TavilySearchProvider.swift */,
+				S2WSKEYS00000000000001 /* WebSearchKeys.swift */,
+				S2WSSERV00000000000001 /* WebSearchService.swift */,
+			);
+			path = Search;
+			sourceTree = "<group>";
+		};
 		E53000030 /* Agent */ = {
 			isa = PBXGroup;
 			children = (
@@ -1718,6 +1742,7 @@
 				BKP000010 /* Backup */,
 				E57000030 /* BrowserUse */,
 				BC1000000000000000000006 /* Bridge */,
+				S2WBSRCH00000000000001 /* Search */,
 				F1A00010 /* Chat */,
 				E5T000030 /* Intents */,
 				F1A00016 /* ISH */,
@@ -2418,6 +2443,7 @@
 				E5SHV0104 /* MountDetailView.swift */,
 				E5SOUL102 /* SoulSettingsView.swift */,
 				BC18A0000000000000000107 /* BridgeExternalConnectionView.swift */,
+				S2WSSETT00000000000001 /* WebSearchSettingsView.swift */,
 				E5LOCK102 /* FaceIDProtectionSettingsView.swift */,
 				E5LOCK103 /* AppLockOverlay.swift */,
 			);
@@ -3302,6 +3328,12 @@
 				E8A000006 /* ToolApprovalDialog.swift in Sources */,
 				E8A000007 /* AIChatViewModel+AskUser.swift in Sources */,
 				E8A000008 /* AskUserDialog.swift in Sources */,
+				S2WSSETT00000000000002 /* WebSearchSettingsView.swift in Sources */,
+				S2WSSERV00000000000002 /* WebSearchService.swift in Sources */,
+				S2WSKEYS00000000000002 /* WebSearchKeys.swift in Sources */,
+				S2WSTAVL00000000000002 /* TavilySearchProvider.swift in Sources */,
+				S2WSBRAV00000000000002 /* BraveSearchProvider.swift in Sources */,
+				S2WSPROV00000000000002 /* WebSearchProvider.swift in Sources */,
 				E8A000003 /* OffloadPermissionSettingsView.swift in Sources */,
 				52535805A60BA4B26902EAFA /* VoiceInputModels.swift in Sources */,
 				33643CC21B9402F949D76C3C /* VoiceProvider.swift in Sources */,

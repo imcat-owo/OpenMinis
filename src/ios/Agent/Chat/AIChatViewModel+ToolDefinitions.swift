@@ -216,6 +216,22 @@ extension AIChatViewModel {
             propertyOrdering: ["tool_title", "questions"]
         ))
 
+        // [s2-search] 第 18 条联网搜索：AI 查资料的成品工具。只在当前选中
+        // 的服务商配好 key 后才挂出来（没配好就不让模型看见，避免它空调）。
+        if WebSearchService.isConfigured(WebSearchService.selectedProviderId) {
+            tools.append(AgentToolDefinition(
+                name: "web_search",
+                description: "Search the web for current or external information you don't know (news, prices, documentation, facts after your knowledge cutoff, anything that needs checking online). Use this instead of guessing. Results come back as numbered sources [1]..[N] with title, URL and snippet. IMPORTANT: when your reply uses a fact from a result, cite it inline as [cite:<id>] (e.g. [cite:2]) right after the claim. Only use ids from the tool's output — never invent one. Prefer the freshest sources for time-sensitive questions.",
+                parameters: [
+                    "tool_title": AgentToolParam(type: .string, description: "A concise 5-10 word summary of what you're searching for, shown to the user (e.g. 'Search latest iPhone price'). Use the same language as the user."),
+                    "query": AgentToolParam(type: .string, description: "The search query. Write it the way you'd type it into a search engine; English queries often get better coverage for technical topics."),
+                    "count": AgentToolParam(type: .integer, description: "How many results to return, 1-20 (default 8). Ask for more only when you need broad coverage."),
+                ],
+                required: ["tool_title", "query"],
+                propertyOrdering: ["tool_title", "query", "count"]
+            ))
+        }
+
         return tools
     }
 

@@ -754,6 +754,8 @@ enum QuietIconSlot: String, CaseIterable, Identifiable {
     case logs, about, privacy, feedback
     /// [merge step18a] Settings → Agent Runtime 的「桥·对外连接」行。
     case bridgeRelay
+    /// [s2-search] Settings 的「联网搜索」行（第 18 条）。
+    case webSearch
     /// [T-user-manual 09-11] Settings → About section's 使用手册 row.
     case manual
 
@@ -783,6 +785,7 @@ enum QuietIconSlot: String, CaseIterable, Identifiable {
         case .rootfs: return "Rootfs 管理"
         case .browser: return "浏览器"
         case .bridgeRelay: return "桥·对外连接"
+        case .webSearch: return "联网搜索"
         }
     }
     var systemName: String {
@@ -810,6 +813,7 @@ enum QuietIconSlot: String, CaseIterable, Identifiable {
         case .rootfs: return "externaldrive"
         case .browser: return "globe"
         case .bridgeRelay: return "antenna.radiowaves.left.and.right"
+        case .webSearch: return "magnifyingglass"
         }
     }
 }

@@ -885,6 +885,51 @@ extension AIChatViewModel {
             toolOutput = askResult.output
             toolSuccess = askResult.success
 
+        case "web_search":
+            // [s2-search] 第 18 条联网搜索：查资料。query 为空直接拦；
+            // key 没配好时工具根本不会注册到模型面前，这里是双保险。
+            let searchQuery = (toolArgs["query"] as? String ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if searchQuery.isEmpty {
+                toolOutput = "Error: Missing required 'query' parameter. Please call web_search again with a non-empty `query`."
+                toolSuccess = false
+                if msgIdx < messages.count, blockIdx < messages[msgIdx].blocks.count {
+                    messages[msgIdx].blocks[blockIdx].content = toolOutput
+                }
+                break
+            }
+            let searchCount: Int = {
+                if let n = toolArgs["count"] as? Int { return n }
+                if let s = toolArgs["count"] as? String, let n = Int(s.trimmingCharacters(in: .whitespaces)) { return n }
+                return 8
+            }()
+            do {
+                let outcome = try await WebSearchService.search(
+                    query: searchQuery, count: min(max(searchCount, 1), 20))
+                let formatted = WebSearchService.formatForModel(outcome, query: searchQuery)
+                if msgIdx < messages.count, blockIdx < messages[msgIdx].blocks.count {
+                    messages[msgIdx].blocks[blockIdx].content = formatted
+                }
+                toolOutput = formatted
+                toolSuccess = true
+            } catch let searchErr as WebSearchError {
+                // userMessage 里不带 key 明文（见 WebSearchError）。
+                toolOutput = "Error: \(searchErr.userMessage)"
+                toolSuccess = false
+                if msgIdx < messages.count, blockIdx < messages[msgIdx].blocks.count {
+                    messages[msgIdx].blocks[blockIdx].content = toolOutput
+                }
+            } catch is CancellationError {
+                // 取消必须透传出去，不能吞成"搜索失败"（外层 do/catch 负责收）。
+                throw
+            } catch {
+                toolOutput = "Error: 搜索失败：\(error.localizedDescription)"
+                toolSuccess = false
+                if msgIdx < messages.count, blockIdx < messages[msgIdx].blocks.count {
+                    messages[msgIdx].blocks[blockIdx].content = toolOutput
+                }
+            }
+
         default:
             toolOutput = "Error: Unknown tool '\(tu.name)'"
             toolSuccess = false
