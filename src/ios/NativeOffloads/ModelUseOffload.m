@@ -398,13 +398,28 @@ static int cmd_run(int argc, char **argv, int stdin_fd, int stdout_fd, int stder
     // The fix is the reporter's option 2: describe the environment and state
     // explicitly that it is NOT the model's identity. Option 1 (send nothing)
     // would regress the providers that demand a non-empty instructions block.
+    //
+    // [s2-28] The full text is now sent only on the FIRST call of a session
+    // (claimed via the bridge, keyed by the mounted session id). Later calls
+    // in the same session get a one-line stub instead: the environment has
+    // already been established, and repeating ~55 tokens per call in a dense
+    // loop is pure overhead. The stub stays non-empty on purpose — dropping
+    // the block entirely on later calls would re-open the option-1
+    // regression above for strict providers mid-session. Calls that can't
+    // be attributed to a session always claim the full text.
     BOOL systemPromptWasInjected = NO;
     if (!systemPrompt) {
-        systemPrompt = @"You are being invoked as a sub-agent inside an app called 我的小家. "
-                       @"This is the calling environment, not your identity — keep your own "
-                       @"model identity unchanged. You are handling a focused task delegated "
-                       @"by the parent agent loop: answer the request directly and concisely, "
-                       @"without restating it or adding extra meta-commentary.";
+        if ([ModelUseOffloadBridge claimFullDefaultSystemPrompt]) {
+            systemPrompt = @"You are being invoked as a sub-agent inside an app called 我的小家. "
+                           @"This is the calling environment, not your identity — keep your own "
+                           @"model identity unchanged. You are handling a focused task delegated "
+                           @"by the parent agent loop: answer the request directly and concisely, "
+                           @"without restating it or adding extra meta-commentary.";
+        } else {
+            systemPrompt = @"Sub-call from the 我的小家 app — that is the calling "
+                           @"environment, not your identity. Answer the delegated "
+                           @"task directly and concisely.";
+        }
         systemPromptWasInjected = YES;
     }
 

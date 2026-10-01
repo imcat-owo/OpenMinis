@@ -256,6 +256,36 @@ private let logger = AppLogger(category: "ModelUseOffload")
         }
     }
 
+    // MARK: - Default system prompt (first-call-per-session claim)
+
+    // [s2-28] ModelUseOffload.m injects a default system prompt describing
+    // the calling environment when the caller passes no --system. The full
+    // text only needs to be said ONCE per session — in a dense call loop
+    // every repetition is pure token overhead. The first call for the
+    // currently-mounted session claims the full text here; later calls in
+    // the same session are served the short form by the caller. The short
+    // form must stay NON-EMPTY: some Responses-API providers reject
+    // requests without an instructions block (see the
+    // [T-modeluse-identity-pollution] note in ModelUseOffload.m), so
+    // "first call only" must not become "dropped entirely" mid-session.
+    // When no session is mounted the call can't be attributed to a
+    // session, so it always claims the full text — the previous behaviour.
+    private static var fullPromptClaimedSessions = Set<String>()
+    private static let fullPromptClaimedLock = NSLock()
+
+    @objc public static func claimFullDefaultSystemPrompt() -> Bool {
+        let sid = ISHExecutionCoordinator.mountedSessionIdSnapshot ?? ""
+        if sid.isEmpty { return true }
+        fullPromptClaimedLock.lock()
+        defer { fullPromptClaimedLock.unlock() }
+        if fullPromptClaimedSessions.contains(sid) { return false }
+        if fullPromptClaimedSessions.count >= 1024 {
+            fullPromptClaimedSessions.removeAll()
+        }
+        fullPromptClaimedSessions.insert(sid)
+        return true
+    }
+
     // MARK: - Run Model
 
     @objc public static func runModel(idOrName modelIdOrName: String,
