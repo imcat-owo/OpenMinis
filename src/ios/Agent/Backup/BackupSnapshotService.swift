@@ -52,6 +52,11 @@ final class BackupSnapshotService {
     private static let manifestFileName = "snapshot-manifest.json"
 
     private var pendingCheck: Task<Void, Never>?
+    /// The export actually running, if any — a separate handle from
+    /// `pendingCheck`, which only ever carries the scheduled wait (P2-2).
+    /// Also the handle handed to BackupRunController, so Stop can reach a
+    /// snapshot the same way it reaches a manual run (P2-1).
+    private var snapshotTask: Task<Void, Never>?
     private var isSnapshotting = false
 
     private init() {}
@@ -199,7 +204,24 @@ final class BackupSnapshotService {
         }
         isSnapshotting = true
         defer { isSnapshotting = false }
-        await takeSnapshot(in: dir)
+        // P2-1: the export runs in its own task (not inside the scheduling
+        // task, see P2-2) and is registered with the run controller, so the
+        // settings page shows the snapshot in flight and a user tap during
+        // it can't start a second export that only collides with the export
+        // lock and leaves a bogus "manual backup failed" history entry.
+        let export = Task { [weak self] in
+            await self?.takeSnapshot(in: dir)
+        }
+        snapshotTask = export
+        defer { snapshotTask = nil }
+        guard BackupRunController.shared.started(task: export) else {
+            // Lost the race to a manual run that started after the isRunning
+            // check above; started() already cancelled `export`, which never
+            // opened a history record.
+            logger.info("[Backup] snapshot skipped — a backup started first")
+            return
+        }
+        await export.value
     }
 
     private func takeSnapshot(in dir: URL) async {
@@ -214,6 +236,13 @@ final class BackupSnapshotService {
             backupId: "", categories: categories.map(\.rawValue).sorted(),
             encrypted: false)
         BackupHistory.shared.log(runId, AppLocalized("Automatic snapshot"))
+        // P2-1: point the controller at this run's real history record, and
+        // clear the running state on EVERY exit path. Token-guarded (same
+        // pattern as the manual flow): a refused start reaching this defer
+        // must not tear down the run that legitimately owns the controller.
+        BackupRunController.shared.attach(recordId: runId)
+        let token = BackupRunController.shared.currentToken
+        defer { BackupRunController.shared.finished(token: token) }
         do {
             let summary = try await BackupBackgroundAssertion.run("BackupSnapshot") {
                 try await BackupExporter().export(options: options) { _ in
