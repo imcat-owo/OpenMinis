@@ -170,6 +170,7 @@ struct MCPIntegrationsView: View {
 struct MCPToolsSheet: View {
     let serverName: String
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var approvalStore = MCPToolApprovalStore.shared
     @State private var tools: [MCPStore.MCPToolInfo] = []
     @State private var isLoading = false
     @State private var errorText: String?
@@ -197,9 +198,9 @@ struct MCPToolsSheet: View {
                     Text("The server reported no tools.")
                         .foregroundStyle(.secondary)
                 } else {
-                    Section(footer: Text("Fetched live from the server just now.")) {
+                    Section(footer: Text("Fetched live from the server just now. A tool never toggled here asks for approval by default.")) {
                         ForEach(tools) { tool in
-                            VStack(alignment: .leading, spacing: 3) {
+                            VStack(alignment: .leading, spacing: 6) {
                                 Text(tool.name)
                                     .font(.body.monospaced())
                                 if !tool.description.isEmpty {
@@ -208,7 +209,15 @@ struct MCPToolsSheet: View {
                                         .foregroundStyle(.secondary)
                                         .lineLimit(3)
                                 }
+                                // [s2-approve] 逐工具审批开关：打开则 AI 调用前先弹窗问你。
+                                Toggle("调用前需批准", isOn: Binding(
+                                    get: { approvalStore.needsApproval(serverId: serverName, tool: tool.name) },
+                                    set: { approvalStore.setNeedsApproval($0, serverId: serverName, tool: tool.name) }
+                                ))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                             }
+                            .padding(.vertical, 4)
                         }
                     }
                 }

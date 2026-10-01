@@ -57,6 +57,9 @@ struct MCPServerConfig: Codable, Identifiable, Hashable {
     /// only round-trips the field so an edit/import/export never drops it.
     /// Optional: absent means the daemon default (60s). [T-mcp-startup-timeout]
     var startupTimeoutSeconds: Int?
+    /// [s2-approve] 逐工具审批开关：[toolName: 需要批准].
+    /// nil（未登记）→ 默认需要批准。随 servers.json 同步。
+    var toolApprovals: [String: Bool]?
 
     var isHTTP: Bool { !(url?.isEmpty ?? true) }
     var isSTDIO: Bool { !(command?.isEmpty ?? true) }
@@ -274,6 +277,7 @@ final class MCPStore: ObservableObject {
         var args: [String]?
         var env: [String: String]?
         var startupTimeoutSeconds: Int?   // 我的小家 STDIO startup timeout; round-tripped verbatim
+        var toolApprovals: [String: Bool]?   // [s2-approve] 逐工具审批开关；nil=未登记=默认需批准
     }
 
     func load() {
@@ -348,7 +352,8 @@ final class MCPStore: ObservableObject {
                     command: entry.command,
                     args: entry.args,
                     env: entry.env,
-                    startupTimeoutSeconds: entry.startupTimeoutSeconds
+                    startupTimeoutSeconds: entry.startupTimeoutSeconds,
+                    toolApprovals: entry.toolApprovals
                 ))
             } catch {
                 logger.error("Skipping malformed MCP server entry '\(name)': \(error.localizedDescription)")
@@ -388,7 +393,8 @@ final class MCPStore: ObservableObject {
                 command: s.command,
                 args: s.args,
                 env: s.env,
-                startupTimeoutSeconds: s.startupTimeoutSeconds
+                startupTimeoutSeconds: s.startupTimeoutSeconds,
+                toolApprovals: s.toolApprovals
             )
         }
         let file = ServersFile(mcpServers: map)
@@ -427,7 +433,8 @@ final class MCPStore: ObservableObject {
             command: server.command,
             args: server.args,
             env: server.env,
-            startupTimeoutSeconds: server.startupTimeoutSeconds
+            startupTimeoutSeconds: server.startupTimeoutSeconds,
+            toolApprovals: server.toolApprovals
         )
         let file = ServersFile(mcpServers: [server.id: entry])
         let encoder = JSONEncoder()
@@ -479,6 +486,17 @@ final class MCPStore: ObservableObject {
         servers[idx].updatedAt = Date().timeIntervalSince1970
         save()
         noteSyncedLocalChange(names: [id])
+    }
+
+    /// [s2-approve] 设置某工具"调用前是否需要批准"。nil（未登记）默认需要批准。
+    func setToolApproval(serverId: String, tool: String, needsApproval: Bool) {
+        guard let idx = servers.firstIndex(where: { $0.id == serverId }) else { return }
+        var approvals = servers[idx].toolApprovals ?? [:]
+        approvals[tool] = needsApproval
+        servers[idx].toolApprovals = approvals
+        servers[idx].updatedAt = Date().timeIntervalSince1970
+        save()
+        noteSyncedLocalChange(names: [serverId])
     }
 
     // MARK: - JSON import (format compat)
@@ -584,7 +602,8 @@ final class MCPStore: ObservableObject {
             command: obj["command"] as? String,
             args: obj["args"] as? [String],
             env: obj["env"] as? [String: String],
-            startupTimeoutSeconds: Self.startupTimeout(from: obj)
+            startupTimeoutSeconds: Self.startupTimeout(from: obj),
+            toolApprovals: obj["toolApprovals"] as? [String: Bool]
         )
     }
 

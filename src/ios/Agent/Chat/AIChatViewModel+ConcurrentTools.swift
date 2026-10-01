@@ -316,23 +316,43 @@ extension AIChatViewModel {
                 break
             }
 
+            // [s2-approve] 高风险工具审批关卡：MCP 逐工具审批 / 日历提醒写动作强制审批 /
+            // 工作区命令总开关。被拦下则直接回 AI，不执行。
+            let gateOutcome = await ToolApprovalGate.checkShellCommand(command, sessionId: self.sessionId)
+            if case .blocked(let gateMessage) = gateOutcome {
+                ctLogger.info("[ToolApproval] BLOCKED shell command")
+                toolOutput = gateMessage
+                toolSuccess = false
+                if msgIdx < messages.count, blockIdx < messages[msgIdx].blocks.count {
+                    messages[msgIdx].blocks[blockIdx].content = gateMessage
+                }
+                break
+            }
+
             // Offload permission check.
             ctLogger.info("[OffloadPerm] shell command: \(command)")
             if let offloadCmd = OffloadPermissionManager.extractOffloadCommand(from: command) {
-                ctLogger.info("[OffloadPerm] matched offload: \(offloadCmd), level: \(OffloadPermissionManager.shared.permissionLevel(for: offloadCmd).rawValue)")
-                let permResult = await OffloadPermissionManager.shared.checkPermission(
-                    for: offloadCmd, sessionId: self.sessionId, fullCommand: command
-                )
-                if case .denied(let msg) = permResult {
-                    ctLogger.info("[OffloadPerm] DENIED: \(offloadCmd)")
-                    toolOutput = msg
-                    toolSuccess = false
-                    if msgIdx < messages.count, blockIdx < messages[msgIdx].blocks.count {
-                        messages[msgIdx].blocks[blockIdx].content = msg
+                // [s2-approve] 日历/提醒的写动作已由上面的强制审批问过，
+                // 这里跳过，避免同一个动作弹两次窗。
+                let writeAlreadyAsked = (offloadCmd == "apple-calendar" || offloadCmd == "apple-reminders")
+                    && ToolApprovalGate.writeSubcommand(command: offloadCmd, fullCommand: command).isWrite
+                if !writeAlreadyAsked {
+                    ctLogger.info("[OffloadPerm] matched offload: \(offloadCmd), level: \(OffloadPermissionManager.shared.permissionLevel(for: offloadCmd).rawValue)")
+                    let permResult = await OffloadPermissionManager.shared.checkPermission(
+                        for: offloadCmd, sessionId: self.sessionId, fullCommand: command
+                    )
+                    if case .denied(let msg) = permResult {
+                        ctLogger.info("[OffloadPerm] DENIED: \(offloadCmd)")
+                        toolOutput = msg
+                        toolSuccess = false
+                        if msgIdx < messages.count, blockIdx < messages[msgIdx].blocks.count {
+                            messages[msgIdx].blocks[blockIdx].content = msg
+                        }
+                        break
                     }
-                    break
+                    ctLogger.info("[OffloadPerm] ALLOWED: \(offloadCmd)")
                 }
-                ctLogger.info("[OffloadPerm] ALLOWED: \(offloadCmd)")
+                }
             } else {
                 ctLogger.info("[OffloadPerm] no offload match for first token")
             }

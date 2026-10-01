@@ -4,6 +4,7 @@ struct OffloadPermissionSettingsView: View {
     @ObservedObject private var manager = OffloadPermissionManager.shared
     @ObservedObject private var configGate = MinisConfigPermissionStore.shared
     @ObservedObject private var correctionConsent = VoiceCorrectionCollectionConsent.shared
+    @ObservedObject private var shellApproval = ShellApprovalSettings.shared
     @State private var showClearCorrectionConfirm = false
     @State private var correctionDataCleared = false
 
@@ -29,6 +30,15 @@ struct OffloadPermissionSettingsView: View {
                 ForEach(settingsCommands, id: \.name) { cmd in
                     CommandPermissionRow(command: cmd)
                 }
+            }
+
+            // [s2-approve] 工作区命令（shell_execute）审批总开关，默认关。
+            Section {
+                Toggle("执行前先询问", isOn: $shellApproval.needsApproval)
+            } header: {
+                Text("Workspace Commands")
+            } footer: {
+                Text("打开后，AI 在工作区执行每条命令前都会先弹窗问你；也可以在弹窗里打开「本次会话不再询问」一键放行。默认关闭。MCP 工具调用、日历/提醒写入与上面的系统命令走各自的审批，不受此开关影响。")
             }
 
             Section {

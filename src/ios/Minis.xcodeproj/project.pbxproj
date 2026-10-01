@@ -522,7 +522,9 @@
 		E7A000002 /* OpenRouterOAuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7A000012 /* OpenRouterOAuthManager.swift */; };
 		E8A000001 /* OffloadPermissionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A000011 /* OffloadPermissionManager.swift */; };
 		E8A000004 /* ToolSuspensionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A000014 /* ToolSuspensionService.swift */; };
+		E8A000005 /* ToolApprovalGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A000015 /* ToolApprovalGate.swift */; };
 		E8A000002 /* OffloadPermissionDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A000012 /* OffloadPermissionDialog.swift */; };
+		E8A000006 /* ToolApprovalDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A000016 /* ToolApprovalDialog.swift */; };
 		E8A000003 /* OffloadPermissionSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A000013 /* OffloadPermissionSettingsView.swift */; };
 		EAB000051 /* SyncMigrationDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAB000050 /* SyncMigrationDetailView.swift */; };
 		EAB000071 /* UploadPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAB000070 /* UploadPolicy.swift */; };
@@ -1232,7 +1234,9 @@
 		E7A000012 /* OpenRouterOAuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenRouterOAuthManager.swift; sourceTree = "<group>"; };
 		E8A000011 /* OffloadPermissionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OffloadPermissionManager.swift; sourceTree = "<group>"; };
 		E8A000014 /* ToolSuspensionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolSuspensionService.swift; sourceTree = "<group>"; };
+		E8A000015 /* ToolApprovalGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolApprovalGate.swift; sourceTree = "<group>"; };
 		E8A000012 /* OffloadPermissionDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OffloadPermissionDialog.swift; sourceTree = "<group>"; };
+		E8A000016 /* ToolApprovalDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolApprovalDialog.swift; sourceTree = "<group>"; };
 		E8A000013 /* OffloadPermissionSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OffloadPermissionSettingsView.swift; sourceTree = "<group>"; };
 		E8AB343B6D865C37CC5E9EDB /* VoiceInputPanel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VoiceInputPanel.swift; sourceTree = "<group>"; };
 		EAB00001A /* WebAppShortcut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAppShortcut.swift; sourceTree = "<group>"; };
@@ -2270,6 +2274,7 @@
 			children = (
 				E8A000011 /* OffloadPermissionManager.swift */,
 				E8A000014 /* ToolSuspensionService.swift */,
+				E8A000015 /* ToolApprovalGate.swift */,
 			);
 			path = Offload;
 			sourceTree = "<group>";
@@ -2356,6 +2361,7 @@
 				F1W00100 /* PrintHelper.swift */,
 				F1W00060 /* PaginatedMarkdownView.swift */,
 				E8A000012 /* OffloadPermissionDialog.swift */,
+				E8A000016 /* ToolApprovalDialog.swift */,
 				E5K000011 /* SelectableMarkdownView.swift */,
 				E5K000012 /* ChatTurnScreenshot.swift */,
 				E5N0000152F3B941A00049557 /* SessionMemoryView.swift */,
@@ -3285,7 +3291,9 @@
 				E5W00003A /* SessionFileChangeTracker.swift in Sources */,
 				E8A000001 /* OffloadPermissionManager.swift in Sources */,
 				E8A000004 /* ToolSuspensionService.swift in Sources */,
+				E8A000005 /* ToolApprovalGate.swift in Sources */,
 				E8A000002 /* OffloadPermissionDialog.swift in Sources */,
+				E8A000006 /* ToolApprovalDialog.swift in Sources */,
 				E8A000003 /* OffloadPermissionSettingsView.swift in Sources */,
 				52535805A60BA4B26902EAFA /* VoiceInputModels.swift in Sources */,
 				33643CC21B9402F949D76C3C /* VoiceProvider.swift in Sources */,
