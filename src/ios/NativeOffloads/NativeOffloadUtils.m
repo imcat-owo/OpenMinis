@@ -146,48 +146,102 @@ NSDictionary *noff_json_envelope(NSString *tool, NSString *action, id data) {
 //
 // Tool handlers frequently surface `error.localizedDescription` verbatim.
 // For system-framework failures that text is an opaque Cocoa dump —
-// "The operation couldn't be completed. (kCLErrorDomain error 0.)",
-// WeatherKit JWT complaints, daemon/XPC wording — which tells the calling
-// model neither what KIND of problem occurred nor what to do next.
-// Translate the recognizable raw-system signatures into a plain-language
-// category plus a next step, keeping the original text appended for
-// debugging. Messages the tools wrote themselves don't carry these
-// signatures and pass through untouched.
+// "The operation couldn’t be completed. (kCLErrorDomain error 0.)" —
+// which tells the calling model neither what KIND of problem occurred nor
+// what to do next. Translate the recognizable raw-system signatures into
+// a plain-language category plus a next step, keeping the original text
+// appended for debugging.
+//
+// [s2-27fix] Signatures are DUMP FORMS ONLY. The first cut also matched
+// bare words ("eventkit", "healthkit", "daemon", "jwt") wherever they
+// appeared in the text, which misfired on the tools' own precise
+// messages — the calendar --parent-id explanation mentions "EventKit",
+// the HealthKit timeout text mentions "HealthKit" — and prepended a
+// wrong category with wrong advice. Now translation triggers ONLY on:
+//   • the parenthesized NSError dump trailer "(<Domain> error <code>.)",
+//     with the category classified from that trailer's domain;
+//   • NSURLError's fixed localized sentences (its typical form carries
+//     no trailer);
+//   • Cocoa's fixed "The operation couldn’t be completed" opener.
+// Anything else — in particular every message a tool composed itself —
+// passes through untouched. When a framework's real dump form is not
+// known, prefer passing the original through over a guessed signature.
+
+// Extract the domain from a "(<Domain> error <code>…)" dump trailer, or
+// nil when the message carries no such trailer. Strict shape: "(" …
+// " error " … a numeric code immediately after, ")" shortly after, and
+// the domain token is a single spaceless word.
+static NSString *noff_dump_domain(NSString *message) {
+    NSUInteger len = message.length;
+    NSUInteger pos = 0;
+    while (pos < len) {
+        NSRange open = [message rangeOfString:@"("
+                                       options:0
+                                         range:NSMakeRange(pos, len - pos)];
+        if (open.location == NSNotFound) return nil;
+        NSString *rest = [message substringFromIndex:open.location + 1];
+        NSRange errTok = [rest rangeOfString:@" error "];
+        if (errTok.location != NSNotFound && errTok.location > 0 &&
+            errTok.location <= 80) {
+            NSString *after =
+                [rest substringFromIndex:errTok.location + errTok.length];
+            unichar c0 = after.length > 0 ? [after characterAtIndex:0] : 0;
+            BOOL numeric = (c0 >= '0' && c0 <= '9') ||
+                (c0 == '-' && after.length > 1 &&
+                 [after characterAtIndex:1] >= '0' &&
+                 [after characterAtIndex:1] <= '9');
+            NSRange close = [after rangeOfString:@")"];
+            if (numeric && close.location != NSNotFound &&
+                close.location <= 24) {
+                NSString *domain = [rest substringToIndex:errTok.location];
+                if ([domain rangeOfCharacterFromSet:
+                        [NSCharacterSet whitespaceCharacterSet]].location ==
+                    NSNotFound) {
+                    return domain;
+                }
+            }
+        }
+        pos = open.location + 1;
+    }
+    return nil;
+}
+
 static NSString *noff_humanized_error_message(NSString *message) {
     if (message.length == 0) return message;
     NSString *lower = [message lowercaseString];
+    NSString *domain = [noff_dump_domain(message) lowercaseString];
 
     NSString *category = nil;
-    if ([lower containsString:@"jwt"] || [lower containsString:@"weatherkit"]) {
+    // Network FIRST: NSURLError dumps and its fixed localized sentences.
+    // (In the first cut the WeatherKit branch ran first, so an offline
+    // WeatherKit failure got filed under "check your Apple ID".)
+    if ([domain containsString:@"nsurlerror"] ||
+        [lower containsString:@"appears to be offline"] ||
+        [lower containsString:@"not connected to the internet"] ||
+        [lower containsString:@"network connection was lost"]) {
+        category = @"网络不通：设备当前连不上网或连接中断。检查网络后重试。";
+    } else if ([domain containsString:@"kclerror"]) {
+        category = @"定位服务报错：系统没能给出位置。确认定位权限已开启、稍等片刻"
+                    "重试；急用时可直接传经纬度参数绕过定位。";
+    } else if ([domain containsString:@"ekerror"]) {
+        category = @"日历/提醒事项服务（EventKit）报错：多半是权限或系统数据问题。"
+                    "检查对应权限是否开启后重试。";
+    } else if ([domain containsString:@"hkerror"]) {
+        category = @"健康数据服务（HealthKit）报错：多半是权限或数据类型问题。"
+                    "检查健康权限是否开启、指标名是否正确后重试。";
+    } else if ([domain containsString:@"weatherkit"]) {
         category = @"天气服务（WeatherKit）在系统侧校验或调用失败：多半是苹果服务端"
                     "或设备登录状态的问题，不是参数写错。等一两分钟重试；若一直"
                     "失败，检查系统时间是否准确、设备是否登录了 Apple ID。";
-    } else if ([lower containsString:@"kclerrordomain"] ||
-               [lower containsString:@"core location"]) {
-        category = @"定位服务报错：系统没能给出位置。确认定位权限已开启、稍等片刻"
-                    "重试；急用时可直接传经纬度参数绕过定位。";
-    } else if ([lower containsString:@"nsurlerrordomain"] ||
-               [lower containsString:@"appears to be offline"] ||
-               [lower containsString:@"not connected to the internet"] ||
-               [lower containsString:@"network connection was lost"]) {
-        category = @"网络不通：设备当前连不上网或连接中断。检查网络后重试。";
-    } else if ([lower containsString:@"ekerrordomain"] ||
-               [lower containsString:@"eventkit"]) {
-        category = @"日历/提醒事项服务（EventKit）报错：多半是权限或系统数据问题。"
-                    "检查对应权限是否开启后重试。";
-    } else if ([lower containsString:@"hkerrordomain"] ||
-               [lower containsString:@"healthkit"]) {
-        category = @"健康数据服务（HealthKit）报错：多半是权限或数据类型问题。"
-                    "检查健康权限是否开启、指标名是否正确后重试。";
-    } else if ([lower containsString:@"daemon"] ||
-               [lower containsString:@"xpc"]) {
+    } else if ([domain containsString:@"xpc"]) {
         category = @"系统后台服务（守护进程）暂时没响应：这是设备系统侧的问题，"
                     "不是参数写错。稍等片刻重试；持续失败可重启 App 或设备。";
-    } else if ([lower containsString:@"couldn't be completed"] ||
-               ([message containsString:@"("] &&
-                [lower containsString:@" error "] &&
-                [message containsString:@")."])) {
-        // Generic opaque Cocoa dump: "(SomeDomain error 123.)"
+    } else if (domain != nil ||
+               [message hasPrefix:@"The operation couldn\u2019t be completed"]) {
+        // Unrecognized domain, but unmistakably a raw Cocoa dump: the
+        // trailer is there, or the message opens with Cocoa's fixed
+        // localized opener (with the real U+2019 apostrophe — the first
+        // cut compared against an ASCII apostrophe and never matched).
         category = @"系统返回了一条原始错误（不是参数写错）：先按原样重试一次；"
                     "若反复出现，把下面的原始报错原文反馈给用户排查。";
     }
