@@ -21,6 +21,11 @@ enum ToolGateOutcome {
 }
 
 /// shell_execute 的审批关卡。
+/// @MainActor：体内同步读写 MCPToolApprovalStore / OffloadPermissionManager /
+/// ShellApprovalSettings / ToolSuspensionService 全是 @MainActor 状态；挂在并发跑的
+/// executeSingleToolUse 里，不隔离就是后台线程和主线程同时读写 Dictionary，
+/// 会直接崩。调用方（ConcurrentTools）本来就在 @MainActor 上，无破坏。
+@MainActor
 enum ToolApprovalGate {
     /// 检查一条 shell 命令是否需要先问用户。返回 .proceed 才能继续执行。
     static func checkShellCommand(_ command: String, sessionId: String?) async -> ToolGateOutcome {
@@ -34,6 +39,11 @@ enum ToolApprovalGate {
         //    MCP 调用只走这一道审批（不再过下面的 shell 总开关，避免问两遍）。
         if let (server, tool) = parseMCPCall(trimmed) {
             if MCPToolApprovalStore.shared.needsApproval(serverId: server, tool: tool) {
+                let grantKey = "mcp-tool:\(server)/\(tool)"
+                // 本次会话已经点过"不再询问"：直接放行，不再弹窗。
+                if suspension.hasSessionGrant(grantKey, sessionId: sessionId) {
+                    return .proceed
+                }
                 let denyMessage = "用户拒绝了这次 MCP 工具调用（\(server)/\(tool)），没有执行。"
                 let decision = await suspension.suspendApproval(
                     title: "\(server) / \(tool)",
@@ -43,7 +53,7 @@ enum ToolApprovalGate {
                         ApprovalRow(key: "工具", value: tool),
                         ApprovalRow(key: "命令", value: String(trimmed.prefix(300))),
                     ],
-                    grantKey: "mcp-tool:\(server)/\(tool)",
+                    grantKey: grantKey,
                     allowSessionGrant: true,
                     denyMessage: denyMessage,
                     sessionId: sessionId,

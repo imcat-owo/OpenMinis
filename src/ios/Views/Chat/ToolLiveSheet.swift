@@ -2006,6 +2006,7 @@ struct ToolLiveSheet: View {
         case .browserTool: return "我的小家 is using Browser"
         case .readImageTool: return "我的小家 is reading Image"
         case .memoryTool: return "我的小家 is using Memory"
+        case .askUserTool: return "我的小家 is asking You"
         case .info: return "我的小家"
         case .text: return "我的小家"
         case .thinking: return "我的小家"
@@ -2039,6 +2040,7 @@ struct ToolLiveSheet: View {
         case .browserTool: return ChatColors.accent
         case .readImageTool: return ChatColors.accent
         case .memoryTool: return ChatColors.accent
+        case .askUserTool: return ChatColors.accent
         case .info: return .secondary
         case .text: return .primary
         case .thinking: return ChatColors.accent
@@ -2379,6 +2381,7 @@ private struct ToolPreviewThumbnail: View {
         case .browserTool: return ChatColors.accent
         case .readImageTool: return ChatColors.accent
         case .memoryTool: return ChatColors.accent
+        case .askUserTool: return ChatColors.accent
         case .info: return .secondary
         case .text: return .primary
         case .thinking: return ChatColors.accent

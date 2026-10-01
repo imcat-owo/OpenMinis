@@ -338,7 +338,8 @@ final class ToolSuspensionService: ObservableObject {
 
     /// 跳过一条恢复出来的问题：每道题都记为 null，让 AI 自己拿主意继续。
     func skipRestoredAsk(_ ask: PersistedAsk) {
-        let nulls = Dictionary(uniqueKeysWithValues: ask.payload.questions.map { ($0.id, NSNull()) })
+        // uniquingKeysWith：旧版本存下的问题 id 可能重复，uniqueKeysWithValues 会 fatalError。
+        let nulls = Dictionary(ask.payload.questions.map { ($0.id, NSNull()) }, uniquingKeysWith: { first, _ in first })
         let data = try? JSONSerialization.data(withJSONObject: nulls, options: [])
         let json = data.flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
         answerRestoredAsk(
@@ -404,8 +405,10 @@ final class ToolSuspensionService: ObservableObject {
         }
 
         // 只有正在呈现的那条被解决，才顶起排队的下一条。
-        if wasCurrent, let next = queue.first {
-            queue.removeFirst()
+        // 恢复的问询不参与顶起——它们只进排队、按会话呈现（askRequestForSession）；
+        // 一旦占住 current，用户不打开原会话就永久堵死后面其他会话的审批/问询。
+        if wasCurrent, let next = queue.first(where: { $0.tag != "ask-user-restored" }) {
+            queue.removeAll { $0.id == next.id }
             activate(next)
         }
     }

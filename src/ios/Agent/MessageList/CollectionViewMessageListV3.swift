@@ -294,6 +294,7 @@ private struct BridgedAssistantBlockV3: View {
         case .browserTool: return "assistantBrowserBlock"
         case .readImageTool: return "assistantReadImageBlock"
         case .memoryTool: return "assistantMemoryBlock"
+        case .askUserTool: return "assistantAskUserBlock"
         case .info: return "assistantInfoBlock"
         }
     }

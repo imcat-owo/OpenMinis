@@ -2281,6 +2281,10 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
     /// The committedBlockCount before the current/last iteration started.
     /// Used by handleUserCancelledCleanup to roll back the last iteration.
     private var prevCommittedBlockCount: Int = 0
+    /// [s2-askuser] 当轮 assistant RawMessage 已被提前落盘（挂起问用户前，为了杀进程
+    /// 恢复时 DB 里有这条 tool_use）。记下 id，loop 尾的批量提交凭 id 跳过，不写两遍。
+    /// 每轮工具执行前重置。
+    var assistantMessagePersistedForSuspension: String? = nil
     /// Set by cancel() so the task's error handler knows this was a user stop.
     /// Internal-access so concurrent tool extensions can read it. [T-concurrent-tools]
     var userDidCancel = false
@@ -6251,6 +6255,8 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
             // Build assistant RawMessage now but defer DB write until tool results
             // are ready, so both can be persisted in a single SQLite transaction.
             let deferredAssistantRaw = await buildRawMessage(assistantMessage, thoughtSignatures: sigMap)
+            // [s2-askuser] 新一轮工具执行：清掉"已提前落盘"标记（问用户挂起时会提前写）。
+            assistantMessagePersistedForSuspension = nil
             // Phase B: write the DB id back into agentHistory immediately — even though
             // we defer the actual appendMessages to batch with the tool results below,
             // the id is deterministic and compact lookups rely on it.
@@ -6360,7 +6366,7 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
                         }
                         let outcome = await self.executeSingleToolUse(
                             tu: tu, msgIdx: msgIdx, tools: toolsSnapshot, batchBudget: imageBudgetActor,
-                            batchFileClaims: fileClaimRegistry
+                            batchFileClaims: fileClaimRegistry, deferredAssistantRaw: deferredAssistantRaw
                         )
                         return (idx, outcome)
                     }
@@ -6427,7 +6433,8 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
             logger.info("[BlocksLost] PERSIST mid-loop (tool) sid=\(sessionId?.prefix(8) ?? "nil") agentParts=\(assistantMessage.parts.count) uiBlocks=\(uiBlockCountMid)")
             if let toolResultRaw = await buildRawMessage(toolResultMessage, snapshots: pendingSnapshots, toolStatuses: toolStatusStrings) {
                 var batch: [RawMessage] = []
-                if let assistantRaw = deferredAssistantRaw { batch.append(assistantRaw) }
+                // [s2-askuser] 问用户挂起时当轮 assistant 已提前落盘：凭 id 跳过，不写两遍。
+                if let assistantRaw = deferredAssistantRaw, assistantRaw.id != assistantMessagePersistedForSuspension { batch.append(assistantRaw) }
                 batch.append(toolResultRaw)
                 await ChatStore.shared.appendMessages(batch)
                 // Phase B: write the DB id back into agentHistory entries so compact
@@ -6435,7 +6442,8 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
                 if toolResultAgentIdx < agentHistory.count {
                     agentHistory[toolResultAgentIdx].dbMessageId = toolResultRaw.id
                 }
-            } else if let assistantRaw = deferredAssistantRaw {
+            } else if let assistantRaw = deferredAssistantRaw,
+                      assistantRaw.id != assistantMessagePersistedForSuspension {
                 await ChatStore.shared.appendMessage(assistantRaw)
                 // (assistantAgentIdx was already populated above via deferredAssistantRaw path)
             }

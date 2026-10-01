@@ -109,7 +109,8 @@ extension AIChatViewModel {
         msgIdx: Int,
         tools: [AgentToolDefinition],
         batchBudget: BatchImageBudget,
-        batchFileClaims: BatchFileClaimRegistry
+        batchFileClaims: BatchFileClaimRegistry,
+        deferredAssistantRaw: RawMessage?
     ) async -> ToolExecOutcome {
         let blockIdx = tu.blockIdx
 
@@ -351,7 +352,6 @@ extension AIChatViewModel {
                         break
                     }
                     ctLogger.info("[OffloadPerm] ALLOWED: \(offloadCmd)")
-                }
                 }
             } else {
                 ctLogger.info("[OffloadPerm] no offload match for first token")
@@ -878,7 +878,7 @@ extension AIChatViewModel {
             toolSuccess = memResult.success
 
         case "ask_user_input_v0":
-            let askResult = await handleAskUser(toolArgs: toolArgs, toolId: tu.id)
+            let askResult = await handleAskUser(toolArgs: toolArgs, toolId: tu.id, deferredAssistantRaw: deferredAssistantRaw)
             if msgIdx < messages.count, blockIdx < messages[msgIdx].blocks.count {
                 messages[msgIdx].blocks[blockIdx].content = askResult.summary
             }

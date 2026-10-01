@@ -406,6 +406,7 @@ struct ToolCapsuleView: View {
         case .browserTool:   toolName = "browser_use"
         case .readImageTool: toolName = "read_image"
         case .memoryTool:    toolName = "memory"
+        case .askUserTool:   toolName = "ask_user_input_v0"
         case .text, .thinking, .info: toolName = "unknown"
         }
 
