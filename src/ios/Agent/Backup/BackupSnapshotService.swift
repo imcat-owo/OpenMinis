@@ -39,9 +39,17 @@ final class BackupSnapshotService {
     static let shared = BackupSnapshotService()
 
     /// Package-name prefix marking a delivered package as a snapshot.
-    /// Retention only ever touches files carrying it; hand-made backups
-    /// in the same folder are untouchable.
+    /// Cosmetic only — retention never trusts the name alone (a hand-made
+    /// backup can be named `snapshot-…` by its device name or by renaming),
+    /// it only ever touches names recorded in the snapshot manifest below.
     static let filePrefix = "snapshot-"
+
+    /// Name of the snapshot ledger kept next to the packages.
+    /// `listSnapshots` only recognises files whose names are in here AND
+    /// exist on disk; retention only deletes ledger entries. A hand-made
+    /// backup is never in the ledger, so it can never be pruned — even when
+    /// its filename starts with `snapshot-`.
+    private static let manifestFileName = "snapshot-manifest.json"
 
     private var pendingCheck: Task<Void, Never>?
     private var isSnapshotting = false
@@ -73,16 +81,21 @@ final class BackupSnapshotService {
         let bytes: Int64
     }
 
-    /// Snapshots in `dir`, newest first. A file counts as a snapshot by
-    /// name only (`snapshot-*.minisbak`); its date is the file's content
-    /// modification date.
+    /// Snapshots in `dir`, newest first. A file counts as a snapshot only if
+    /// its name is recorded in the snapshot manifest (written when the
+    /// service itself creates the package) AND the file still exists — the
+    /// filename prefix alone is forgeable and is never trusted. A missing or
+    /// unreadable manifest means zero recognised snapshots: old snapshot
+    /// files simply stop being pruned, which is the safe direction (a
+    /// hand-made backup can never be misclassified).
     static func listSnapshots(in dir: URL) -> [SnapshotFile] {
         let fm = FileManager.default
-        let names = (try? fm.contentsOfDirectory(atPath: dir.path)) ?? []
+        let names = Set(manifestNames(in: dir))
+        guard !names.isEmpty else { return [] }
         var out: [SnapshotFile] = []
-        for name in names
-        where name.hasPrefix(filePrefix) && name.hasSuffix("." + BackupFormat.fileExtension) {
+        for name in names {
             let url = dir.appendingPathComponent(name)
+            guard fm.fileExists(atPath: url.path) else { continue }
             let attrs = try? fm.attributesOfItem(atPath: url.path)
             let date = attrs?[.modificationDate] as? Date
                 ?? attrs?[.creationDate] as? Date ?? .distantPast
@@ -90,6 +103,39 @@ final class BackupSnapshotService {
             out.append(SnapshotFile(url: url, date: date, bytes: bytes))
         }
         return out.sorted { $0.date > $1.date }
+    }
+
+    // MARK: - Snapshot ledger
+
+    private static func manifestURL(in dir: URL) -> URL {
+        dir.appendingPathComponent(manifestFileName)
+    }
+
+    private static func manifestNames(in dir: URL) -> [String] {
+        guard let data = try? Data(contentsOf: manifestURL(in: dir)),
+              let names = try? JSONDecoder().decode([String].self, from: data)
+        else { return [] }
+        return names
+    }
+
+    private static func writeManifest(_ names: [String], in dir: URL) {
+        guard let data = try? JSONEncoder().encode(names.sorted()) else { return }
+        try? data.write(to: manifestURL(in: dir), options: .atomic)
+    }
+
+    /// Record a freshly created snapshot. Called exactly once per package,
+    /// after the move into `dir` succeeded.
+    static func registerSnapshot(named name: String, in dir: URL) {
+        var names = Set(manifestNames(in: dir))
+        names.insert(name)
+        writeManifest(Array(names), in: dir)
+    }
+
+    /// Drop ledger entries for packages retention deleted (or that are gone
+    /// for any other reason), so the manifest never references dead files.
+    static func unregisterSnapshots(named names: Set<String>, in dir: URL) {
+        let remaining = Set(manifestNames(in: dir)).subtracting(names)
+        writeManifest(Array(remaining), in: dir)
     }
 
     /// How old the newest snapshot may get before another is due, scaled
@@ -177,6 +223,7 @@ final class BackupSnapshotService {
             let snapURL = dir.appendingPathComponent(Self.filePrefix + stable.lastPathComponent)
             try? FileManager.default.removeItem(at: snapURL)
             try FileManager.default.moveItem(at: stable, to: snapURL)
+            Self.registerSnapshot(named: snapURL.lastPathComponent, in: dir)
             BackupHistory.shared.finish(
                 runId, totalBytes: summary.totalBytes,
                 skippedFiles: summary.skippedFiles,
@@ -202,9 +249,18 @@ final class BackupSnapshotService {
 
     private func pruneSnapshots(in dir: URL) {
         let snapshots = Self.listSnapshots(in: dir)
+        var deleted = Set<String>()
         for url in Self.retentionDeletions(snapshots, now: Date()) {
-            try? FileManager.default.removeItem(at: url)
-            logger.info("[Backup] snapshot pruned: \(url.lastPathComponent)")
+            do {
+                try FileManager.default.removeItem(at: url)
+                deleted.insert(url.lastPathComponent)
+                logger.info("[Backup] snapshot pruned: \(url.lastPathComponent)")
+            } catch {
+                logger.error("[Backup] snapshot prune failed: \(url.lastPathComponent) — \(error.localizedDescription)")
+            }
+        }
+        if !deleted.isEmpty {
+            Self.unregisterSnapshots(named: deleted, in: dir)
         }
     }
 }
