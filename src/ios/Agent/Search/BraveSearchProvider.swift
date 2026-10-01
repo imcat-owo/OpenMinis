@@ -37,6 +37,12 @@ struct BraveSearchProvider: WebSearchProvider {
             data = body
             status = (response as? HTTPURLResponse)?.statusCode ?? -1
         } catch {
+            // 取消必须原样透传：包成 network 会让调用方把它当成"搜索失败"。
+            // URLSession 取消传出来的是 URLError(.cancelled)，不是 CancellationError，
+            // 两种形态都要放行（仓内四个 LLM provider 的 mapError 同款口径）。
+            if error is CancellationError || Self.isURLSessionCancelled(error) {
+                throw error
+            }
             throw WebSearchError.network("Brave Search：\(error.localizedDescription)")
         }
 
@@ -54,6 +60,12 @@ struct BraveSearchProvider: WebSearchProvider {
         }
 
         return try parse(data: data)
+    }
+
+    /// URLSession 任务被取消时抛的是 URLError(.cancelled)，不是 CancellationError。
+    private static func isURLSessionCancelled(_ error: Error) -> Bool {
+        let ns = error as NSError
+        return ns.domain == NSURLErrorDomain && ns.code == NSURLErrorCancelled
     }
 
     // MARK: - 解析

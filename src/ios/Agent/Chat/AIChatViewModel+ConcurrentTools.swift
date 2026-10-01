@@ -922,6 +922,10 @@ extension AIChatViewModel {
             } catch let cancel as CancellationError {
                 // 取消必须透传出去，不能吞成"搜索失败"（外层 do/catch 负责收）。
                 throw cancel
+            } catch let urlErr as URLError where urlErr.code == .cancelled {
+                // URLSession 取消传出来的是 URLError(.cancelled) 不是 CancellationError，
+                // 转一下让外层取消分支能收（不转会掉进下面的兜底变成"搜索失败"）。
+                throw CancellationError()
             } catch {
                 toolOutput = "Error: 搜索失败：\(error.localizedDescription)"
                 toolSuccess = false
