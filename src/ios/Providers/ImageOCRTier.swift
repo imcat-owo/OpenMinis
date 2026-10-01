@@ -8,7 +8,10 @@ import Vision
 // quota every time. The ladder is:
 //
 //   1. Image-hash cache (memory LRU 48 + disk, see ImageTextCache) — a repeat
-//      read of the same image costs nothing at all.
+//      read of the same image costs nothing at all. The local-OCR
+//      transcription is prompt-independent (plain image hash); a vision-group
+//      description is keyed by image hash + normalized question, because its
+//      answer depends on the question asked.
 //   2. Free on-device OCR (Vision framework, accurate level, en + zh-Hans +
 //      zh-Hant — the same defaults as the `apple-vision` CLI offload). When it
 //      recognizes a substantial amount of text, that transcription IS the
@@ -69,30 +72,48 @@ enum ImageOCRTier {
         seed: Int,
         onAttempt: (@MainActor (VisionGroupResolver.VisionAttempt) -> Void)? = nil
     ) async throws -> TierOutcome {
-        let key = sha256Hex(originalData)
+        let imageKey = sha256Hex(originalData)
+        // [s2-ocr P1-1] The visionGroup tier's answer DEPENDS on the question:
+        // VisionGroupResolver.describe REPLACES its generic instruction with
+        // customPrompt, so the same image asked two different questions gets
+        // two different answers. Keying visionGroup entries by image alone
+        // would silently serve yesterday's answer under today's question
+        // header. Local OCR is a pure transcription (prompt-independent), so
+        // it keeps the plain image key.
+        let normalizedPrompt = (customPrompt ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let visionKey = imageKey + ".q" + sha256Hex(Data(normalizedPrompt.utf8))
 
-        // Tier 1: cache.
-        if let cached = ImageTextCache.get(key: key) {
-            let inner: String
-            var modelName: String?
-            switch cached.source {
-            case .localOCR:
-                inner = frameOCR(cached.text, question: customPrompt)
-            case .visionGroup:
-                modelName = cached.modelName
-                let outcome = VisionGroupResolver.VisionOutcome(
-                    modelName: cached.modelName ?? "vision model",
-                    description: cached.text,
-                    priorFailures: []
-                )
-                inner = VisionGroupResolver.framedDescription(
-                    outcome, groupName: VisionGroupResolver.groupName(), question: customPrompt)
-            }
+        // Tier 1a: prompt-independent transcription cache.
+        if let cached = ImageTextCache.get(key: imageKey), cached.source == .localOCR {
             return TierOutcome(
                 framedText: "[from cache — the identical image was read before; "
-                    + "result reproduced without re-running recognition]\n" + inner,
+                    + "transcription reproduced without re-running recognition]\n"
+                    + frameOCR(cached.text, question: customPrompt),
                 source: .cache,
-                modelName: modelName,
+                modelName: nil,
+                fromCache: true
+            )
+        }
+
+        // Tier 1b: question-specific vision-group cache. Keyed by image AND
+        // the normalized question, so a different question never gets a
+        // stale answer (P1-1).
+        if let cached = ImageTextCache.get(key: visionKey), cached.source == .visionGroup {
+            let outcome = VisionGroupResolver.VisionOutcome(
+                modelName: cached.modelName ?? "vision model",
+                description: cached.text,
+                priorFailures: []
+            )
+            return TierOutcome(
+                framedText: "[from cache — the identical image was read before "
+                    + "with the same question; result reproduced without "
+                    + "re-running recognition]\n"
+                    + VisionGroupResolver.framedDescription(
+                        outcome, groupName: VisionGroupResolver.groupName(),
+                        question: customPrompt),
+                source: .cache,
+                modelName: cached.modelName,
                 fromCache: true
             )
         }
@@ -100,7 +121,7 @@ enum ImageOCRTier {
         // Tier 2: free on-device OCR.
         if let ocrText = await runLocalOCR(preparedData),
            ocrText.count >= ocrSubstantialChars {
-            ImageTextCache.store(key: key, entry: ImageTextCache.Entry(
+            ImageTextCache.store(key: imageKey, entry: ImageTextCache.Entry(
                 text: ocrText, source: .localOCR, modelName: nil, storedAt: Date().timeIntervalSince1970))
             return TierOutcome(
                 framedText: frameOCR(ocrText, question: customPrompt),
@@ -118,7 +139,7 @@ enum ImageOCRTier {
             seed: seed,
             onAttempt: onAttempt
         )
-        ImageTextCache.store(key: key, entry: ImageTextCache.Entry(
+        ImageTextCache.store(key: visionKey, entry: ImageTextCache.Entry(
             text: outcome.description, source: .visionGroup,
             modelName: outcome.modelName, storedAt: Date().timeIntervalSince1970))
         return TierOutcome(
