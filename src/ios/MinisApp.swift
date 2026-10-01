@@ -419,6 +419,9 @@ struct MinisApp: App {
                     shareCoordinator.checkForPendingShare()
                     // Set up background keep-alive manager
                     BackgroundKeepAliveManager.shared.setup()
+                    // [五-2] 桥冷启动恢复：上次开着的对外服务 / 中继连接
+                    // 按持久化开关自动接回去，不必等用户打开设置页。
+                    BridgeRelayClient.shared.restoreOnLaunch()
                     // Monitor network changes to keep iSH DNS up to date
                     NetworkMonitor.shared.start()
                     // Register FileProvider domain for shared files

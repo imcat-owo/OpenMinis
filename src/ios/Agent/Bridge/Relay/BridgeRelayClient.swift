@@ -116,12 +116,29 @@ final class BridgeRelayClient: NSObject, ObservableObject {
     }
 
     /// 设置页出现时调用：把持久化的开关值同步进来，开着且离线就连上。
-    /// （App 冷启动时在设置页打开前不自动连——启动接线不在本条范围。）
     func restoreFromPreferences() {
         isEnabled = BridgeRelayPreferences.relayEnabled
         if isEnabled, state == .offline {
             startConnecting()
         }
+    }
+
+    /// App 冷启动接线（五-2）：MinisApp 启动时调一次，按上次保存的
+    /// 两个开关恢复现场，不必等用户打开「桥·对外连接」设置页：
+    /// 对外服务开关（externalMCPEnabled）或中继开关（relayEnabled）
+    /// 任一开着，就先把本地对外服务补起来（中继转发靠它干活）；
+    /// 然后中继按它自己的开关恢复连接。两步都幂等，重复调用无
+    /// 副作用；本地服务补起失败不拦中继连接（转发路径自己会再拉）。
+    func restoreOnLaunch() {
+        if BridgeRelayPreferences.externalMCPEnabled || BridgeRelayPreferences.relayEnabled,
+           !BridgeExternalMCPService.shared.isRunning {
+            do {
+                try BridgeExternalMCPService.shared.ensureRunning()
+            } catch {
+                relayLog.error("relay launch restore: local MCP service failed to start: \(error.localizedDescription)")
+            }
+        }
+        restoreFromPreferences()
     }
 
     // MARK: - 连接状态机（@MainActor 内执行）
