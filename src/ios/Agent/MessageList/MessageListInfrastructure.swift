@@ -1185,4 +1185,11 @@ final class CellStateBridgeV2: ObservableObject {
     @Published var usageContentVisible: Bool = false
     /// Compact summary — presented from overlay outside cell tree for animation.
     var onShowCompactSummary: ((String) -> Void)?
+    /// [s20] 浏览器接管回调：由 Coordinator 从 chat VM 接线，语义与悬浮
+    /// 工具条的主路径完全一致——onBrowserTakeover 置位
+    /// vm.browserTakeoverActive 停泊 agent 循环让主人手动操作浏览器，
+    /// onTakeoverDone 调 vm.resumeFromBrowserTakeover() 交还并续跑。
+    /// 此前工具详情页（ToolLiveSheet）这条链断着，接管按钮不显示（BR-2）。
+    var onBrowserTakeover: (() -> Void)?
+    var onTakeoverDone: (() -> Void)?
 }

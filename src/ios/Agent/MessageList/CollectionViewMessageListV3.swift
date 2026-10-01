@@ -674,6 +674,8 @@ private struct BridgedWholeMessageV3: View {
             onCompact: bridge.onCompact,
             onCopyScreenshot: bridge.onCopyScreenshot,
             onShowCompactSummary: bridge.onShowCompactSummary,
+            onBrowserTakeover: bridge.onBrowserTakeover,
+            onTakeoverDone: bridge.onTakeoverDone,
             browserPool: nil,
             toolSnapshots: []
         )
@@ -1418,7 +1420,9 @@ extension CollectionViewMessageListV3 {
                             block: block,
                             toolBlocks: toolBlocks,
                             toolSnapshots: bridge.toolSnapshots,
-                            browserPool: bridge.browserPool
+                            browserPool: bridge.browserPool,
+                            onBrowserTakeover: bridge.onBrowserTakeover,
+                            onTakeoverDone: bridge.onTakeoverDone
                         )
                     }
                     // Dismiss is handled by sheetPresenter.onDismiss (set in attach)
@@ -1466,6 +1470,11 @@ extension CollectionViewMessageListV3 {
             bridge.onStop = isActive ? { [weak self] in self?.onStop?() } : nil
             bridge.browserPool = vm.browserTabPool
             bridge.toolSnapshots = vm.toolSnapshots
+            // [s20] 接管回调与悬浮工具条主路径同源同义：置位停泊 agent
+            // 循环 / 交还续跑。此前 bridge 没这两个字段，工具详情页拿不到
+            // 回调、接管按钮被迫隐藏（BR-2 只做到不显示假按钮）。
+            bridge.onBrowserTakeover = { [weak vm] in vm?.browserTakeoverActive = true }
+            bridge.onTakeoverDone = { [weak vm] in vm?.resumeFromBrowserTakeover() }
             bridge.autoRetryAttempt = isLast ? vm.autoRetryAttempt : 0
             bridge.autoRetryCountdown = isLast ? vm.autoRetryCountdown : 0
             // [T-ios-session-status-mismatch] Defense-in-depth: even if vm.canResume
@@ -5436,6 +5445,9 @@ private final class ToolSheetPresenter: ObservableObject {
         let toolBlocks: [AssistantBlock]
         let toolSnapshots: [ToolSnapshotItem]
         let browserPool: BrowserTabPool?
+        /// [s20] 浏览器接管回调（来自 CellStateBridgeV2，最终源头是 chat VM）。
+        let onBrowserTakeover: (() -> Void)?
+        let onTakeoverDone: (() -> Void)?
     }
 
     @Published var sheetData: SheetData?
@@ -5469,7 +5481,9 @@ private struct SheetOverlayView: View {
                     toolBlocks: data.toolBlocks,
                     initialIdx: data.toolBlocks.firstIndex(where: { $0.id == data.block.id }) ?? 0,
                     toolSnapshots: data.toolSnapshots,
-                    browserPool: data.browserPool
+                    browserPool: data.browserPool,
+                    onBrowserTakeover: data.onBrowserTakeover,
+                    onTakeoverDone: data.onTakeoverDone
                 )
             }
             .onChange(of: toolPresenter.sheetData?.id) { newVal in

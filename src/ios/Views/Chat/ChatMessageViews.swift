@@ -205,6 +205,10 @@ struct ChatMessageRow: View {
     /// Triggers AIChatViewModel.revertCompact(). Wired from AIChatView so the
     /// row + sheet stay free of view-model imports.
     var onRevertCompact: (() -> Void)?
+    /// [s20] 浏览器接管回调，透传给本行弹出的 ToolLiveSheet（语义同
+    /// CellStateBridgeV2 上的同名字段）。nil 时接管按钮不显示（BR-2）。
+    var onBrowserTakeover: (() -> Void)?
+    var onTakeoverDone: (() -> Void)?
     var browserPool: BrowserTabPool?
     var toolSnapshots: [ToolSnapshotItem] = []
     @State private var showUsage = false
@@ -650,7 +654,9 @@ struct ChatMessageRow: View {
         .sheet(item: $detailBlock) { block in
             ToolLiveSheet(toolBlocks: message.blocks.filter { $0.toolStatus != nil },
                           initialIdx: message.blocks.filter({ $0.toolStatus != nil }).firstIndex(where: { $0.id == block.id }) ?? 0,
-                          toolSnapshots: toolSnapshots, browserPool: browserPool)
+                          toolSnapshots: toolSnapshots, browserPool: browserPool,
+                          onBrowserTakeover: onBrowserTakeover,
+                          onTakeoverDone: onTakeoverDone)
         }
     }
 
