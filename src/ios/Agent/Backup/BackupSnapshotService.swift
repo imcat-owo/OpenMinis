@@ -110,17 +110,25 @@ final class BackupSnapshotService {
     }
 
     /// Retention: the newest 7 snapshots stay. Beyond that batch, one
-    /// weekly keeper (the newest snapshot at least 7 days old) and one
-    /// monthly keeper (the newest at least 30 days old) survive; every
-    /// other snapshot is deleted. At most 9 packages ever accumulate.
+    /// weekly keeper (the newest remaining snapshot at least 7 days old)
+    /// and one monthly keeper (the newest remaining at least 30 days
+    /// old) survive; every other snapshot is deleted. The keepers are
+    /// picked from OUTSIDE the batch — if the batch itself already
+    /// reaches back 7 days, the weekly slot still goes to the next one
+    /// out, so the long tail doesn't thin out. At most 9 packages ever
+    /// accumulate.
     static func retentionDeletions(_ snapshots: [SnapshotFile], now: Date) -> [URL] {
         var keep = Set<URL>()
         for s in snapshots.prefix(7) { keep.insert(s.url) }
         let day: TimeInterval = 24 * 3600
-        if let weekly = snapshots.first(where: { now.timeIntervalSince($0.date) >= 7 * day }) {
+        if let weekly = snapshots.first(where: {
+            !keep.contains($0.url) && now.timeIntervalSince($0.date) >= 7 * day
+        }) {
             keep.insert(weekly.url)
         }
-        if let monthly = snapshots.first(where: { now.timeIntervalSince($0.date) >= 30 * day }) {
+        if let monthly = snapshots.first(where: {
+            !keep.contains($0.url) && now.timeIntervalSince($0.date) >= 30 * day
+        }) {
             keep.insert(monthly.url)
         }
         return snapshots.filter { !keep.contains($0.url) }.map(\.url)
