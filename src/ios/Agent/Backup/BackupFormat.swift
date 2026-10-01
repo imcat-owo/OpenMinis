@@ -49,6 +49,19 @@ enum BackupCategory: String, Codable, CaseIterable, Sendable {
     /// either. iCloud sync covered this all along, which is why it went
     /// unnoticed by anyone who had sync switched on.
     case environmentVariables = "environment_variables"
+    /// Appearance: the whole `AppearanceStudio` directory (wallpapers,
+    /// category / card images, custom icons, saved-theme packs) as a file
+    /// tree, plus the appearance UserDefaults state (colours, user avatar,
+    /// opacities, current pack, theme-library list) as
+    /// `data/appearance_settings.json`.
+    ///
+    /// [PIC-2] Before this category existed a restore brought back chats,
+    /// memory and providers but silently dropped every trace of how the
+    /// user had dressed the app — the only survivor was the assistant
+    /// avatar, which happens to live in SOUL.md and rode along with
+    /// Memory. Pure addition to the format: older readers ignore the
+    /// unknown category key, older packages simply don't have it.
+    case appearance
 
     /// Default checkbox state on the backup screen (§3 table).
     var defaultsOn: Bool { true }
@@ -70,11 +83,24 @@ enum BackupCategory: String, Codable, CaseIterable, Sendable {
     /// the §3.4 size cap applies to.
     var carriesFileTree: Bool {
         switch self {
-        case .chats, .sharedFiles, .skills: return true
+        case .chats, .sharedFiles, .skills, .appearance: return true
         case .memory, .providers, .mcpServers, .voiceCorrections,
              .environmentVariables: return false
         }
     }
+}
+
+/// One UserDefaults value as carried in `data/appearance_settings.json`
+/// ([PIC-2], Appearance category). A tagged struct rather than a bare
+/// plist value so the JSON shape is explicit, stable across platforms,
+/// and tolerant: a reader that meets an unknown `kind` skips that key
+/// instead of failing the category. `data` is base64.
+struct BackupDefaultsValue: Codable, Sendable {
+    var kind: String            // "data" | "string" | "double" | "strings"
+    var data: String? = nil
+    var string: String? = nil
+    var double: Double? = nil
+    var strings: [String]? = nil
 }
 
 // MARK: - Manifest

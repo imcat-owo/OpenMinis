@@ -408,6 +408,7 @@ struct BackupHistoryDetailView: View {
         case .mcpServers: return AppLocalized("MCP Servers")
         case .voiceCorrections: return AppLocalized("Voice Corrections")
         case .environmentVariables: return AppLocalized("Environment Variables")
+        case .appearance: return AppLocalized("Appearance")
         }
     }
 }

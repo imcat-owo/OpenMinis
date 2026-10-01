@@ -330,6 +330,9 @@ actor BackupExporter {
                       AppLocalized("Exporting environment variables…")) {
             try await exportEnvironmentVariables(dataDir: dataDir)
         }
+        try await run(.appearance, AppLocalized("Exporting appearance…")) {
+            try await exportAppearance(dataDir: dataDir, trees: trees)
+        }
         // [2026-08-15] Not reached in normal use: `.voiceCorrections` is absent
         // from `BackupCategory.backupable`, so it never appears in
         // `options.categories` and `run` skips it. Kept wired up rather than
@@ -951,6 +954,32 @@ actor BackupExporter {
             return nil
         }
         return servers.count
+    }
+
+    // MARK: - Appearance
+
+    /// [PIC-2] The whole AppearanceStudio directory as a file tree
+    /// (wallpapers, category / card images, custom icons, saved-theme
+    /// packs) plus the appearance UserDefaults state as
+    /// `data/appearance_settings.json`. The settings file is written only
+    /// when the user has actually customised something, so an untouched
+    /// install's package gains no file at all.
+    private func exportAppearance(dataDir: URL, trees: BackupFileTreeExporter) async throws
+        -> BackupManifest.CategoryStat {
+        let dir = await MainActor.run { AppearanceStudio.appearanceAssetsDirectory }
+        let r = try trees.export(root: dir, logicalPrefix: "appearance",
+                                 category: .appearance)
+        var bytes = r.bytesIncluded
+        var entries = r.filesIncluded
+        let values = await MainActor.run { AppearanceStudio.shared.collectBackupDefaults() }
+        if !values.isEmpty {
+            let url = dataDir.appendingPathComponent("appearance_settings.json")
+            try BackupJSONFile.write(values, to: url)
+            bytes += (try? fm.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
+            entries += 1
+        }
+        return BackupManifest.CategoryStat(
+            entries: entries, bytes: bytes, encrypted: false, files: r.filesIncluded)
     }
 
     // MARK: - Environment variables

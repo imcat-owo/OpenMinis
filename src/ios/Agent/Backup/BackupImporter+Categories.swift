@@ -62,6 +62,9 @@ extension BackupImporter {
         switch category {
         case .sharedFiles: liveDirs = [AIChatViewModel.minisSharedPersistentDir]
         case .memory: liveDirs = [AIChatViewModel.minisMemoryPersistentDir]
+        // [PIC-2] The appearance tree is directory-backed like shared
+        // files, so it gets the same copy-aside rollback.
+        case .appearance: liveDirs = [AppearanceStudio.appearanceAssetsDirectory]
         case .mcpServers: liveDirs = [MCPStore.syncFileURL.deletingLastPathComponent()]
         // [review B3] Providers had NO rollback at all. It is a single JSON
         // file rather than a directory, so it is snapshotted via a dedicated
@@ -147,6 +150,7 @@ extension BackupImporter {
         case .voiceCorrections: return try await importVoiceCorrections(root: root)
         case .environmentVariables:
             return try await importEnvironmentVariables(root: root)
+        case .appearance: return try await importAppearance(root: root, fileIndex: fileIndex)
         }
     }
 
@@ -302,6 +306,38 @@ extension BackupImporter {
         // Per §3.2 no meta.db write is needed: every mount re-walks this
         // directory and re-registers rows, so the guest sees the files after the
         // next boot.
+        return report
+    }
+
+    // MARK: - Appearance
+
+    /// [PIC-2] The AppearanceStudio tree back to its original location
+    /// (same merge semantics as Shared Files: package files overwrite,
+    /// files the package doesn't mention are left alone), plus the
+    /// UserDefaults half from `data/appearance_settings.json`.
+    /// `applyBackupDefaults` whitelists the keys it writes and reloads
+    /// the live AppearanceStudio, so the restored look applies without
+    /// a relaunch.
+    private func importAppearance(root: URL, fileIndex: [BackupFileIndexEntry]) async throws
+        -> CategoryReport {
+        var report = CategoryReport(category: BackupCategory.appearance.rawValue)
+        let base = AppearanceStudio.appearanceAssetsDirectory
+        let files = try restoreFileTree(
+            root: root, fileIndex: fileIndex, category: .appearance,
+            destinationFor: { path in
+                guard path.hasPrefix("appearance/") else { return nil }
+                return base.appendingPathComponent(String(path.dropFirst("appearance/".count)))
+            })
+        report.filesWritten = files.written
+        report.bytesWritten = files.bytes
+        report.missingBlobs = files.missingBlobs
+
+        let settingsURL = root.appendingPathComponent("data/appearance_settings.json")
+        if let data = try? Data(contentsOf: settingsURL),
+           let values = try? JSONDecoder().decode([String: BackupDefaultsValue].self, from: data) {
+            await MainActor.run { AppearanceStudio.shared.applyBackupDefaults(values) }
+            report.imported += 1
+        }
         return report
     }
 
@@ -804,6 +840,7 @@ extension BackupImporter {
         case .sharedFiles: return AIChatViewModel.minisSharedPersistentDir
         case .skills: return AIChatViewModel.minisSkillsPersistentDir
         case .memory: return AIChatViewModel.minisMemoryPersistentDir
+        case .appearance: return AppearanceStudio.appearanceAssetsDirectory
         case .providers, .mcpServers, .voiceCorrections, .environmentVariables:
             // These write single known files, not index-driven trees; give them
             // the app-group root so the check is still meaningful if one ever
@@ -1004,6 +1041,12 @@ extension BackupImporter {
     func reloadStores(for categories: Set<BackupCategory>) async {
         if categories.contains(.skills) {
             await MainActor.run { SkillStore.shared.reload() }
+        }
+        if categories.contains(.appearance) {
+            // Covers packages whose appearance half is files only (no
+            // settings file): the live studio must still drop its cached
+            // wallpapers and re-read the icons the restore just wrote.
+            await MainActor.run { AppearanceStudio.shared.reloadAfterRestore() }
         }
         if categories.contains(.chats) {
             // One batch signal is enough to refresh everything chat-related.

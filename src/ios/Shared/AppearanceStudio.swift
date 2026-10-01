@@ -271,13 +271,21 @@ final class AppearanceStudio: ObservableObject {
     /// Static twin of `appearanceDirectory`: init-time helpers that run
     /// before all stored properties are initialized (the PIC-6 icon
     /// migration/load) resolve the same directory without touching `self`.
-    private static var appearanceDirectoryURL: URL {
+    /// `nonisolated`: the body is a pure path computation plus an
+    /// idempotent directory creation, and off-main callers (the backup
+    /// system) need the path without an actor hop.
+    private nonisolated static var appearanceDirectoryURL: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory,
                                             in: .userDomainMask).first!
         let dir = base.appendingPathComponent("AppearanceStudio", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
+
+    /// [PIC-2] The directory the backup system archives wholesale for the
+    /// Appearance category: every wallpaper, category / card image,
+    /// custom icon and saved-theme pack lives under it.
+    nonisolated static var appearanceAssetsDirectory: URL { appearanceDirectoryURL }
 
     private func wallpaperURL(_ scope: AppearanceScope) -> URL {
         appearanceDirectory.appendingPathComponent("wallpaper-\(scope.rawValue).jpg")
@@ -803,5 +811,99 @@ enum QuietIconSlot: String, CaseIterable, Identifiable {
         case .browser: return "globe"
         case .bridgeRelay: return "antenna.radiowaves.left.and.right"
         }
+    }
+}
+
+// MARK: - Backup ([PIC-2])
+
+extension AppearanceStudio {
+    /// Every UserDefaults key holding appearance state. The image FILES
+    /// are archived as a tree (see `appearanceAssetsDirectory`); these
+    /// keys are the half that lives in defaults — custom colours, the
+    /// user avatar, opacities, the wallpaper-cleared list, the
+    /// theme-library list and the current theme pack. Single source of
+    /// truth for both directions, and the restore side's whitelist: a
+    /// package may only ever write THESE keys, never arbitrary defaults.
+    static var backupDefaultsKeys: [String] {
+        [Keys.colors, Keys.userAvatar, Keys.surfaceOpacity, Keys.bubbleOpacity,
+         Keys.wallpaperShade, wallpaperClearedKey,
+         AppearanceSavedTheme.libraryKey, AppearanceThemePack.currentKey]
+    }
+
+    /// Snapshot the keys above into the package's wire shape. Absent keys
+    /// stay absent, so restoring an old or sparse package never invents
+    /// values the source device didn't have.
+    func collectBackupDefaults() -> [String: BackupDefaultsValue] {
+        let defaults = UserDefaults.standard
+        var out: [String: BackupDefaultsValue] = [:]
+        for key in Self.backupDefaultsKeys {
+            guard let raw = defaults.object(forKey: key) else { continue }
+            if let data = raw as? Data {
+                out[key] = BackupDefaultsValue(kind: "data", data: data.base64EncodedString())
+            } else if let string = raw as? String {
+                out[key] = BackupDefaultsValue(kind: "string", string: string)
+            } else if let strings = raw as? [String] {
+                out[key] = BackupDefaultsValue(kind: "strings", strings: strings)
+            } else if let number = raw as? NSNumber {
+                out[key] = BackupDefaultsValue(kind: "double", double: number.doubleValue)
+            }
+        }
+        return out
+    }
+
+    /// Write a restored package's values back into UserDefaults (only the
+    /// whitelisted keys; unknown kinds are skipped, not fatal), then
+    /// reload the live instance so the restored look takes effect without
+    /// a relaunch.
+    func applyBackupDefaults(_ values: [String: BackupDefaultsValue]) {
+        let defaults = UserDefaults.standard
+        for key in Self.backupDefaultsKeys {
+            guard let value = values[key] else { continue }
+            switch value.kind {
+            case "data":
+                if let b64 = value.data, let data = Data(base64Encoded: b64) {
+                    defaults.set(data, forKey: key)
+                }
+            case "string":
+                if let string = value.string { defaults.set(string, forKey: key) }
+            case "strings":
+                if let strings = value.strings { defaults.set(strings, forKey: key) }
+            case "double":
+                if let double = value.double { defaults.set(double, forKey: key) }
+            default:
+                break
+            }
+        }
+        reloadAfterRestore()
+    }
+
+    /// Re-read every piece of appearance state from disk / defaults after
+    /// a restore rewrote it underneath the live instance: colours, avatar,
+    /// opacities, cleared-wallpaper list, custom icons (files), current
+    /// theme pack, and the cached wallpapers.
+    func reloadAfterRestore() {
+        if let data = UserDefaults.standard.data(forKey: Keys.colors),
+           let value = try? JSONDecoder().decode([String: String].self, from: data) {
+            customColors = value
+        } else {
+            customColors = [:]
+        }
+        Self.colorSnapshot = customColors
+        userAvatar = UserDefaults.standard.string(forKey: Keys.userAvatar) ?? ""
+        surfaceOpacity = UserDefaults.standard.object(forKey: Keys.surfaceOpacity) as? Double ?? 0.88
+        bubbleOpacity = UserDefaults.standard.object(forKey: Keys.bubbleOpacity) as? Double ?? 1.0
+        wallpaperShade = UserDefaults.standard.object(forKey: Keys.wallpaperShade) as? Double ?? 0.08
+        loadWallpaperCleared()
+        customIcons = Self.loadCustomIconsFromDisk()
+        themePackLock.lock()
+        cachedThemePack = loadStoredPackUnlocked()
+        themePackLoaded = true
+        themePackLock.unlock()
+        themePackRevision += 1
+        wallpaperCache.removeAll()
+        wallpaperRevision += 1
+        iconRevision += 1
+        configureUIKitSurfaces()
+        objectWillChange.send()
     }
 }
