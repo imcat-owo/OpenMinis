@@ -564,6 +564,7 @@
 		RCL000119 /* BackupHistoryDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = RCL000219 /* BackupHistoryDetailView.swift */; };
 		RCL000120 /* BackupCategoryIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = RCL000220 /* BackupCategoryIcon.swift */; };
 		RCL000121 /* BackupHUD.swift in Sources */ = {isa = PBXBuildFile; fileRef = RCL000221 /* BackupHUD.swift */; };
+		RCL000122 /* BackupSnapshotService.swift in Sources */ = {isa = PBXBuildFile; fileRef = RCL000222 /* BackupSnapshotService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -1282,6 +1283,7 @@
 		RCL000219 /* BackupHistoryDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupHistoryDetailView.swift; sourceTree = "<group>"; };
 		RCL000220 /* BackupCategoryIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupCategoryIcon.swift; sourceTree = "<group>"; };
 		RCL000221 /* BackupHUD.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupHUD.swift; sourceTree = "<group>"; };
+		RCL000222 /* BackupSnapshotService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupSnapshotService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -1500,6 +1502,7 @@
 				BKP000232 /* BackupExportJournal.swift */,
 				BKP000233 /* BackupRescueIndex.swift */,
 				RCL000218 /* BackupRunController.swift */,
+				RCL000222 /* BackupSnapshotService.swift */,
 				RCL000217 /* BackupHistory.swift */,
 				RCL000210 /* RcloneBridge.swift */,
 				RCL000213 /* RcloneBackendCatalog.swift */,
@@ -3238,6 +3241,7 @@
 				RCL000119 /* BackupHistoryDetailView.swift in Sources */,
 				RCL000120 /* BackupCategoryIcon.swift in Sources */,
 				RCL000121 /* BackupHUD.swift in Sources */,
+				RCL000122 /* BackupSnapshotService.swift in Sources */,
 				RCL000116 /* BackupDestinationDetailView.swift in Sources */,
 				BKP000113 /* BackupCrypto.swift in Sources */,
 				BKP000112 /* BackupSecrets.swift in Sources */,

@@ -422,6 +422,9 @@ struct MinisApp: App {
                     // [五-2] 桥冷启动恢复：上次开着的对外服务 / 中继连接
                     // 按持久化开关自动接回去，不必等用户打开设置页。
                     BridgeRelayClient.shared.restoreOnLaunch()
+                    // [第20条·快照] 冷启动后约 8 秒查一次：最新快照不够
+                    // 新就自动拍一份（保留策略见 BackupSnapshotService）。
+                    BackupSnapshotService.shared.scheduleLaunchCheck()
                     // Monitor network changes to keep iSH DNS up to date
                     NetworkMonitor.shared.start()
                     // Register FileProvider domain for shared files
@@ -517,6 +520,9 @@ struct MinisApp: App {
 
                 CrashReporter.shared.onAppLaunch()
                 CrashReporter.shared.updateMarkerPhase(phase: "active")
+                // [第20条·快照] 回前台后约 3 秒查一次快照新鲜度（与冷启动
+                // 同一服务；已有更新的快照时只记一行日志就走）。
+                BackupSnapshotService.shared.scheduleForegroundCheck()
 
                 _ = SessionBadgeStore.shared
                 // [T-ios-session-paused-badge-hardkill] Reconcile .paused badges

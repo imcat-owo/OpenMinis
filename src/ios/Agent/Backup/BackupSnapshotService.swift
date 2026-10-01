@@ -1,0 +1,202 @@
+import Foundation
+
+private let logger = AppLogger(category: "Backup")
+
+/// [第20条 · 快照半边] Automatic on-device snapshots: the safety net
+/// between manual backups.
+///
+/// A manual backup only exists when the user remembers to make one, so
+/// the failure this guards against is "the data broke / the phone was
+/// reset, and the newest package is weeks old". The app therefore takes
+/// a snapshot by itself — a full package built by the SAME
+/// `BackupExporter` a manual run uses, so there is exactly one packaging
+/// implementation to trust — and keeps it in the same delivered-packages
+/// folder, renamed with a `snapshot-` prefix. The existing restore flow
+/// picks `.minisbak` files from Files, and the Backups folder is visible
+/// there, so a snapshot is restorable with no new UI; snapshot runs also
+/// appear in Backup History like any other run, first log line
+/// "Automatic snapshot".
+///
+/// Deliberate scope limits (the other half of 第20条 — importing OTHER
+/// apps' backups — is not built):
+///   * On-device only. Nothing is uploaded anywhere; destinations and
+///     delivery are the manual flow's job.
+///   * Credentials are NOT included. A snapshot is an unencrypted
+///     package sitting in user-visible storage; the manual flow only
+///     ships secrets inside an encrypted package, and a same-device
+///     restore keeps the Keychain anyway.
+///   * No settings UI. Whether a toggle should exist is a product
+///     decision, not made here.
+///
+/// Triggering follows the Kelivo snapshot shape: shortly after launch
+/// (≈8s) and after returning to the foreground (≈3s) the service checks
+/// whether the newest snapshot is still fresh; if not, it takes one.
+/// The required freshness interval grows with the size of the last
+/// snapshot (bigger data → rarer snapshots), so a large install doesn't
+/// pay a full export every day.
+@MainActor
+final class BackupSnapshotService {
+    static let shared = BackupSnapshotService()
+
+    /// Package-name prefix marking a delivered package as a snapshot.
+    /// Retention only ever touches files carrying it; hand-made backups
+    /// in the same folder are untouchable.
+    static let filePrefix = "snapshot-"
+
+    private var pendingCheck: Task<Void, Never>?
+    private var isSnapshotting = false
+
+    private init() {}
+
+    // MARK: - Triggers
+
+    /// Called once the app has launched and settled.
+    func scheduleLaunchCheck() { scheduleCheck(after: 8) }
+
+    /// Called when the app returns to the foreground.
+    func scheduleForegroundCheck() { scheduleCheck(after: 3) }
+
+    private func scheduleCheck(after delay: TimeInterval) {
+        pendingCheck?.cancel()
+        pendingCheck = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            await self?.checkAndSnapshotIfDue()
+        }
+    }
+
+    // MARK: - Decision (pure, so the shape can be reviewed without a device)
+
+    struct SnapshotFile {
+        let url: URL
+        let date: Date
+        let bytes: Int64
+    }
+
+    /// Snapshots in `dir`, newest first. A file counts as a snapshot by
+    /// name only (`snapshot-*.minisbak`); its date is the file's content
+    /// modification date.
+    static func listSnapshots(in dir: URL) -> [SnapshotFile] {
+        let fm = FileManager.default
+        let names = (try? fm.contentsOfDirectory(atPath: dir.path)) ?? []
+        var out: [SnapshotFile] = []
+        for name in names
+        where name.hasPrefix(filePrefix) && name.hasSuffix("." + BackupFormat.fileExtension) {
+            let url = dir.appendingPathComponent(name)
+            let attrs = try? fm.attributesOfItem(atPath: url.path)
+            let date = attrs?[.modificationDate] as? Date
+                ?? attrs?[.creationDate] as? Date ?? .distantPast
+            let bytes = attrs?[.size] as? Int64 ?? 0
+            out.append(SnapshotFile(url: url, date: date, bytes: bytes))
+        }
+        return out.sorted { $0.date > $1.date }
+    }
+
+    /// How old the newest snapshot may get before another is due, scaled
+    /// by how big the last one was.
+    static func minimumInterval(forSnapshotBytes bytes: Int64) -> TimeInterval {
+        let mb: Int64 = 1024 * 1024
+        switch bytes {
+        case ..<(200 * mb): return 24 * 3600
+        case ..<(1024 * mb): return 48 * 3600
+        default: return 72 * 3600
+        }
+    }
+
+    static func isDue(now: Date, snapshots: [SnapshotFile]) -> Bool {
+        guard let newest = snapshots.first else { return true }
+        return now.timeIntervalSince(newest.date)
+            >= minimumInterval(forSnapshotBytes: newest.bytes)
+    }
+
+    /// Retention: the newest 7 snapshots stay. Beyond that batch, one
+    /// weekly keeper (the newest snapshot at least 7 days old) and one
+    /// monthly keeper (the newest at least 30 days old) survive; every
+    /// other snapshot is deleted. At most 9 packages ever accumulate.
+    static func retentionDeletions(_ snapshots: [SnapshotFile], now: Date) -> [URL] {
+        var keep = Set<URL>()
+        for s in snapshots.prefix(7) { keep.insert(s.url) }
+        let day: TimeInterval = 24 * 3600
+        if let weekly = snapshots.first(where: { now.timeIntervalSince($0.date) >= 7 * day }) {
+            keep.insert(weekly.url)
+        }
+        if let monthly = snapshots.first(where: { now.timeIntervalSince($0.date) >= 30 * day }) {
+            keep.insert(monthly.url)
+        }
+        return snapshots.filter { !keep.contains($0.url) }.map(\.url)
+    }
+
+    // MARK: - Taking a snapshot
+
+    private func checkAndSnapshotIfDue() async {
+        guard !isSnapshotting else { return }
+        let dir = BackupDelivery.backupsDirectory
+        let existing = Self.listSnapshots(in: dir)
+        guard Self.isDue(now: Date(), snapshots: existing) else {
+            logger.info("[Backup] snapshot still fresh — skipping check")
+            return
+        }
+        // A user-started backup owns the machinery; the export lock would
+        // refuse a second run anyway, but bowing out here keeps the
+        // history free of a failed record for a non-event.
+        guard !BackupRunController.shared.isRunning else {
+            logger.info("[Backup] snapshot due but a backup is already running — skipping")
+            return
+        }
+        isSnapshotting = true
+        defer { isSnapshotting = false }
+        await takeSnapshot(in: dir)
+    }
+
+    private func takeSnapshot(in dir: URL) async {
+        let categories = BackupCategory.backupable
+        let options = BackupExporter.Options(
+            categories: categories,
+            maxFileBytes: nil,
+            includeCredentials: false,
+            passphrase: nil,
+            allowResume: false)
+        let runId = BackupHistory.shared.begin(
+            backupId: "", categories: categories.map(\.rawValue).sorted(),
+            encrypted: false)
+        BackupHistory.shared.log(runId, AppLocalized("Automatic snapshot"))
+        do {
+            let summary = try await BackupBackgroundAssertion.run("BackupSnapshot") {
+                try await BackupExporter().export(options: options) { _ in
+                } progressDetailed: { _, _ in }
+            }
+            let stable = try BackupDelivery.moveToVisibleStorage(summary.packageURL)
+            let snapURL = dir.appendingPathComponent(Self.filePrefix + stable.lastPathComponent)
+            try? FileManager.default.removeItem(at: snapURL)
+            try FileManager.default.moveItem(at: stable, to: snapURL)
+            BackupHistory.shared.finish(
+                runId, totalBytes: summary.totalBytes,
+                skippedFiles: summary.skippedFiles,
+                packageName: snapURL.lastPathComponent, destinations: [],
+                skippedEntries: summary.skippedPaths.map {
+                    .init(path: $0.path, size: $0.size, sessionTitle: nil)
+                })
+            logger.info("[Backup] snapshot written: \(snapURL.lastPathComponent) (\(summary.totalBytes) bytes)")
+            pruneSnapshots(in: dir)
+        } catch let busy as BackupActivityLock.Busy {
+            // Lost a race with a manual run that started after the check
+            // above. Not a failure — leave no history record behind.
+            BackupHistory.shared.remove(runId)
+            logger.info("[Backup] snapshot skipped: \(busy.errorDescription ?? "busy")")
+        } catch is CancellationError {
+            BackupHistory.shared.remove(runId)
+            logger.info("[Backup] snapshot cancelled")
+        } catch {
+            BackupHistory.shared.fail(runId, message: error.localizedDescription)
+            logger.error("[Backup] snapshot failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func pruneSnapshots(in dir: URL) {
+        let snapshots = Self.listSnapshots(in: dir)
+        for url in Self.retentionDeletions(snapshots, now: Date()) {
+            try? FileManager.default.removeItem(at: url)
+            logger.info("[Backup] snapshot pruned: \(url.lastPathComponent)")
+        }
+    }
+}
