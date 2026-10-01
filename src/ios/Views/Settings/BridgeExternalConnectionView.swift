@@ -9,7 +9,9 @@ import SwiftUI
 ///   ⑤ 中继状态行（在线 / 离线 / 连接中 / 口令错误）；
 ///   ⑥ 「小管家」状态行 + 打断按钮（第 20 条）：服务开着时显示小管家
 ///      正在执行的任务，有任务在跑/排队时可一键打断，外部 AI 会收到
-///      「主人打断」专属报错。
+///      「主人打断」专属报错；
+///   ⑦ 「报问题到 GitHub」区（第 21 条）：报问题令牌录入——只显示
+///      已填/未填、不回显明文，令牌只存钥匙串（BridgeGitHubTokenStore）。
 ///
 /// 口令与完整中继地址不进日志；口令在界面上默认只以 •••• 出现，
 /// 与本 App 其他凭据输入框（如 API Key）同一套交互：眼睛按钮才明文。
@@ -27,6 +29,11 @@ struct BridgeExternalConnectionView: View {
     /// 小管家当前任务状态（第 20 条）：页面在屏时轮询刷新。
     @State private var stewardStatusText: String = ""
     @State private var hasActiveStewardTask: Bool = false
+
+    /// GitHub 报问题令牌（第 21 条）：输入框只收新令牌，已存的只显示
+    /// 已填/未填，绝不把钥匙串里的明文读回界面。
+    @State private var githubTokenInput: String = ""
+    @State private var hasGitHubToken: Bool = false
 
     var body: some View {
         Form {
@@ -86,11 +93,36 @@ struct BridgeExternalConnectionView: View {
             } footer: {
                 Text(AppLocalized("先填中继地址和口令，再打开中继连接；改完按回车生效。口令只存本机钥匙串，不会上传；中继只转手、不存任何内容。"))
             }
+
+            Section {
+                LabeledContent(AppLocalized("报问题令牌")) {
+                    Text(hasGitHubToken ? AppLocalized("已填") : AppLocalized("未填"))
+                        .foregroundStyle(.secondary)
+                }
+                SecureField(AppLocalized("粘贴令牌"), text: $githubTokenInput)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .textContentType(.oneTimeCode)
+                    .submitLabel(.done)
+                    .onSubmit { saveGitHubToken() }
+                if hasGitHubToken {
+                    Button(role: .destructive) {
+                        clearGitHubToken()
+                    } label: {
+                        Text(AppLocalized("清除报问题令牌"))
+                    }
+                }
+            } header: {
+                Text(AppLocalized("报问题到 GitHub"))
+            } footer: {
+                Text(AppLocalized("在桥里跟小管家说哪里有问题，它会把问题连同当时的情况打包发到 GitHub 仓库 imcat-owo/OpenMinis 的问题列表里，不用填表。发送需要一把令牌：在 GitHub 里生成一个 fine-grained 个人访问令牌（PAT），只选 imcat-owo/OpenMinis 这一个仓库、权限只给 Issues 的读写。令牌只存本机钥匙串，界面不回显，也不会发到别处。填好按回车保存。"))
+            }
         }
         .navigationTitle(AppLocalized("桥·对外连接"))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             tokenInput = BridgeRelayTokenStore.load() ?? ""
+            hasGitHubToken = BridgeGitHubTokenStore.hasToken
             relay.restoreFromPreferences()
             restoreMCPExternal()
         }
@@ -235,6 +267,23 @@ struct BridgeExternalConnectionView: View {
         } else {
             mcpStatusText = AppLocalized("未运行")
         }
+    }
+
+    // MARK: GitHub 报问题令牌（第 21 条）
+
+    /// 保存新令牌：落钥匙串后立刻清空输入框，界面只留「已填」状态。
+    private func saveGitHubToken() {
+        let trimmed = githubTokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        BridgeGitHubTokenStore.save(trimmed)
+        githubTokenInput = ""
+        hasGitHubToken = BridgeGitHubTokenStore.hasToken
+    }
+
+    private func clearGitHubToken() {
+        BridgeGitHubTokenStore.delete()
+        githubTokenInput = ""
+        hasGitHubToken = false
     }
 
     // MARK: 小管家任务状态与打断（第 20 条）
