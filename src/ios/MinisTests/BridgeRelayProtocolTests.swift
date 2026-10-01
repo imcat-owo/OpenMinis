@@ -186,4 +186,68 @@ final class BridgeRelayProtocolTests: XCTestCase {
         XCTAssertEqual(RelayEndpoint.maskedHost(""), "—")
         XCTAssertEqual(RelayEndpoint.maskedHost("short.dev"), "••••")
     }
+
+    // MARK: - RelayRequestLedger（五-1 去重台账）
+
+    private func ledgerFrame(id: String) -> RelayFrame {
+        .response(id: id, status: 200, headers: ["content-type": "application/json"], bodyBase64: "e30=")
+    }
+
+    func testLedgerFirstBeginIsNewSecondBeginIsDuplicateInFlight() {
+        let ledger = RelayRequestLedger()
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        XCTAssertEqual(ledger.begin(id: "r1", now: t0), .newRequest)
+        XCTAssertEqual(ledger.begin(id: "r1", now: t0), .duplicateInFlight)
+    }
+
+    func testLedgerCompletedRequestReplaysCachedFrame() {
+        let ledger = RelayRequestLedger()
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        XCTAssertEqual(ledger.begin(id: "r1", now: t0), .newRequest)
+        ledger.complete(id: "r1", frame: ledgerFrame(id: "r1"), now: t0)
+        XCTAssertEqual(ledger.begin(id: "r1", now: t0), .replay(ledgerFrame(id: "r1")))
+    }
+
+    func testLedgerErrorFrameIsAlsoReplayable() {
+        let ledger = RelayRequestLedger()
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        XCTAssertEqual(ledger.begin(id: "r1", now: t0), .newRequest)
+        let err = RelayFrame.error(id: "r1", message: "local MCP service unavailable")
+        ledger.complete(id: "r1", frame: err, now: t0)
+        XCTAssertEqual(ledger.begin(id: "r1", now: t0), .replay(err))
+    }
+
+    func testLedgerReplayExpiresAfterTTL() {
+        let ledger = RelayRequestLedger(completedTTL: 600)
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        XCTAssertEqual(ledger.begin(id: "r1", now: t0), .newRequest)
+        ledger.complete(id: "r1", frame: ledgerFrame(id: "r1"), now: t0)
+        // TTL 内还是回放；过了 TTL 当新请求（台账不许无限期记账）。
+        XCTAssertEqual(ledger.begin(id: "r1", now: t0.addingTimeInterval(599)), .replay(ledgerFrame(id: "r1")))
+        XCTAssertEqual(ledger.begin(id: "r1", now: t0.addingTimeInterval(601)), .newRequest)
+    }
+
+    func testLedgerEvictsOldestBeyondCapacity() {
+        let ledger = RelayRequestLedger(maxCompletedEntries: 2, completedTTL: 3600)
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        for (i, id) in ["a", "b", "c"].enumerated() {
+            let t = t0.addingTimeInterval(TimeInterval(i))
+            XCTAssertEqual(ledger.begin(id: id, now: t), .newRequest)
+            ledger.complete(id: id, frame: ledgerFrame(id: id), now: t)
+        }
+        // 容量 2：最早的 a 被淘汰（当新请求），b、c 还能回放。
+        XCTAssertEqual(ledger.begin(id: "a", now: t0.addingTimeInterval(10)), .newRequest)
+        XCTAssertEqual(ledger.begin(id: "b", now: t0.addingTimeInterval(10)), .replay(ledgerFrame(id: "b")))
+        XCTAssertEqual(ledger.begin(id: "c", now: t0.addingTimeInterval(10)), .replay(ledgerFrame(id: "c")))
+    }
+
+    func testLedgerIdsAreIndependent() {
+        let ledger = RelayRequestLedger()
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        XCTAssertEqual(ledger.begin(id: "r1", now: t0), .newRequest)
+        XCTAssertEqual(ledger.begin(id: "r2", now: t0), .newRequest)
+        ledger.complete(id: "r2", frame: ledgerFrame(id: "r2"), now: t0)
+        XCTAssertEqual(ledger.begin(id: "r1", now: t0), .duplicateInFlight)
+        XCTAssertEqual(ledger.begin(id: "r2", now: t0), .replay(ledgerFrame(id: "r2")))
+    }
 }

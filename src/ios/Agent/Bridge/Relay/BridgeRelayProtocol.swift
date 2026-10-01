@@ -166,6 +166,89 @@ struct RelayBackoff: Equatable {
     }
 }
 
+// MARK: - 请求去重台账（第五节五-1：中继防重复转发，App 侧半边）
+//
+// 协议语义补充（v1 帧形一字不变，req 的 id 字段本就存在，这里立的是
+// 它作为「唯一编号＋幂等键」的约定）：
+//   - 每条逻辑请求有且只有一个编号（UUID），就是 req 帧的 id。
+//   - 中继（Durable Object）侧的义务：同一条逻辑请求被重投时
+//     （外部客户端重试、转发超时后重发等），沿用同一个 id 投递，
+//     不许另编新号；并按「设备连接＋编号」记住最近处理过的编号，
+//     重投的直接丢弃或回上次的结果。——这半的实现在 CF Worker
+//     （仓外，bridge-merge/relay/worker.js），不在本仓，本文件只立约定。
+//   - App 侧的义务（本类实现）：收到 req 先查台账——处理中的同号帧
+//     直接丢弃；已完成的同号帧不重跑本地服务，把上次那份响应帧按
+//     原编号重发（幂等回放）；只有新号才真正转发。
+// 台账有界：已完成条目最多留 maxCompletedEntries 份、且只留
+// completedTTL 秒，防长跑内存膨胀；判定与登记是同一个加锁原子动作，
+// 并发重投不会两份都落进「新请求」。
+final class RelayRequestLedger: @unchecked Sendable {
+    enum BeginResult: Equatable {
+        /// 第一次见到这个编号：已登记为处理中，调用方去真正执行。
+        case newRequest
+        /// 同号请求还在处理中：重投直接丢弃，第一份的响应会正常回去。
+        case duplicateInFlight
+        /// 同号请求已处理完：别重跑，把括号里这份响应帧按原编号重发。
+        case replay(RelayFrame)
+    }
+
+    static let defaultMaxCompletedEntries = 128
+    static let defaultCompletedTTL: TimeInterval = 600
+
+    private let lock = NSLock()
+    private var inFlight: Set<String> = []
+    private var completed: [String: (frame: RelayFrame, completedAt: Date)] = [:]
+    /// 完成顺序（FIFO），供过期修剪与超量淘汰从头部摘。
+    private var completionOrder: [String] = []
+
+    private let maxCompletedEntries: Int
+    private let completedTTL: TimeInterval
+
+    init(maxCompletedEntries: Int = RelayRequestLedger.defaultMaxCompletedEntries,
+         completedTTL: TimeInterval = RelayRequestLedger.defaultCompletedTTL) {
+        self.maxCompletedEntries = max(1, maxCompletedEntries)
+        self.completedTTL = completedTTL
+    }
+
+    /// 收到 req 帧时先问这一句。
+    func begin(id: String, now: Date = Date()) -> BeginResult {
+        lock.lock()
+        defer { lock.unlock() }
+        pruneExpired(now: now)
+        if inFlight.contains(id) { return .duplicateInFlight }
+        if let entry = completed[id] { return .replay(entry.frame) }
+        inFlight.insert(id)
+        return .newRequest
+    }
+
+    /// 本地处理产出了响应帧（res / err 都算）时记账，之后同号重投
+    /// 一律回放这一帧、不再重跑。调用方应先记账再发送：发送途中
+    /// 连接被换掉，响应帧也不会丢，重投时还能补发。
+    func complete(id: String, frame: RelayFrame, now: Date = Date()) {
+        lock.lock()
+        defer { lock.unlock() }
+        inFlight.remove(id)
+        if completed[id] == nil {
+            completionOrder.append(id)
+        }
+        completed[id] = (frame, now)
+        while completionOrder.count > maxCompletedEntries {
+            let oldest = completionOrder.removeFirst()
+            completed.removeValue(forKey: oldest)
+        }
+    }
+
+    private func pruneExpired(now: Date) {
+        // completionOrder 按完成时间 FIFO，过期的一定在头部。
+        while let first = completionOrder.first,
+              let entry = completed[first],
+              now.timeIntervalSince(entry.completedAt) > completedTTL {
+            completionOrder.removeFirst()
+            completed.removeValue(forKey: first)
+        }
+    }
+}
+
 // MARK: - 请求头过滤
 
 /// 代理转发时的请求头清洗。协议约定 headers 照搬、hop-by-hop 头可剥；

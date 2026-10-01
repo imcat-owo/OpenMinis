@@ -55,6 +55,11 @@ final class BridgeRelayClient: NSObject, ObservableObject {
     private var handshakeAuthRejected = false
 
     private var backoff = RelayBackoff()
+    /// 请求去重台账（五-1）：按 req 编号记「处理中 / 已完成＋响应帧」。
+    /// 跨连接代次存活（编号本身就是幂等键，换连接不换账），
+    /// 有界淘汰在台账内部。线程安全（内部加锁），detached 转发
+    /// 任务可直接用，不必 hop 回主 actor 查账。
+    private let requestLedger = RelayRequestLedger()
     private var receiveTask: Task<Void, Never>?
     private var pingTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
@@ -224,8 +229,23 @@ final class BridgeRelayClient: NSObject, ObservableObject {
         }
         switch frame {
         case .request(let id, let headers, let bodyBase64):
-            Task.detached { [weak self] in
-                await self?.forwardToLocalMCP(id: id, headers: headers, bodyBase64: bodyBase64, generation: gen)
+            // 五-1 去重：同号重投不许让手机干第二遍活。还在处理中的
+            // 直接丢弃（第一份的响应会正常回去）；已处理完的把上次
+            // 响应按原编号回放；只有新号才真正转发到本地服务。
+            switch requestLedger.begin(id: id) {
+            case .newRequest:
+                Task.detached { [weak self] in
+                    await self?.forwardToLocalMCP(id: id, headers: headers, bodyBase64: bodyBase64, generation: gen)
+                }
+            case .duplicateInFlight:
+                relayLog.warning("relay dropped duplicate in-flight req id=\(id)")
+            case .replay(let cachedFrame):
+                relayLog.info("relay replaying cached response for duplicate req id=\(id)")
+                Task.detached { [weak self] in
+                    // 回放失败（连接又换了）也不再补 err：帧还在台账里，
+                    // 下次同号重投会再回放一次。
+                    try? await self?.send(frame: cachedFrame, generation: gen)
+                }
             }
         case .hello, .ping, .response, .error:
             // 这四种是手机→中继方向的帧，中继不该发回来；收到只记日志不断开。
@@ -310,28 +330,37 @@ final class BridgeRelayClient: NSObject, ObservableObject {
 
     /// 在 detached 任务里跑：网络等待不占主线程；只有最后发帧时
     /// 经 send() 回 @MainActor 对代次、取 socket。
+    /// 产出的响应帧（res / err 都算）先记进，去重台账再发送——发送途中
+    /// 连接被换掉也不丢帧，同号重投时台账会把这一帧回放出去（五-1）。
+    /// 因此发送失败不再补发 err 帧：活已经干完，补 err 只会让中继
+    /// 把「其实成功了」误报成失败，回放才是正解。
     private nonisolated func forwardToLocalMCP(id: String, headers: [String: String], bodyBase64: String, generation gen: Int) async {
+        let frame: RelayFrame
         do {
             let (status, responseHeaders, body) = try await Self.performLocalRequest(headers: headers, bodyBase64: bodyBase64)
-            let frame = RelayFrame.response(
+            frame = RelayFrame.response(
                 id: id,
                 status: status,
                 headers: RelayHeaderFilter.headersForRelayResponse(responseHeaders),
                 bodyBase64: body.base64EncodedString())
-            try await send(frame: frame, generation: gen)
         } catch let error as LocalForwardError {
-            await sendErrorFrame(id: id, message: error.message, generation: gen)
-        } catch is SendError {
-            // 连接已被新连接取代：这一帧回不回去都无意义，静默收尾。
+            relayLog.warning("relay forward failed for req id=\(id): \(error.message)")
+            frame = .error(id: id, message: error.message)
         } catch {
             // URLError 等：文案只带系统错误描述，不带任何 URL/口令。
-            await sendErrorFrame(id: id, message: "local request failed: \(error.localizedDescription)", generation: gen)
+            let message = "local request failed: \(error.localizedDescription)"
+            relayLog.warning("relay forward failed for req id=\(id): \(message)")
+            frame = .error(id: id, message: message)
         }
-    }
-
-    private func sendErrorFrame(id: String, message: String, generation gen: Int) async {
-        relayLog.warning("relay forward failed for req id=\(id): \(message)")
-        try? await send(frame: .error(id: id, message: message), generation: gen)
+        requestLedger.complete(id: id, frame: frame)
+        do {
+            try await send(frame: frame, generation: gen)
+        } catch is SendError {
+            // 连接已被新连接取代：帧已入账，同号重投时会回放，静默收尾。
+        } catch {
+            // 其他发送失败同样靠台账回放兜底（帧已入账），只记一笔。
+            relayLog.warning("relay response send failed for req id=\(id): \(error.localizedDescription)")
+        }
     }
 
     /// 把 req 照搬打到本地 MCP 服务，等完整响应。
