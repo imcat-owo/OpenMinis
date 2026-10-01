@@ -214,9 +214,37 @@ import Foundation
             }
         }
 
-        // Fall back to the in-memory host path only when we couldn't persist.
+        // [s2-25] Post-action snapshots (navigate/click/scroll/…) arrive with
+        // ONLY a host temp path — BrowserUseManager deliberately does not
+        // attach base64 for them (on the agent path they are UI-preview aids,
+        // not model input). On this CLI path the raw host path is unreachable
+        // from the guest sandbox, so persist the file into the session
+        // browser dir and report the Linux path, exactly like an explicit
+        // screenshot above. Only when persisting is impossible do we keep
+        // the old host-path fallback.
         if persistedImagePath == nil, let p = r.imageFilePath, !p.isEmpty {
-            out["image_path"] = p
+            var reported = false
+            if let hostDir = browserHostDir {
+                let src = URL(fileURLWithPath: p)
+                let filename = src.lastPathComponent
+                if !filename.isEmpty,
+                   FileManager.default.fileExists(atPath: p),
+                   let data = try? Data(contentsOf: src) {
+                    try? FileManager.default.createDirectory(at: hostDir, withIntermediateDirectories: true)
+                    let dest = hostDir.appendingPathComponent(filename)
+                    do {
+                        try data.write(to: dest)
+                        out["image_path"] = "\(AIChatViewModel.minisBrowserLinuxDir)/\(filename)"
+                        out["minis_url"] = "minis-clone://browser/\(filename)"
+                        reported = true
+                    } catch {
+                        logger.warning("Failed to persist snapshot to \(dest.path): \(error.localizedDescription)")
+                    }
+                }
+            }
+            if !reported {
+                out["image_path"] = p
+            }
         }
 
         if withBase64, let b = r.base64Image, !b.isEmpty {
