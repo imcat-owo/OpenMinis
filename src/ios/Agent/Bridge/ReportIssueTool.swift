@@ -129,6 +129,14 @@ enum ReportIssueTool {
                 """)
         }
 
+        if http.statusCode == 201 {
+            // 发成功了但回执没解析出编号/链接：如实说，别误导重发造成重复。
+            SharedEventLog.shared.emit(
+                event: "bridge.issue_reported",
+                summary: "问题已发到 GitHub（回执未解析出编号）")
+            return ToolOutput(text: "已经把问题发到 GitHub 了（GitHub 回了成功，但回执里没解析出编号和链接，请到仓库 \(repoFullName) 的 Issues 列表里看最新一条）。")
+        }
+
         logger.warning("GitHub 发 Issue 失败 status=\(http.statusCode)")
         let githubMessage = parsed?["message"] as? String
         return ToolOutput(
