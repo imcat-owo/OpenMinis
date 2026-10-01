@@ -398,7 +398,8 @@ final class ToolSuspensionService: ObservableObject {
         }
 
         // 会话放行：只有明确点了"本次会话不再询问"才记。
-        if case .approved(let grantSession) = decision, grantSession,
+        // 注意：approved 的关联值与放行方法同名，这里改名避免遮住方法。
+        if case .approved(let grantSessionFlag) = decision, grantSessionFlag,
            case .approval(let payload) = request?.kind,
            let grantKey = payload.grantKey {
             grantSession(grantKey, sessionId: request?.sessionId)

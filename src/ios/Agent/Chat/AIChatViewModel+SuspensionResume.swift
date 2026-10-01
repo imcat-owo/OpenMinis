@@ -1,5 +1,9 @@
 import Foundation
 
+/// [s2-suspend-base] 本文件自带 logger（主类里的 logger 是 private，扩展文件不可见，
+/// 按 Agent/Chat 下其他扩展文件的惯例各自声明）。
+private let logger = AppLogger(category: "AIChatVM")
+
 // MARK: - [s2-suspend-base] 挂起恢复后继续跑
 //
 // App 被杀时正在等用户点按的挂起（如问用户），恢复后用户给出答案，
