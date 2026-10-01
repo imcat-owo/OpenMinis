@@ -940,7 +940,7 @@ actor BackupExporter {
         if includeCredentials {
             try fm.copyItem(at: src, to: dst)
         } else {
-            try writeRedactedMCPServers(from: src, to: dst)
+            writeRedactedMCPServers(from: src, to: dst)
             logger.info("[Backup] MCP servers exported without credentials (redacted headers/env)")
         }
         let bytes = (try? fm.attributesOfItem(atPath: dst.path)[.size] as? Int64) ?? 0
@@ -960,14 +960,21 @@ actor BackupExporter {
     /// strips every server's `headers` (HTTP Authorization lives there) and
     /// `env` (STDIO API keys live there), keeps everything else byte-shape.
     /// Lenient JSONSerialization rather than the typed decoder, so an
-    /// externally-authored config with unknown fields keeps them. If the file
-    /// isn't the `{"mcpServers": {…}}` shape MCPStore reads, it can't load as
-    /// servers anyway — copy as-is rather than inventing content.
-    private func writeRedactedMCPServers(from src: URL, to dst: URL) throws {
-        let data = try Data(contentsOf: src)
-        guard var root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+    /// externally-authored config with unknown fields keeps them.
+    ///
+    /// fail-closed: if the file is invalid JSON or not the
+    /// `{"mcpServers": {…}}` shape MCPStore reads, NOTHING is written — the
+    /// file is skipped. Copying it as-is would smuggle possibly-credentialed
+    /// content into an unencrypted package (the app itself reads such a file
+    /// as zero servers — MCPStore returns [] on shape mismatch), and throwing
+    /// would fail the entire snapshot export (MCPStore tolerates a broken
+    /// file, so export must too). The importer tolerates the missing file
+    /// (`guard fileExists else`).
+    private func writeRedactedMCPServers(from src: URL, to dst: URL) {
+        guard let data = try? Data(contentsOf: src),
+              let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               var servers = root["mcpServers"] as? [String: Any] else {
-            try fm.copyItem(at: src, to: dst)
+            logger.warning("[Backup] MCP servers.json unreadable — skipping, not copying into the unencrypted package")
             return
         }
         for (id, entry) in servers {
@@ -976,9 +983,13 @@ actor BackupExporter {
             dict.removeValue(forKey: "env")
             servers[id] = dict
         }
-        root["mcpServers"] = servers
-        let out = try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys])
-        try out.write(to: dst, options: .atomic)
+        var redacted = root
+        redacted["mcpServers"] = servers
+        guard let out = try? JSONSerialization.data(withJSONObject: redacted, options: [.sortedKeys]) else {
+            logger.warning("[Backup] MCP servers.json could not be re-encoded — skipping")
+            return
+        }
+        try? out.write(to: dst, options: .atomic)
     }
 
     /// Number of servers declared in a `servers.json`, or nil if it cannot be
