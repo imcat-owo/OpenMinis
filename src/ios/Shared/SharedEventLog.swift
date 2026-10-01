@@ -79,6 +79,30 @@ final class SharedEventLog {
         }
     }
 
+    // MARK: - reading (merge s21: report_issue 附上下文用)
+
+    /// 最近 `limit` 条事件，格式化成 "[时间] 事件名 — 摘要" 文本行
+    /// （保持日志原有先后顺序）。读不到文件返回空数组。
+    /// 走同一条串行队列读，与写入互斥，不会读到写一半的行；
+    /// 日记内容落盘时已脱敏，这里只做格式化、不再加工原文。
+    func recentEntries(limit: Int = 20) -> [String] {
+        queue.sync { readRecentEntries(limit: limit) }
+    }
+
+    private func readRecentEntries(limit: Int) -> [String] {
+        guard limit > 0,
+              let data = try? Data(contentsOf: logURL),
+              let text = String(data: data, encoding: .utf8) else { return [] }
+        return text.split(separator: "\n").suffix(limit).compactMap { line in
+            guard let lineData = line.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+                  let ts = obj["ts"] as? String,
+                  let event = obj["event"] as? String else { return nil }
+            let summary = obj["summary"] as? String ?? ""
+            return "[\(ts)] \(event) — \(summary)"
+        }
+    }
+
     // MARK: - redaction
 
     static func redact(_ s: String) -> String {
