@@ -186,9 +186,20 @@ final class ImagePayloadPrepTests: XCTestCase {
         XCTAssertTrue(AIChatViewModel.errorImplicatesImagePayload(
             LLMError.providerError(message: "Downloaded image content cannot exceed 30MB")))
         XCTAssertTrue(AIChatViewModel.errorImplicatesImagePayload(
-            LLMError.providerError(message: "HTTP 413: request entity too large")))
-        XCTAssertTrue(AIChatViewModel.errorImplicatesImagePayload(
             LLMError.providerError(message: "media_type does not match data")))
+        // [AI-P2-2] A 413 only implicates images when an image-ish token is
+        // present in the same message.
+        XCTAssertTrue(AIChatViewModel.errorImplicatesImagePayload(
+            LLMError.providerError(message: "HTTP 413: image content too large")))
+    }
+
+    func testErrorImplicatesImage_bare413NotImageImplicated() {
+        // [AI-P2-2] Bare 413s without an image token must NOT trigger the
+        // strip-retry — plain-text over-limit rejections surface as 413 too.
+        XCTAssertFalse(AIChatViewModel.errorImplicatesImagePayload(
+            LLMError.providerError(message: "HTTP 413: request entity too large")))
+        XCTAssertFalse(AIChatViewModel.errorImplicatesImagePayload(
+            LLMError.providerError(message: "413: context length exceeded")))
     }
 
     func testErrorImplicatesImage_nonImageErrors() {

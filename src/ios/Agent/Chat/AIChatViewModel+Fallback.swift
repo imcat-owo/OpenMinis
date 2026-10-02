@@ -114,13 +114,20 @@ extension AIChatViewModel {
     /// gates costs the turn its images, so phrases stay image-specific
     /// rather than matching any 400. Provider wordings covered: Anthropic
     /// ("image exceeds size limit", "Could not process image",
-    /// media_type mismatches, its 413 "image content" text), OpenAI
-    /// ("Invalid image", "image_url" errors), Gemini ("image" rejections),
-    /// and bare HTTP 413s surfaced by relays.
+    /// media_type mismatches), OpenAI ("Invalid image", "image_url" errors),
+    /// Gemini ("image" rejections), and relay size phrases that ride along
+    /// with an image token.
+    /// [AI-P2-2] A bare "413" is deliberately NOT matched on its own:
+    /// plain-text over-limit rejections (context length, oversized text)
+    /// also surface as HTTP 413, and matching them would strip the user's
+    /// images for a problem stripping can't fix. 413 only counts when an
+    /// image-ish token is present in the same message (e.g. Anthropic's
+    /// "image content" 413 wording) — those are caught by the image
+    /// needles above.
     static func errorImplicatesImagePayload(_ error: Error) -> Bool {
         let text = ((error as? LLMError)?.fallbackReason ?? error.localizedDescription).lowercased()
         let needles = [
-            "image", "media_type", "media type", "413",
+            "image", "media_type", "media type",
             "payload too large", "request too large", "too many images",
         ]
         return needles.contains { text.contains($0) }
@@ -348,6 +355,14 @@ extension AIChatViewModel {
                 triedEntries.insert(nextEntryId)
                 currentEntryId = nextEntryId
                 currentProvider = await makeAgentProvider(for: nextEntry)
+                // [AI-P2-2] The image strip was a self-heal scoped to the entry
+                // that rejected the payload — the next member may accept images
+                // fine, so restore the original bytes instead of keeping the
+                // placeholders for the rest of the turn.
+                if didStripImagesForRetry {
+                    effectiveMessages = messages
+                    logger.info("🔀ROUTE image payloads restored for entry=\(nextEntryId)")
+                }
                 // Rebuild system prompt for the new model's capabilities
                 var rebuiltPrompt = baseSystemPrompt
                 if let capFragment = nextEntry.model.capabilityPromptFragment {
@@ -423,6 +438,13 @@ extension AIChatViewModel {
                     triedEntries.insert(nextEntryId)
                     currentEntryId = nextEntryId
                     currentProvider = await makeAgentProvider(for: nextEntry)
+                    // [AI-P2-2] Same image restore as the main advance path:
+                    // the strip was scoped to the entry that rejected the
+                    // payload; the next member gets the original bytes back.
+                    if didStripImagesForRetry {
+                        effectiveMessages = messages
+                        logger.info("🔀ROUTE image payloads restored for entry=\(nextEntryId)")
+                    }
                     var rebuiltPrompt = baseSystemPrompt
                     if let capFragment = nextEntry.model.capabilityPromptFragment {
                         rebuiltPrompt += "\n\n" + capFragment
@@ -505,6 +527,13 @@ extension AIChatViewModel {
                     triedEntries.insert(nextEntryId)
                     currentEntryId = nextEntryId
                     currentProvider = await makeAgentProvider(for: nextEntry)
+                    // [AI-P2-2] Same image restore as the main advance path:
+                    // the strip was scoped to the entry that rejected the
+                    // payload; the next member gets the original bytes back.
+                    if didStripImagesForRetry {
+                        effectiveMessages = messages
+                        logger.info("🔀ROUTE image payloads restored for entry=\(nextEntryId)")
+                    }
                     var rebuiltPrompt = baseSystemPrompt
                     if let capFragment = nextEntry.model.capabilityPromptFragment {
                         rebuiltPrompt += "\n\n" + capFragment
