@@ -334,12 +334,16 @@ struct BridgeExternalConnectionView: View {
     }
 
     /// App 重启后回到本页时：开关期望值是开、服务却没在跑，就补起一次。
+    /// 用户-P3-4：补起失败不再静默灭开关——把失败原因弹给用户，
+    /// 让她知道"为什么起不来"；开关如实反映服务真实状态（确实没
+    /// 跑起来，开关亮着才是假象），但灭开关的同时必须说清原因。
     private func restoreMCPExternal() {
         if BridgeRelayPreferences.externalMCPEnabled, !BridgeExternalMCPService.shared.isRunning {
             do {
                 try BridgeExternalMCPService.shared.ensureRunning()
             } catch {
                 BridgeRelayPreferences.externalMCPEnabled = false
+                mcpError = error.localizedDescription
             }
         }
         refreshMCPStatus()
