@@ -204,6 +204,45 @@ final class StewardTests: XCTestCase {
         XCTAssertTrue(after.isEmpty, "全部终结后不应再有活动任务")
     }
 
+    func testHugeTimeoutDoesNotCrashProcess() async throws {
+        // 回归：timeoutSeconds 传超大值（外部 JSON 的 1e999 解析为 Double.inf）时，
+        // 旧代码 UInt64(max(timeout, 0) * 1e9) 直接 trap 崩进程（可远程触发）。
+        // 修后应钳制到上界，工具正常返回。
+        let steward = try await makeSteward()
+        let result = await steward.execute(
+            StewardRequest(
+                instruction: "复述一下",
+                toolName: FakeTools.echoName,
+                arguments: try StrictJSON.parseObject(#"{"text":"超时钳制"}"#),
+                timeoutSeconds: Double.infinity))
+        XCTAssertEqual(result.state, .finished)
+        XCTAssertEqual(result.cleanedText, "超时钳制")
+    }
+
+    func testRecentFinishedSummariesIncludeErrorText() async throws {
+        // AI-P1-4/AI-P2-7：最近终结的任务摘要要带上报错原文，新的在前。
+        let steward = try await makeSteward()
+        let okResult = await steward.execute(
+            StewardRequest(instruction: "复述", toolName: FakeTools.echoName,
+                           arguments: try StrictJSON.parseObject(#"{"text":"好"}"#)))
+        let failResult = await steward.execute(
+            StewardRequest(instruction: "执行", toolName: FakeTools.alwaysFailName))
+        XCTAssertEqual(okResult.state, .finished)
+        guard case .failed = failResult.state else {
+            return XCTFail("应失败，实际：\(failResult.state)")
+        }
+        let summaries = await steward.recentFinishedSummaries(limit: 5)
+        XCTAssertEqual(summaries.count, 2)
+        // 新的在前：失败的那个排第一，且带报错原文。
+        XCTAssertEqual(summaries[0].toolName, FakeTools.alwaysFailName)
+        XCTAssertTrue(summaries[0].errorText?.contains("FAKE_TOOL_FAILURE") ?? false)
+        // 成功的那个不带报错文本。
+        XCTAssertEqual(summaries[1].toolName, FakeTools.echoName)
+        XCTAssertNil(summaries[1].errorText)
+        // 正在跑/排队的任务不应出现在终结摘要里。
+        XCTAssertTrue((await steward.activeTaskSummaries()).isEmpty)
+    }
+
     func testTimeoutFuse() async throws {
         let steward = try await makeSteward()
         let started = Date()
@@ -219,23 +258,59 @@ final class StewardTests: XCTestCase {
         XCTAssertLessThan(elapsed, 5, "超时熔断应很快收尾")
     }
 
-    func testSensitiveToolNeedsApproval() async throws {
-        let registry = ToolRegistry()
-        try await registry.register(
-            descriptor: ToolDescriptor(
-                name: "danger_op", summary: "敏感操作假工具", permission: .sensitive)
-        ) { _ in ToolOutput(text: "已执行敏感操作") }
-        let steward = Steward(registry: registry)
-
-        let denied = await steward.execute(
-            StewardRequest(instruction: "执行", toolName: "danger_op"))
-        guard case .failed(let reason) = denied.state else {
-            return XCTFail("未确认的敏感工具应失败，实际：\(denied.state)")
+    func testSensitiveToolNeedsPhoneApproval() async throws {
+        // 审批门桩：三种裁决各一扇。
+        struct DenyGate: SensitiveApprovalGate {
+            func requestApproval(toolName: String, instruction: String) async -> SensitiveApprovalDecision {
+                .denied
+            }
         }
-        XCTAssertTrue(reason.contains("需要主人确认"))
+        struct ApproveGate: SensitiveApprovalGate {
+            func requestApproval(toolName: String, instruction: String) async -> SensitiveApprovalDecision {
+                .approved
+            }
+        }
+        struct AwayGate: SensitiveApprovalGate {
+            func requestApproval(toolName: String, instruction: String) async -> SensitiveApprovalDecision {
+                .ownerAway
+            }
+        }
+        func makeStewardWithGate(_ gate: (any SensitiveApprovalGate)?) async throws -> Steward {
+            let registry = ToolRegistry()
+            try await registry.register(
+                descriptor: ToolDescriptor(
+                    name: "danger_op", summary: "敏感操作假工具", permission: .sensitive)
+            ) { _ in ToolOutput(text: "已执行敏感操作") }
+            return Steward(registry: registry, approvalGate: gate)
+        }
 
-        let approved = await steward.execute(
-            StewardRequest(instruction: "执行", toolName: "danger_op", sensitiveApproved: true))
+        // 没装门：默认拒绝，不执行。
+        let noGate = await (try makeStewardWithGate(nil)).execute(
+            StewardRequest(instruction: "执行", toolName: "danger_op"))
+        guard case .failed(let noGateReason) = noGate.state else {
+            return XCTFail("没装审批门时敏感工具应失败，实际：\(noGate.state)")
+        }
+        XCTAssertTrue(noGateReason.contains("已拒绝"))
+
+        // 主人拒绝：失败，不执行。
+        let denied = await (try makeStewardWithGate(DenyGate())).execute(
+            StewardRequest(instruction: "执行", toolName: "danger_op"))
+        guard case .failed(let deniedReason) = denied.state else {
+            return XCTFail("主人拒绝时敏感工具应失败，实际：\(denied.state)")
+        }
+        XCTAssertTrue(deniedReason.contains("已拒绝"))
+
+        // 主人不在手机旁：失败，文案明确告知。
+        let away = await (try makeStewardWithGate(AwayGate())).execute(
+            StewardRequest(instruction: "执行", toolName: "danger_op"))
+        guard case .failed(let awayReason) = away.state else {
+            return XCTFail("主人不在时敏感工具应失败，实际：\(away.state)")
+        }
+        XCTAssertTrue(awayReason.contains("主人未在手机旁"))
+
+        // 主人批准：执行。
+        let approved = await (try makeStewardWithGate(ApproveGate())).execute(
+            StewardRequest(instruction: "执行", toolName: "danger_op"))
         XCTAssertEqual(approved.state, .finished)
         XCTAssertEqual(approved.cleanedText, "已执行敏感操作")
     }

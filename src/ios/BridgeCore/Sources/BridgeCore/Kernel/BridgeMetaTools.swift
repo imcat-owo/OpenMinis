@@ -17,7 +17,7 @@ public enum BridgeMetaTools {
             title: "桥",
             instructions: """
                 你连上的是「桥」。桥对外只有两个工具：
-                先用「搜」按关键词找到能干活的工具（返回名字与一句话简介），
+                先用「搜」按关键词找到能干活的工具（返回名字、一句话简介与参数简述），
                 再用「命令」下指令让桥里的小管家执行，只回清洗后的高密度结果。
                 """,
             capabilities: .init(tools: .init(listChanged: false))
@@ -25,7 +25,7 @@ public enum BridgeMetaTools {
 
         let searchTool = Tool(
             name: searchName,
-            description: "在桥的工具库里按关键词搜索可用工具，返回短清单（名字 + 一句话简介）。先搜再执行。",
+            description: "在桥的工具库里按关键词搜索可用工具，返回短清单（名字 + 一句话简介 + 参数简述）。先搜再执行。",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -39,7 +39,7 @@ public enum BridgeMetaTools {
         )
         let commandTool = Tool(
             name: commandName,
-            description: "下达一条指令，桥里的小管家负责找工具、执行、清洗，只回高密度结果。可点名 tool 指定工具，不点名则由管家按指令智能路由。",
+            description: "下达一条指令，桥里的小管家负责找工具、执行、清洗，只回高密度结果。可点名 tool 指定工具，不点名则由管家按指令智能路由。敏感动作（如删照片、发 GitHub Issue）执行前会弹框请主人在手机上确认，主人超时未确认或不在手机旁则默认拒绝。",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -57,11 +57,14 @@ public enum BridgeMetaTools {
                     ]),
                     "timeoutSeconds": .object([
                         "type": .string("number"),
-                        "description": .string("可选：超时秒数，默认 30"),
+                        "description": .string(
+                            "可选：超时秒数，默认 30。不要超过 60（中继转发上限），超过 60 第一次必吃 504。"),
                     ]),
                     "sensitiveApproved": .object([
                         "type": .string("boolean"),
-                        "description": .string("可选：敏感工具经主人确认后传 true"),
+                        // 已作废：兼容保留，实际审批只能由手机侧弹框签发，
+                        // 传任何值都不会被信任（防外部 AI 自批）。
+                        "description": .string("已作废：兼容保留。敏感审批由手机侧弹框完成，传 true 也不会被信任。"),
                     ]),
                 ]),
                 "required": .array([.string("instruction")]),
@@ -108,7 +111,13 @@ public enum BridgeMetaTools {
         guard !hits.isEmpty else {
             return textResult("没有找到与「\(query)」匹配的工具。")
         }
-        let lines = hits.map { "- \($0.name)：\($0.summary)" }
+        let lines = hits.map { hit -> String in
+            var line = "- \(hit.name)：\(hit.summary)"
+            if !hit.parameterBrief.isEmpty {
+                line += "\n  参数：\(hit.parameterBrief)"
+            }
+            return line
+        }
         return textResult("找到 \(hits.count) 个工具：\n" + lines.joined(separator: "\n"))
     }
 
@@ -123,12 +132,29 @@ public enum BridgeMetaTools {
         guard let instruction = try? arguments.requireString("instruction") else {
             return errorResult("「命令」缺少必填参数 instruction（字符串）")
         }
+        // 类型写错不许静默回默认值：传了字符串 "60" 调用方会以为生效、
+        // 实际跑 30 秒——和 query 缺必填一样，明确报错。
+        let timeoutSeconds: Double
+        if arguments.contains("timeoutSeconds") {
+            guard let parsed = arguments.double("timeoutSeconds") else {
+                let actual = StrictJSON.typeName(
+                    of: arguments.value("timeoutSeconds") ?? NSNull())
+                return errorResult(
+                    "「命令」timeoutSeconds 类型不对：需要数字（秒），你传了\(actual)")
+            }
+            timeoutSeconds = parsed
+        } else {
+            timeoutSeconds = 30
+        }
+        guard timeoutSeconds <= Steward.maxTimeoutSeconds else {
+            return errorResult(
+                "「命令」timeoutSeconds 不能超过 \(Int(Steward.maxTimeoutSeconds)) 秒（你传了 \(timeoutSeconds)），已拒绝。")
+        }
         let request = StewardRequest(
             instruction: instruction,
             toolName: arguments.string("tool"),
             arguments: arguments.object("arguments") ?? StrictJSONObject(raw: [:]),
-            timeoutSeconds: arguments.double("timeoutSeconds") ?? 30,
-            sensitiveApproved: arguments.bool("sensitiveApproved") ?? false)
+            timeoutSeconds: timeoutSeconds)
         let result = await steward.execute(request)
         let text = result.cleanedText ?? "（没有返回内容）"
         return CallTool.Result(

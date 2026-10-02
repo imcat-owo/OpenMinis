@@ -56,16 +56,20 @@ public struct ToolDescriptor: Sendable, Equatable {
     }
 }
 
-/// 一次搜索命中：只带名字与一句话简介，保持「搜」的结果短。
+/// 一次搜索命中：名字＋一句话简介＋参数简述（AI-P1-6 起，外部 AI
+/// 不用多问一轮就能知道参数怎么传）。参数简述保持短，不倒完整 schema。
 public struct ToolSearchHit: Sendable, Equatable {
     public var name: String
     public var summary: String
     public var score: Int
+    /// 如 "title(字符串,必填)、detail(字符串)"；解析不出时为空。
+    public var parameterBrief: String
 
-    public init(name: String, summary: String, score: Int) {
+    public init(name: String, summary: String, score: Int, parameterBrief: String = "") {
         self.name = name
         self.summary = summary
         self.score = score
+        self.parameterBrief = parameterBrief
     }
 }
 
@@ -182,7 +186,11 @@ public actor ToolRegistry {
             }
             if score > 0 {
                 hits.append(
-                    ToolSearchHit(name: descriptor.name, summary: descriptor.summary, score: score))
+                    ToolSearchHit(
+                        name: descriptor.name,
+                        summary: descriptor.summary,
+                        score: score,
+                        parameterBrief: Self.parameterBrief(from: descriptor.parameterSchemaJSON)))
             }
         }
         hits.sort {
@@ -219,5 +227,36 @@ public actor ToolRegistry {
             tokens.append(whole)
         }
         return tokens
+    }
+
+    /// 从参数 JSON Schema 里抽"参数名(类型,必填)"简述，如
+    /// "title(字符串,必填)、detail(字符串)"。保持短：最多 6 个参数、
+    /// 总长超 120 字截断。解析失败返回 ""，不让坏 schema 污染搜索结果。
+    private static func parameterBrief(from schemaJSON: String) -> String {
+        guard let data = schemaJSON.data(using: .utf8),
+              let root = try? StrictJSON.parseObject(data),
+              let properties = root.object("properties") else { return "" }
+        let requiredSet = Set(root.array("required")?.compactMap { $0 as? String } ?? [])
+        var parts: [String] = []
+        for key in properties.keys.sorted() {
+            guard let prop = properties.object(key) else { continue }
+            let type = prop.string("type").map(Self.shortTypeName) ?? "?"
+            let req = requiredSet.contains(key) ? ",必填" : ""
+            parts.append("\(key)(\(type)\(req))")
+            if parts.count >= 6 || parts.joined(separator: "、").count > 120 { break }
+        }
+        return parts.joined(separator: "、")
+    }
+
+    private static func shortTypeName(_ jsonType: String) -> String {
+        switch jsonType {
+        case "string": return "字符串"
+        case "number": return "数字"
+        case "integer": return "整数"
+        case "boolean": return "布尔"
+        case "object": return "对象"
+        case "array": return "数组"
+        default: return jsonType
+        }
     }
 }

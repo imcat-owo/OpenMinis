@@ -36,21 +36,17 @@ public struct StewardRequest: Sendable {
     public var arguments: StrictJSONObject
     /// 超时熔断秒数。
     public var timeoutSeconds: Double
-    /// 敏感工具放行标记：主人确认过才为 true。
-    public var sensitiveApproved: Bool
 
     public init(
         instruction: String,
         toolName: String? = nil,
         arguments: StrictJSONObject = StrictJSONObject(raw: [:]),
-        timeoutSeconds: Double = 30,
-        sensitiveApproved: Bool = false
+        timeoutSeconds: Double = 30
     ) {
         self.instruction = instruction
         self.toolName = toolName
         self.arguments = arguments
         self.timeoutSeconds = timeoutSeconds
-        self.sensitiveApproved = sensitiveApproved
     }
 }
 
@@ -92,6 +88,25 @@ public struct StewardTaskSummary: Sendable, Equatable {
     }
 }
 
+/// 一个已终结任务的摘要（「报问题」附上下文用，AI-P1-4/AI-P2-7）。
+/// 终结原因原文一起带上：主人报"刚才那个错"时，Issue 里有现场。
+public struct StewardFinishedSummary: Sendable, Equatable {
+    public var toolName: String?
+    public var instruction: String
+    public var state: StewardState
+    /// 终结原因原文（失败的 reason / 超时与取消的文案）；成功时为 nil。
+    public var errorText: String?
+
+    public init(
+        toolName: String?, instruction: String, state: StewardState, errorText: String?
+    ) {
+        self.toolName = toolName
+        self.instruction = instruction
+        self.state = state
+        self.errorText = errorText
+    }
+}
+
 /// 小管家调度：串行队列接单，逐个走完状态机。
 ///
 /// - 队列：一台在跑时后面的排队，不并发抢工具；
@@ -103,6 +118,21 @@ public struct StewardTaskSummary: Sendable, Equatable {
 ///   占着队列直到自然结束，其结果被丢弃（这一条写死在语义里，不假装能强杀）。
 /// - 错误：工具抛错/返回错误都收尾为 .failed，原因原文保留进结果，不吞。
 public actor Steward {
+    /// 「命令」超时熔断的上界（秒）。
+    ///
+    /// 外部 AI 传超大值（如 1e999 → Double.inf）时，Double→UInt64 越界转换
+    /// 会直接 trap 崩进程——这里先钳住再转整数。「命令」入口
+    /// （BridgeMetaTools）对超界值直接报错；这里是纵深防御，
+    /// 直调 Steward.execute 的调用方同样被保护。
+    public static let maxTimeoutSeconds: Double = 3600
+
+    /// 把外部传进来的超时钳到 [0, maxTimeoutSeconds]；非有限值（inf/NaN）
+    /// 按上界处理，绝不让它进 UInt64 转换。
+    private static func clampedTimeout(_ raw: Double) -> Double {
+        guard raw.isFinite else { return maxTimeoutSeconds }
+        return min(max(raw, 0), maxTimeoutSeconds)
+    }
+
     /// 主人打断时回给外部调用方的文案。与一般取消（「任务已取消」）、
     /// 超时、失败明确区分：点明是主人在 App 里手动打断，并要求外部 AI
     /// 先向主人询问原因、不许自行重试。
@@ -116,15 +146,28 @@ public actor Steward {
     private var requests: [UUID: StewardRequest] = [:]
     private var results: [UUID: StewardResult] = [:]
     private var histories: [UUID: [StewardState]] = [:]
+    /// 终结顺序（新的在尾）：recentFinishedSummaries 按它倒序取。
+    /// finish() 里 requests[id] 会被清掉，所以指令快照另存一份。
+    private var finishedOrder: [UUID] = []
+    private var finishedInstructions: [UUID: String] = [:]
     private var waiters: [UUID: [CheckedContinuation<StewardResult, Never>]] = [:]
     private var runningID: UUID?
     private var runningTask: Task<Void, Never>?
     private var cancelRequested: Set<UUID> = []
     private var ownerInterruptRequested: Set<UUID> = []
 
-    public init(registry: ToolRegistry, cleaner: ResultCleaner = ResultCleaner()) {
+    /// 敏感审批门（宿主 App 注入）：敏感工具执行前走它请主人在手机上确认。
+    /// nil = 没装门，敏感工具一律拒绝（默认安全）。
+    private let approvalGate: (any SensitiveApprovalGate)?
+
+    public init(
+        registry: ToolRegistry,
+        cleaner: ResultCleaner = ResultCleaner(),
+        approvalGate: (any SensitiveApprovalGate)? = nil
+    ) {
         self.registry = registry
         self.cleaner = cleaner
+        self.approvalGate = approvalGate
     }
 
     // MARK: - 提交与查询
@@ -133,6 +176,7 @@ public actor Steward {
     public func submit(_ request: StewardRequest) -> UUID {
         let id = UUID()
         requests[id] = request
+        finishedInstructions[id] = request.instruction
         let initial = StewardResult(
             id: id, state: .queued, toolName: request.toolName,
             rawText: nil, cleanedText: nil, isError: false)
@@ -217,6 +261,25 @@ public actor Steward {
         }
     }
 
+    /// 最近终结的任务摘要（新的在前）：供「报问题」附上下文用。
+    /// 成功的不带报错文本；失败/超时/取消/主人打断带原因原文。
+    public func recentFinishedSummaries(limit: Int = 5) -> [StewardFinishedSummary] {
+        finishedOrder.suffix(max(limit, 0)).reversed().compactMap { id in
+            guard let result = results[id], result.state.isTerminal else { return nil }
+            let errorText: String? = switch result.state {
+            case .finished: nil
+            case .failed(let reason): reason
+            case .timedOut, .cancelled, .interruptedByOwner: result.cleanedText
+            default: result.cleanedText
+            }
+            return StewardFinishedSummary(
+                toolName: result.toolName,
+                instruction: finishedInstructions[id] ?? "",
+                state: result.state,
+                errorText: errorText)
+        }
+    }
+
     // MARK: - 内部流程
 
     private func startNextIfIdle() {
@@ -266,13 +329,30 @@ public actor Steward {
             completeRun(id: id)
             return
         }
-        if descriptor.permission == .sensitive, !request.sensitiveApproved {
-            let reason = "工具 \(toolName) 是敏感操作，需要主人确认后才能执行"
-            finish(
-                id: id, state: .failed(reason: reason), toolName: toolName,
-                rawText: nil, cleanedText: reason, isError: true)
-            completeRun(id: id)
-            return
+        // —— 敏感审批：只能由手机侧签发，外部传进来的标记一律不认 ——
+        if descriptor.permission == .sensitive {
+            let decision =
+                await approvalGate?.requestApproval(
+                    toolName: toolName, instruction: request.instruction) ?? .denied
+            switch decision {
+            case .approved:
+                break
+            case .denied:
+                let reason =
+                    "工具 \(toolName) 是敏感操作，需要主人在手机上确认后才能执行；未获批准，已拒绝"
+                finish(
+                    id: id, state: .failed(reason: reason), toolName: toolName,
+                    rawText: nil, cleanedText: reason, isError: true)
+                completeRun(id: id)
+                return
+            case .ownerAway:
+                let reason = "主人未在手机旁，已拒绝"
+                finish(
+                    id: id, state: .failed(reason: reason), toolName: toolName,
+                    rawText: nil, cleanedText: reason, isError: true)
+                completeRun(id: id)
+                return
+            }
         }
 
         // 主人若在派发阶段就打断了（运行任务已被 cancel，但派发校验是
@@ -347,7 +427,8 @@ public actor Steward {
     ) async -> ExecutionOutcome {
         let registry = self.registry
         let arguments = request.arguments
-        let timeout = request.timeoutSeconds
+        // 先钳制再转 UInt64：超大值（inf/NaN/1e19+）直接转整数会 trap 崩进程。
+        let timeout = Self.clampedTimeout(request.timeoutSeconds)
         return await withTaskGroup(of: ExecutionOutcome.self) { group in
             group.addTask {
                 do {
@@ -361,7 +442,7 @@ public actor Steward {
             }
             group.addTask {
                 do {
-                    try await Task.sleep(nanoseconds: UInt64(max(timeout, 0) * 1_000_000_000))
+                    try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
                     return .timedOut
                 } catch {
                     return .cancelled
@@ -396,6 +477,7 @@ public actor Steward {
         results[id] = result
         histories[id, default: []].append(state)
         requests[id] = nil
+        finishedOrder.append(id)
         let pending = waiters.removeValue(forKey: id) ?? []
         for continuation in pending {
             continuation.resume(returning: result)

@@ -48,13 +48,24 @@ final class SharedEventLog {
         // key = value / "key": "value" — mask the value, keep the key name.
         // The value swallows an optional second token so
         // "Authorization: Bearer <token>" is fully masked.
+        // 中文键（口令/密码/密钥，AI-P2-8）：\b 在中文字符间没有词边界，
+        // 所以中文分支不用 \b；分隔符认全角冒号和"是"（"密码是 xxx"）。
+        // 两个分支的键分别进 $1/$3，模板 "$1$3=***REDACTED***" 两边都成立。
         try? NSRegularExpression(
-            pattern: #"(?i)\b(api[_-]?key|secret|token|password|passwd|pwd|authorization|bearer|client[_-]?secret)\b(?=["']?\s*[:=])["']?\s*[:=]\s*("[^"]*"|'[^']*'|\S+(?:\s+\S+)?)"#)
+            pattern: #"(?i)\b(api[_-]?key|secret|token|password|passwd|pwd|authorization|bearer|client[_-]?secret)\b(?=["']?\s*[:=])["']?\s*[:=]\s*("[^"]*"|'[^']*'|\S+(?:\s+\S+)?)|(口令|密码|密钥)(?=["']?\s*(?:[:：=]|是))["']?\s*(?:[:：=]|是)\s*("[^"]*"|'[^']*'|\S+(?:\s+\S+)?)"#)
     }()
 
     private static let dataURIPattern: NSRegularExpression? = {
         // Embedded images / long base64 blobs are never useful in a summary.
         try? NSRegularExpression(pattern: #"data:[A-Za-z0-9/+\-]+;base64,[A-Za-z0-9+/=]{64,}"#)
+    }()
+
+    private static let bareURLPattern: NSRegularExpression? = {
+        // 裸 http(s) 网址：日志片段会进公开的 GitHub Issue，带 token 的
+        // 查询串一旦落盘就等于公开，AI-P1-2 起一律遮掉。
+        try? NSRegularExpression(
+            pattern: "https?://[^\\s)\"<>\\]]+",
+            options: [.caseInsensitive])
     }()
 
     private var logURL: URL {
@@ -81,25 +92,36 @@ final class SharedEventLog {
 
     // MARK: - reading (merge s21: report_issue 附上下文用)
 
-    /// 最近 `limit` 条事件，格式化成 "[时间] 事件名 — 摘要" 文本行
-    /// （保持日志原有先后顺序）。读不到文件返回空数组。
+    /// 最近 `limit` 条、且在 `within` 时间窗口内（默认 1 小时）的事件，
+    /// 格式化成 "[时间] 事件名 @会话 — 摘要" 文本行（保持日志原有先后顺序）。
+    /// 读不到文件返回空数组。时间戳解析失败的老行不丢（解析失败不等于过期）。
     /// 走同一条串行队列读，与写入互斥，不会读到写一半的行；
     /// 日记内容落盘时已脱敏，这里只做格式化、不再加工原文。
-    func recentEntries(limit: Int = 20) -> [String] {
-        queue.sync { readRecentEntries(limit: limit) }
+    func recentEntries(limit: Int = 20, within: TimeInterval = 3600) -> [String] {
+        queue.sync { readRecentEntries(limit: limit, within: within) }
     }
 
-    private func readRecentEntries(limit: Int) -> [String] {
+    private func readRecentEntries(limit: Int, within: TimeInterval) -> [String] {
         guard limit > 0,
               let data = try? Data(contentsOf: logURL),
               let text = String(data: data, encoding: .utf8) else { return [] }
+        let cutoff = Date().addingTimeInterval(-within)
         return text.split(separator: "\n").suffix(limit).compactMap { line in
             guard let lineData = line.data(using: .utf8),
                   let obj = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
                   let ts = obj["ts"] as? String,
                   let event = obj["event"] as? String else { return nil }
+            // 时间窗口：窗口外的条目不要；时间戳解析失败的老行保留。
+            if let date = Self.iso.date(from: ts), date < cutoff { return nil }
             let summary = obj["summary"] as? String ?? ""
-            return "[\(ts)] \(event) — \(summary)"
+            // session 字段是跨会话排障的线索，格式化时保留。
+            let who: String
+            if let session = obj["session"] as? String, !session.isEmpty {
+                who = " @\(session)"
+            } else {
+                who = ""
+            }
+            return "[\(ts)] \(event)\(who) — \(summary)"
         }
     }
 
@@ -108,14 +130,17 @@ final class SharedEventLog {
     static func redact(_ s: String) -> String {
         // Fail closed: if the patterns somehow didn't compile, the summary
         // is useless rather than a secret leak.
-        guard let dataURIPattern, let secretPattern else { return "<redacted>" }
+        guard let dataURIPattern, let secretPattern, let bareURLPattern else { return "<redacted>" }
         var out = s
         var range = NSRange(out.startIndex..., in: out)
         out = dataURIPattern.stringByReplacingMatches(
             in: out, range: range, withTemplate: "<image>")
         range = NSRange(out.startIndex..., in: out)
         out = secretPattern.stringByReplacingMatches(
-            in: out, range: range, withTemplate: "$1=***REDACTED***")
+            in: out, range: range, withTemplate: "$1$3=***REDACTED***")
+        range = NSRange(out.startIndex..., in: out)
+        out = bareURLPattern.stringByReplacingMatches(
+            in: out, range: range, withTemplate: "<url>")
         return out
     }
 

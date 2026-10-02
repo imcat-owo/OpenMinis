@@ -20,7 +20,9 @@ final class BridgeKernelAssembly {
     init() {
         let registry = ToolRegistry()
         self.registry = registry
-        let steward = Steward(registry: registry)
+        // 敏感审批门：敏感工具执行前走手机侧弹框请主人确认，
+        // 外部 AI 传进来的任何标记都不被信任（用户-P1）。
+        let steward = Steward(registry: registry, approvalGate: StewardSensitiveApprovalGate())
         self.steward = steward
         self.sessionManager = MCPSessionManager(registry: registry, steward: steward)
 
