@@ -43,7 +43,7 @@ public struct ToolDescriptor: Sendable, Equatable {
         detail: String = "",
         keywords: [String] = [],
         parameterSchemaJSON: String = #"{"type":"object"}"#,
-        permission: ToolPermission = .standard,
+        permission: ToolPermission? = nil,
         isEnabled: Bool = true
     ) {
         self.name = name
@@ -51,8 +51,14 @@ public struct ToolDescriptor: Sendable, Equatable {
         self.detail = detail
         self.keywords = keywords
         self.parameterSchemaJSON = parameterSchemaJSON
-        self.permission = permission
+        self.permission = permission ?? Self.defaultPermission(for: name)
         self.isEnabled = isEnabled
+    }
+
+    /// 未显式声明权限时的兜底：名字里带 bluetooth 的默认敏感级，
+    /// 其余保持标准级。蓝牙能扫描附近设备并连接读写，漏声明时也不该直接放行。
+    private static func defaultPermission(for name: String) -> ToolPermission {
+        name.lowercased().contains("bluetooth") ? .sensitive : .standard
     }
 }
 

@@ -38,7 +38,8 @@ enum BluetoothDeviceTool {
                       "value":{"type":"string","description":"write：十六进制值，如 0100"},
                       "value_string":{"type":"string","description":"write：文本值（与 value 二选一）"}},
                      "required":["action"]}
-                    """#
+                    """#,
+                permission: .sensitive
             )
         ) { arguments in
             let action = arguments.string("action") ?? ""

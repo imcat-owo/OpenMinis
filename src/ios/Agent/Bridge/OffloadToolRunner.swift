@@ -68,8 +68,8 @@ enum OffloadToolRunner {
             .joined(separator: " ")
 
         // 1. 权限关卡：只对登记表内的命令生效（与聊天流的判断完全一致——
-        //    extractOffloadCommand 命中才查；apple-bluetooth 不在登记表内，
-        //    聊天流同样不设关卡，本管线不擅自加）。
+        //    extractOffloadCommand 命中才查。[batch7 用户-P2-1] apple-bluetooth
+        //    已登记进权限表（隐私类），这里和聊天流都会走权限关卡。
         if await OffloadPermissionManager.extractOffloadCommand(from: commandName) != nil {
             let permission = await OffloadPermissionManager.shared.checkPermission(
                 for: commandName, sessionId: bridgeSessionId, fullCommand: commandLine)
