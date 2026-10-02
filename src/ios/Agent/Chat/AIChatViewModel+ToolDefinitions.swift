@@ -242,9 +242,14 @@ extension AIChatViewModel {
             parameters: [
                 "tool_title": AgentToolParam(type: .string, description: "A concise 5-10 word summary of what you're sending, shown to the user (e.g. 'Send goodnight voice message'). Use the same language as the user."),
                 "text": AgentToolParam(type: .string, description: "The words to speak, in the user's language. Keep it conversational and reasonably short — this is what the user will hear."),
+                // [voice-bubble-tool 2026-10-02] 点名音色/分组（TTS 施工员转交）。
+                // voice = TTS 服务名（服务自带音色配置）；group = TTS 分组名（按成员顺序 fallback）。
+                // 名字在 TTS 能力纸条里列着，别自己编。都不传 = 默认 TTS 分组。
+                "voice": AgentToolParam(type: .string, description: "可选：点名用哪个 TTS 服务的声音（服务名，见 TTS 能力纸条里列的）。不传就用默认 TTS 分组。"),
+                "group": AgentToolParam(type: .string, description: "可选：点名用哪个 TTS 分组（分组名，见 TTS 能力纸条里列的），按分组成员顺序自动 fallback。不传就用默认分组。"),
             ],
             required: ["tool_title", "text"],
-            propertyOrdering: ["tool_title", "text"]
+            propertyOrdering: ["tool_title", "text", "voice", "group"]
         ))
 
         // [mcp-agg] MCP 聚合点管理工具：小管家（MCP 小助手人设）给她接入/管理 MCP 用。

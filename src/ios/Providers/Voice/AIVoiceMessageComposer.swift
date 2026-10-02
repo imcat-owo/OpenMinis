@@ -22,6 +22,40 @@ enum AIVoiceMessageComposer {
     struct Result {
         let url: String
         let duration: Double
+        /// 实际合成出音频的服务名（默认链路兜底时为 nil）。
+        /// [voice-bubble-tool 2026-10-02] send_voice 点名 voice/group 时回给模型，
+        /// 让它知道到底是哪个声音发出去的。
+        let serviceName: String?
+    }
+
+    /// [voice-bubble-tool 2026-10-02] send_voice 点名 voice/group 时的错误。
+    /// description 直接是给模型的中文交代（含可用选项），调用方原样回即可。
+    enum VoiceComposeError: LocalizedError {
+        case emptyText
+        case groupNotFound(name: String, available: [String])
+        case groupEmpty(name: String)
+        case voiceNotFound(name: String, available: [String])
+        case serviceDisabled(name: String)
+        case synthesisFailed(detail: String)
+
+        var errorDescription: String? {
+            switch self {
+            case .emptyText:
+                return "没有可说的话（文本为空）。"
+            case .groupNotFound(let name, let available):
+                let opts = available.isEmpty ? "（还没有建任何分组）" : "可用分组：" + available.joined(separator: "、")
+                return "没有这个 TTS 分组「\(name)」。\(opts)不传 group 就用默认分组。"
+            case .groupEmpty(let name):
+                return "TTS 分组「\(name)」里没有可用的服务（成员都被删了或停用了）。换个分组，或不传 group 用默认的。"
+            case .voiceNotFound(let name, let available):
+                let opts = available.isEmpty ? "（还没有配任何 TTS 服务）" : "可用服务：" + available.joined(separator: "、")
+                return "没有这个 TTS 服务「\(name)」。\(opts)不传 voice 就用默认分组。"
+            case .serviceDisabled(let name):
+                return "TTS 服务「\(name)」已停用。让主人去「设置 > Voice Services」里启用，或换个服务。"
+            case .synthesisFailed(let detail):
+                return "语音合成失败（\(detail)）。如实告诉主人这条语音没发出去，不要谎称已发送；可以建议她检查 TTS 服务配置。"
+            }
+        }
     }
 
     private static func prefKey(_ sid: String) -> String { "ai.voiceReplies.\(sid)" }
@@ -55,19 +89,43 @@ enum AIVoiceMessageComposer {
     /// user-visible side of nil: it toasts the failure AND appends a
     /// <system-reminder> trace to the in-memory assistant message so the model
     /// knows no voice bubble went out — the nil itself stays silent here.
+    ///
+    /// [voice-bubble-tool 2026-10-02] 这是默认链路版（等价于 voice/group 都不传）。
+    /// 要点名音色/分组的调用方请用下面的 throwing 重载，能拿到"为什么不行"的
+    /// 具体原因（VoiceComposeError 的 description 直接是给模型的中文交代）。
     static func compose(for text: String, sessionId: String) async -> Result? {
-        let sanitized = VoiceTextSanitizer.sanitize(text, mode: .fullText)
-        guard !sanitized.isEmpty else { return nil }
-
-        let data: Data
-        let dur: Double
         do {
-            (data, dur) = try await synthesizeFull(sanitized)
+            return try await compose(for: text, sessionId: sessionId, voice: nil, group: nil)
         } catch {
             logger.warning("voice message synthesis failed: \(error.localizedDescription)")
             return nil
         }
-        guard !data.isEmpty else { return nil }
+    }
+
+    /// [voice-bubble-tool 2026-10-02] send_voice 专用：voice/group 点名版。
+    /// - voice: TTS 服务名（服务的 id 也行），用该服务的音色合成。
+    /// - group: TTS 分组名（分组 id 也行），按分组成员顺序 fallback。
+    /// 都不传 = 走默认链路（默认 TTS 分组 → 选中服务 → 模型分组）。
+    /// 点名时是严格语义：只试点名的候选，死透了就抛错，不会悄悄用别的声音顶。
+    static func compose(for text: String, sessionId: String, voice: String?, group: String?) async throws -> Result {
+        let sanitized = VoiceTextSanitizer.sanitize(text, mode: .fullText)
+        guard !sanitized.isEmpty else { throw VoiceComposeError.emptyText }
+
+        let data: Data
+        let dur: Double
+        let usedService: String?
+        do {
+            (data, dur, usedService) = try await synthesizeFull(sanitized, voice: voice, group: group)
+        } catch let e as VoiceComposeError {
+            throw e
+        } catch is CancellationError {
+            // 取消必须透传，不能吞成"合成失败"（外层 dispatch 的取消分支负责收）。
+            throw CancellationError()
+        } catch {
+            logger.warning("voice message synthesis failed: \(error.localizedDescription)")
+            throw VoiceComposeError.synthesisFailed(detail: "TTS 服务不可用或未配置")
+        }
+        guard !data.isEmpty else { throw VoiceComposeError.synthesisFailed(detail: "合成返回空音频") }
 
         let ext = Self.isWAVData(data) ? "wav" : "mp3"
         let fname = "tts-\(UUID().uuidString.prefix(8)).\(ext)"
@@ -78,12 +136,12 @@ enum AIVoiceMessageComposer {
             try data.write(to: dest, options: .atomic)
         } catch {
             logger.warning("voice message write failed: \(error.localizedDescription)")
-            return nil
+            throw VoiceComposeError.synthesisFailed(detail: "音频写盘失败")
         }
         let linuxPath = "/var/minis/attachments/\(fname)"
         let minisURL = "minis-clone://attachments/\(fname.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? fname)"
-        logger.info("voice message composed: \(linuxPath) dur=\(String(format: "%.1f", dur))s size=\(data.count)")
-        return Result(url: minisURL, duration: dur)
+        logger.info("voice message composed: \(linuxPath) dur=\(String(format: "%.1f", dur))s size=\(data.count) service=\(usedService ?? "default-chain")")
+        return Result(url: minisURL, duration: dur, serviceName: usedService)
     }
 
     /// Walk the candidate chain exactly like read-aloud: selected service →
@@ -93,12 +151,60 @@ enum AIVoiceMessageComposer {
     /// reads as text-only and the log names the gap. The old always-System
     /// tail made every misconfigured session sound like the robotic system
     /// voice 醒醒 hates.
-    private static func synthesizeFull(_ text: String) async throws -> (Data, Double) {
-        if let (data, _) = try? await synthesizeWithServiceOrGroup(text) {
-            return (data, VoiceOutputPlayer.wavDurationOf(data))
+    private static func synthesizeFull(_ text: String, voice: String?, group: String?) async throws -> (Data, Double, String?) {
+        // [voice-bubble-tool 2026-10-02] 点名了就走严格语义：只试点名的候选
+        //（分组按成员顺序 fallback），死透了抛错，不悄悄用别的声音顶。
+        if let explicit = try resolveExplicitServices(voice: voice, group: group) {
+            for service in explicit {
+                if let (data, _) = await synthesizeWithService(service, text) {
+                    return (data, VoiceOutputPlayer.wavDurationOf(data), service.name)
+                }
+            }
+            throw VoiceComposeError.synthesisFailed(detail: "点名的 TTS 候选都失败了")
         }
-        throw VoiceProviderError.parseError(
-            "no usable TTS target — select a TTS service or voice group first")
+        // 默认链路：和以前完全一致（默认 TTS 分组 → 选中服务 → 模型分组）。
+        if let (data, _) = try? await synthesizeWithServiceOrGroup(text) {
+            return (data, VoiceOutputPlayer.wavDurationOf(data), nil)
+        }
+        throw VoiceComposeError.synthesisFailed(detail: "没有可用的 TTS 目标——先选个 TTS 服务或语音分组")
+    }
+
+    /// [voice-bubble-tool 2026-10-02] 把模型传的 voice/group 解析成候选服务列表。
+    /// 都不传返回 nil（调用方走默认链路）。匹配顺序：id 精确 → 名字精确 →
+    /// 名字忽略大小写。找不到/不可用就抛 VoiceComposeError（description 直接
+    /// 是给模型的中文交代，含可用选项）。
+    private static func resolveExplicitServices(voice: String?, group: String?) throws -> [TTSServiceOptions]? {
+        if let g = group?.trimmingCharacters(in: .whitespacesAndNewlines), !g.isEmpty {
+            let store = TTSGroupStore.shared
+            let matched = store.group(id: g)
+                ?? store.groups.first { $0.name == g }
+                ?? store.groups.first { $0.name.lowercased() == g.lowercased() }
+            guard let grp = matched else {
+                throw VoiceComposeError.groupNotFound(name: g, available: store.groups.map { $0.name })
+            }
+            let cands = store.candidates(for: grp)
+            guard !cands.isEmpty else {
+                throw VoiceComposeError.groupEmpty(name: grp.name)
+            }
+            logger.info("[AIVoice] explicit group '\(grp.name)' → \(cands.count) candidate(s)")
+            return cands
+        }
+        if let v = voice?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty {
+            let store = TTSServiceStore.shared
+            let matched = store.service(id: v)
+                ?? store.services.first { $0.name == v }
+                ?? store.services.first { $0.name.lowercased() == v.lowercased() }
+            guard let svc = matched else {
+                throw VoiceComposeError.voiceNotFound(
+                    name: v, available: store.services.filter { $0.enabled }.map { $0.name })
+            }
+            guard svc.enabled else {
+                throw VoiceComposeError.serviceDisabled(name: svc.name)
+            }
+            logger.info("[AIVoice] explicit voice service '\(svc.name)'")
+            return [svc]
+        }
+        return nil
     }
 
     /// linuxPathFor(url:) — turn the minis-clone URL back into the /var/minis

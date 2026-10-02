@@ -969,7 +969,19 @@ extension AIChatViewModel {
                 }
                 break
             }
-            if let voice = await AIVoiceMessageComposer.compose(for: speakText, sessionId: sid) {
+            // [voice-bubble-tool 2026-10-02] voice/group 点名（TTS 施工员转交）：
+            // 空字符串当没传；点名走严格语义（找不到/都挂了就报错，不悄悄换声音）。
+            let voiceParam: String? = {
+                let v = (toolArgs["voice"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                return v.isEmpty ? nil : v
+            }()
+            let groupParam: String? = {
+                let g = (toolArgs["group"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                return g.isEmpty ? nil : g
+            }()
+            do {
+                let voice = try await AIVoiceMessageComposer.compose(
+                    for: speakText, sessionId: sid, voice: voiceParam, group: groupParam)
                 let durParam = voice.duration > 0 ? Int(voice.duration.rounded()) : 0
                 let link = "![voice](\(voice.url)?voice_bubble=1&dur=\(durParam)&auto_play=true)"
                 // ① UI：气泡 block 直接进当前回复（用户立刻看见）。
@@ -986,18 +998,19 @@ extension AIChatViewModel {
                         GlobalAudioPlayer.shared.play(url: fileURL)
                     }
                 }
-                ctLogger.info("[VoiceBubbleTool] sent voice bubble dur=\(durParam)s")
-                let summary = "语音消息已发出（约\(durParam)秒），以语音气泡呈现并自动播放。"
+                let via = voice.serviceName.map { "（\($0)合成）" } ?? ""
+                ctLogger.info("[VoiceBubbleTool] sent voice bubble dur=\(durParam)s service=\(voice.serviceName ?? "default-chain")")
+                let summary = "语音消息已发出（约\(durParam)秒\(via)），以语音气泡呈现并自动播放。"
                 toolOutput = summary
                 toolSuccess = true
                 if msgIdx < messages.count, blockIdx < messages[msgIdx].blocks.count {
                     messages[msgIdx].blocks[blockIdx].content = summary
                 }
-            } else {
-                // 合成失败：明确告诉模型没发出去，别让它谎称已发送。
-                // （compose 内部已打日志；nil 的用户侧 trace 由调用方按需补——
-                // 这里 tool result 本身就是给模型的交代，不再另补 system-reminder。）
-                toolOutput = "Error: 语音合成失败（TTS 服务不可用或未配置）。请如实告诉用户这条语音没发出去，不要谎称已发送；可以建议用户检查 TTS 服务配置。"
+            } catch {
+                // VoiceComposeError 的 description 直接是给模型的中文交代（含可用选项）；
+                // 其他错误兜底，不让模型对着空气猜。
+                let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                toolOutput = "Error: \(msg)"
                 toolSuccess = false
                 if msgIdx < messages.count, blockIdx < messages[msgIdx].blocks.count {
                     messages[msgIdx].blocks[blockIdx].content = toolOutput
