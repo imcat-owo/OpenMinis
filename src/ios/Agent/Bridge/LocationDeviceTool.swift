@@ -73,8 +73,7 @@ enum LocationDeviceTool {
                 keywords: ["当前位置", "我在哪", "gps 位置", "current location", "定位", "坐标"],
                 parameterSchemaJSON: #"""
                     {"type":"object","properties":{
-                      "accuracy":{"type":"string","enum":["best","near","km"],"description":"精度，默认 best"}},
-                     "type":"object"}
+                      "accuracy":{"type":"string","enum":["best","near","km"],"description":"精度，默认 best"}}}
                     """#,
                 permission: .sensitive
             )

@@ -66,8 +66,7 @@ enum ClipboardDeviceTool {
                 keywords: ["读剪贴板", "剪贴板内容", "clipboard read", "粘贴板", "复制的内容"],
                 parameterSchemaJSON: #"""
                     {"type":"object","properties":{
-                      "image":{"type":"string","description":"沙箱内图片路径：把剪贴板里的图片存到该路径"}},
-                     "type":"object"}
+                      "image":{"type":"string","description":"沙箱内图片路径：把剪贴板里的图片存到该路径"}}}
                     """#,
                 permission: .sensitive
             )
