@@ -17,7 +17,7 @@ public enum BridgeMetaTools {
             title: "桥",
             instructions: """
                 你连上的是「桥」。桥对外只有两个工具：
-                先用「搜」按关键词找到能干活的工具（返回名字与一句话简介），
+                先用「搜」按关键词找到能干活的工具（返回名字、一句话简介与参数简述），
                 再用「命令」下指令让桥里的小管家执行，只回清洗后的高密度结果。
                 """,
             capabilities: .init(tools: .init(listChanged: false))
@@ -25,13 +25,13 @@ public enum BridgeMetaTools {
 
         let searchTool = Tool(
             name: searchName,
-            description: "在桥的工具库里按关键词搜索可用工具，返回短清单（名字 + 一句话简介）。先搜再执行。",
+            description: "在桥的工具库里按关键词搜索可用工具，返回短清单（名字 + 一句话简介 + 参数简述）。先搜再执行。",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
                     "query": .object([
                         "type": .string("string"),
-                        "description": .string("搜索关键词，如：回声、时间、蓝牙"),
+                        "description": .string("要找什么能力，用中文关键词说，比如：蓝牙、剪贴板、定位、通知、相册、报问题"),
                     ])
                 ]),
                 "required": .array([.string("query")]),
@@ -39,29 +39,32 @@ public enum BridgeMetaTools {
         )
         let commandTool = Tool(
             name: commandName,
-            description: "下达一条指令，桥里的小管家负责找工具、执行、清洗，只回高密度结果。可点名 tool 指定工具，不点名则由管家按指令智能路由。",
+            description: "下达一条指令，桥里的小管家负责找工具、执行、清洗，只回高密度结果。可点名 tool 指定工具，不点名则由管家按指令智能路由。敏感动作（如删照片、发 GitHub Issue）执行前会弹框请主人在手机上确认，主人超时未确认或不在手机旁则默认拒绝。",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
                     "instruction": .object([
                         "type": .string("string"),
-                        "description": .string("要执行的指令"),
+                        "description": .string("一句话告诉小管家要干什么，比如：帮我查一下手机现在的位置。小管家会自己找工具办。"),
                     ]),
                     "tool": .object([
                         "type": .string("string"),
-                        "description": .string("可选：点名要用的工具（先用「搜」查到名字）"),
+                        "description": .string("可选：点名要用哪个工具（名字先用「搜」查到）；不填小管家就按指令自己挑"),
                     ]),
                     "arguments": .object([
                         "type": .string("object"),
-                        "description": .string("可选：给工具的参数对象"),
+                        "description": .string("可选：点名工具时一起传的参数（JSON 对象）；参数名和必填项看「搜」返回的参数简述"),
                     ]),
                     "timeoutSeconds": .object([
                         "type": .string("number"),
-                        "description": .string("可选：超时秒数，默认 30"),
+                        "description": .string(
+                            "可选：超时秒数，默认 30。不要超过 60（中继转发上限），超过 60 第一次必吃 504。"),
                     ]),
                     "sensitiveApproved": .object([
                         "type": .string("boolean"),
-                        "description": .string("可选：敏感工具经主人确认后传 true"),
+                        // 已作废：兼容保留，实际审批只能由手机侧弹框签发，
+                        // 传任何值都不会被信任（防外部 AI 自批）。
+                        "description": .string("已作废：兼容保留。敏感审批由手机侧弹框完成，传 true 也不会被信任。"),
                     ]),
                 ]),
                 "required": .array([.string("instruction")]),
