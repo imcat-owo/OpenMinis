@@ -32,7 +32,7 @@ enum TTSPaper {
         let defaultCandidates = groupStore.defaultGroupCandidates()
         if let defId = groupStore.defaultGroupId, let g = groupStore.group(id: defId) {
             if defaultCandidates.isEmpty {
-                lines.append("默认 TTS 分组「\(g.name)」里没有可用的服务——先跟主人说 TTS 还没配好，让她去「设置 > 语音服务」里配。")
+                lines.append("默认 TTS 分组「\(g.name)」里没有可用的服务——先跟主人说 TTS 还没配好，让她去「设置 > Voice Services」里配。")
             } else {
                 lines.append("默认 TTS 分组「\(g.name)」：")
                 for (i, s) in defaultCandidates.enumerated() {
@@ -53,8 +53,8 @@ enum TTSPaper {
             lines.append("备选服务（不在默认分组里）：\(others.map { "\($0.name)（音色 \($0.voice)）" }.joined(separator: "、"))。")
         }
         lines.append("")
-        lines.append("调用方法：send_voice(text=要说的话)。text 写口语化的中文，直接是主人会听到的话，别带 markdown 符号；别太长，太长分段调多次。")
-        lines.append("换音色你换不了：音色/分组是主人在「设置 > 语音服务」里定的。主人让你换声音时，别自己编个音色名传进去——跟她说去设置里换默认分组/服务。")
+        lines.append("调用方法：send_voice(text=要说的话，tool_title=一句话摘要)。text 写口语化的中文，直接是主人会听到的话，别带 markdown 符号；别太长，太长分段调多次。")
+        lines.append("换音色你换不了：音色/分组是主人在「设置 > Voice Services」里定的。主人让你换声音时，别自己编个音色名传进去——跟她说去设置里换默认分组/服务。")
         lines.append("失败时：工具会明确报错。如实告诉主人这条语音没发出去，不要谎称已发送；可以建议她检查 TTS 服务配置。")
         return lines.joined(separator: "\n")
     }
