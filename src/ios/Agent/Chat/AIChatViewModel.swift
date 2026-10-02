@@ -6052,10 +6052,17 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
             let allBlocks = messages[msgIdx].blocks
             for i in min(committedBlockCount, allBlocks.count)..<allBlocks.count {
                 let block = allBlocks[i]
-                if case .text = block.kind {
+                // [p1fix 2026-10-02] voice-bubble link 绝不进 agentHistory（UI/DB 专用）。
+                // 口径见 T-voice-bubble-context-clean：agentHistory 永远不含气泡 part；
+                // live 侧唯一的组装点就在这里，直接跳过，不依赖 committedBlockCount 的时序。
+                if case .text = block.kind, !AIVoiceMessageComposer.isVoiceBubbleOnlyText(block.content) {
                     // Prefer the fully-accumulated assistantText over block.content for the
                     // LAST text block — block.content may be stale due to throttled UI updates.
-                    let isLastTextBlock = !allBlocks[(i+1)..<allBlocks.count].contains(where: { $0.kind == .text })
+                    // "last" 按非气泡文本块算——气泡块不参与判定（它若是最后一个文本块，
+                    // 会把 assistantText 误写进气泡块，既毁 UI 又污染 history）。
+                    let isLastTextBlock = !allBlocks[(i+1)..<allBlocks.count].contains(where: {
+                        $0.kind == .text && !AIVoiceMessageComposer.isVoiceBubbleOnlyText($0.content)
+                    })
                     let content = (isLastTextBlock && assistantText.count > block.content.count)
                         ? assistantText : block.content
                     if !content.isEmpty {

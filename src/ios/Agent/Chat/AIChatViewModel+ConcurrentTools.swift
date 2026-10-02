@@ -1006,6 +1006,11 @@ extension AIChatViewModel {
                 if msgIdx < messages.count, blockIdx < messages[msgIdx].blocks.count {
                     messages[msgIdx].blocks[blockIdx].content = summary
                 }
+            } catch is CancellationError {
+                // [p1fix 2026-10-02] 取消信号必须透传——外层的 `catch is CancellationError`
+                // 负责收尾（用户点停止）。无差别 catch 会把它变成普通工具结果，
+                // 导致"点了停止停不下来"。
+                throw
             } catch {
                 // VoiceComposeError 的 description 直接是给模型的中文交代（含可用选项）；
                 // 其他错误兜底，不让模型对着空气猜。

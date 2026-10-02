@@ -246,7 +246,7 @@ extension AIChatViewModel {
                 // voice = TTS 服务名（服务自带音色配置）；group = TTS 分组名（按成员顺序 fallback）。
                 // 名字在 TTS 能力纸条里列着，别自己编。都不传 = 默认 TTS 分组。
                 "voice": AgentToolParam(type: .string, description: "可选：点名用哪个 TTS 服务的声音（服务名，见 TTS 能力纸条里列的）。不传就用默认 TTS 分组。"),
-                "group": AgentToolParam(type: .string, description: "可选：点名用哪个 TTS 分组（分组名，见 TTS 能力纸条里列的），按分组成员顺序自动 fallback。不传就用默认分组。"),
+                "group": AgentToolParam(type: .string, description: "可选：点名用哪个 TTS 分组（分组名，见 TTS 能力纸条里列的），按分组成员顺序自动 fallback。不传就用默认分组。voice 和 group 同时传时，以 group 为准。"),
             ],
             required: ["tool_title", "text"],
             propertyOrdering: ["tool_title", "text", "voice", "group"]
