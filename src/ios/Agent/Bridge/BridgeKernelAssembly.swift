@@ -4,7 +4,8 @@ import BridgeCore
 /// 「桥」小管家内核在 App 侧的组装点（合并第 16 条：内核搬入）。
 ///
 /// 只负责按依赖顺序造出三件套：工具注册中心 → 小管家 → 会话管理，
-/// 并把设备能力工具组（第 19 条，DeviceTools）与报问题工具（第 21 条，
+/// 并把设备能力工具组（第 19 条，DeviceTools）、联网搜索工具
+/// （第 18 条，WebSearchBridgeTool，桥审计 B）与报问题工具（第 21 条，
 /// ReportIssueTool，需注入 steward 取活动任务）挂进注册中心——注册是
 /// 异步的（注册中心是 actor），组装时起一个任务完成；单次失败自动重试
 /// （最多 3 次，间隔 1s/2s），重试前先清掉上次注册到一半的残留；仍失败
@@ -100,6 +101,30 @@ final class BridgeKernelAssembly {
         if let reportError {
             stateLock.withLock {
                 _registrationState = .failed("报问题工具注册失败：\(reportError)")
+            }
+            return
+        }
+
+        var searchError: Error?
+        for attempt in 1...Self.maxRegisterAttempts {
+            _ = await registry.unregister(name: WebSearchBridgeTool.toolName)
+            do {
+                // 联网搜索工具（第 18 条，桥审计 B）：无依赖，单独挂。
+                // 没配 key 时工具照常注册，调用时诚实报错指引去设置页填 key。
+                try await WebSearchBridgeTool.register(into: registry)
+                searchError = nil
+                break
+            } catch {
+                searchError = error
+                Self.logger.error("联网搜索工具注册失败（第 \(attempt) 次）：\(error)")
+                if attempt < Self.maxRegisterAttempts {
+                    try? await Task.sleep(nanoseconds: Self.registerRetryDelays[attempt - 1])
+                }
+            }
+        }
+        if let searchError {
+            stateLock.withLock {
+                _registrationState = .failed("联网搜索工具注册失败：\(searchError)")
             }
             return
         }
