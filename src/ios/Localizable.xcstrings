@@ -104453,6 +104453,23 @@
         }
       }
     }
+  },
+  "Automatic snapshot": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Automatic snapshot"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "自动快照"
+        }
+      }
+    }
   }
   },
   "version" : "1.0"
