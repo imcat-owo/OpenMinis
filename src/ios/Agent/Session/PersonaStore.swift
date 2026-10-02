@@ -242,6 +242,13 @@ final class PersonaStore: ObservableObject {
         }
     }
 
+    /// 备份恢复/回滚后重载注册表（BackupImporter 调）：读盘 + 补目录。
+    /// load() 里已有"当前 id 指向的人设没了 → 回落 default"的保护。
+    func reloadFromDisk() {
+        load()
+        ensureDirs()
+    }
+
     private func persist() {
         save(personas)
     }
@@ -290,6 +297,9 @@ final class PersonaStore: ObservableObject {
     func deletePersona(_ id: String) {
         guard let idx = personas.firstIndex(where: { $0.id == id }) else { return }
         guard !personas[idx].isBuiltIn else { return }
+        // P2-1：default 人设是迁移锚点（老会话 persona_id 为空时的归属），
+        // 删了它等于把"家"拆了——标成不可删。
+        guard id != Self.defaultPersonaID else { return }
         guard personas.count > 1 else { return }
         let removed = personas.remove(at: idx)
         persist()

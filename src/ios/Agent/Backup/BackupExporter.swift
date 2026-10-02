@@ -806,6 +806,55 @@ actor BackupExporter {
             count += 1
             bytes += (try? fm.attributesOfItem(atPath: from.path)[.size] as? Int64) ?? 0
         }
+
+        // P1-2：人设记忆 memory/personas/<id>/*.md（SOUL.md / GLOBAL.md / 日报）
+        // 递归进包。旧包没有 personas 目录时照常跳过；快照纪律与顶层一致
+        //（snapshotAt 之后改过的文件不进包；已 staged 的按 resume 计）。
+        let personasSrc = src.appendingPathComponent("personas", isDirectory: true)
+        if fm.fileExists(atPath: personasSrc.path) {
+            let personasDst = dst.appendingPathComponent("personas", isDirectory: true)
+            try fm.createDirectory(at: personasDst, withIntermediateDirectories: true)
+            let keys: [URLResourceKey] = [.isRegularFileKey, .contentModificationDateKey]
+            if let enumerator = fm.enumerator(at: personasSrc, includingPropertiesForKeys: keys) {
+                for case let fileURL as URL in enumerator {
+                    guard fileURL.pathExtension == "md",
+                          (try? fileURL.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
+                    else { continue }
+                    let rel = String(fileURL.path.dropFirst(personasSrc.path.count + 1))
+                    let to = personasDst.appendingPathComponent(rel)
+                    if fm.fileExists(atPath: to.path) {
+                        count += 1
+                        bytes += (try? fm.attributesOfItem(atPath: to.path)[.size] as? Int64) ?? 0
+                        continue
+                    }
+                    let mtime = (try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+                    if let mtime, mtime > snapshotAt { continue }
+                    try fm.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try fm.copyItem(at: fileURL, to: to)
+                    count += 1
+                    bytes += (try? fm.attributesOfItem(atPath: fileURL.path)[.size] as? Int64) ?? 0
+                }
+            }
+        }
+
+        // P1-2：人设注册表 MinisConfig/personas.json —— 恢复后人设才回得来。
+        // 旧包没有它时照常跳过。
+        let registrySrc = AIChatViewModel.minisConfigRoot.appendingPathComponent("personas.json")
+        if fm.fileExists(atPath: registrySrc.path) {
+            let to = dst.appendingPathComponent("personas.json")
+            if fm.fileExists(atPath: to.path) {
+                count += 1
+                bytes += (try? fm.attributesOfItem(atPath: to.path)[.size] as? Int64) ?? 0
+            } else {
+                let mtime = (try? registrySrc.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+                if mtime.map({ $0 > snapshotAt }) != true {
+                    try fm.copyItem(at: registrySrc, to: to)
+                    count += 1
+                    bytes += (try? fm.attributesOfItem(atPath: registrySrc.path)[.size] as? Int64) ?? 0
+                }
+            }
+        }
+
         return BackupManifest.CategoryStat(entries: count, bytes: bytes, encrypted: false)
     }
 

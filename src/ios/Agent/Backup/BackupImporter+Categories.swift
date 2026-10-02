@@ -97,6 +97,24 @@ extension BackupImporter {
             }
         }
 
+        // [p1fix] personas.json 住在 MinisConfig，不在 memory 目录树里，
+        // 上面的目录 copy-aside 覆盖不到。仿 providers 做文件级快照，
+        // 否则恢复中途失败时注册表回滚不了。
+        if category == .memory {
+            let live = AIChatViewModel.minisConfigRoot.appendingPathComponent("personas.json")
+            if fm.fileExists(atPath: live.path) {
+                let saved = staging.appendingPathComponent("memory-personas.json")
+                try? fm.removeItem(at: saved)
+                try fm.copyItem(at: live, to: saved)
+                try? Data(live.path.utf8).write(
+                    to: staging.appendingPathComponent(
+                        "memory-personas.json"
+                        + BackupRestoreJournal.fileSnapshotSidecarSuffix),
+                    options: .atomic)
+                snap.files.append((live: live, saved: saved))
+            }
+        }
+
         for live in liveDirs where fm.fileExists(atPath: live.path) {
             let saved = staging.appendingPathComponent(
                 "\(category.rawValue)-\(live.lastPathComponent)", isDirectory: true)
@@ -128,8 +146,15 @@ extension BackupImporter {
         // A file-level provider rollback only rewrites the JSON on disk; the
         // in-memory store still holds the merged config, so it must be reloaded
         // or the UI would keep showing state that is no longer persisted.
+        // [p1fix] personas.json 同理：回滚后重载 PersonaStore。
         if !snapshot.files.isEmpty {
-            Task { @MainActor in await ProviderConfigStore.shared.reloadFromDisk() }
+            let rolledBackPersonas = snapshot.files.contains {
+                $0.live.lastPathComponent == "personas.json"
+            }
+            Task { @MainActor in
+                await ProviderConfigStore.shared.reloadFromDisk()
+                if rolledBackPersonas { PersonaStore.shared.reloadFromDisk() }
+            }
         }
         logger.info("[Restore] rolled back \(snapshot.category.rawValue) (\(snapshot.directories.count) dir(s))")
     }
@@ -483,9 +508,81 @@ extension BackupImporter {
             }
         }
 
+        // P1-2：人设记忆目录 data/memory/personas/<id>/*.md 原样写回。
+        // 旧包没有它时照常跳过；单文件走与顶层同样的 hash 比对 + staged swap。
+        var registryRestored = false
+        let personasSrc = src.appendingPathComponent("personas", isDirectory: true)
+        if fm.fileExists(atPath: personasSrc.path) {
+            let personasDst = dst.appendingPathComponent("personas", isDirectory: true)
+            try fm.createDirectory(at: personasDst, withIntermediateDirectories: true)
+            if let enumerator = fm.enumerator(at: personasSrc, includingPropertiesForKeys: [.isRegularFileKey]) {
+                for case let fileURL as URL in enumerator {
+                    guard fileURL.pathExtension == "md",
+                          (try? fileURL.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
+                    else { continue }
+                    let rel = String(fileURL.path.dropFirst(personasSrc.path.count + 1))
+                    let to = personasDst.appendingPathComponent(rel)
+                    try fm.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    if let localData = try? Data(contentsOf: to),
+                       let pkgData = try? Data(contentsOf: fileURL),
+                       localData == pkgData {
+                        report.skipped += 1
+                        continue
+                    }
+                    let staged = dst.appendingPathComponent(".restore-\(UUID().uuidString).tmp")
+                    do {
+                        try fm.copyItem(at: fileURL, to: staged)
+                        if fm.fileExists(atPath: to.path) {
+                            _ = try fm.replaceItemAt(to, withItemAt: staged)
+                        } else {
+                            try fm.moveItem(at: staged, to: to)
+                        }
+                        report.imported += 1
+                    } catch {
+                        try? fm.removeItem(at: staged)
+                        throw error
+                    }
+                }
+            }
+        }
+
+        // P1-2：人设注册表 data/memory/personas.json → MinisConfig/personas.json。
+        // 旧包没有它时照常跳过。
+        let registrySrc = src.appendingPathComponent("personas.json")
+        if fm.fileExists(atPath: registrySrc.path) {
+            let registryDst = AIChatViewModel.minisConfigRoot.appendingPathComponent("personas.json")
+            try fm.createDirectory(at: registryDst.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if let localData = try? Data(contentsOf: registryDst),
+               let pkgData = try? Data(contentsOf: registrySrc),
+               localData == pkgData {
+                report.skipped += 1
+            } else {
+                let staged = registryDst.deletingLastPathComponent()
+                    .appendingPathComponent(".restore-\(UUID().uuidString).tmp")
+                do {
+                    try fm.copyItem(at: registrySrc, to: staged)
+                    if fm.fileExists(atPath: registryDst.path) {
+                        _ = try fm.replaceItemAt(registryDst, withItemAt: staged)
+                    } else {
+                        try fm.moveItem(at: staged, to: registryDst)
+                    }
+                    report.imported += 1
+                    registryRestored = true
+                } catch {
+                    try? fm.removeItem(at: staged)
+                    throw error
+                }
+            }
+        }
+
         // SOUL.md is cached in memory; a raw file write leaves that cache stale
         // until something else refreshes it.
         await MainActor.run { SoulStore.refreshCache() }
+        // 注册表落盘后内存里的 PersonaStore 还是旧表，重载一次，
+        // 否则恢复完人设列表不变——看起来像"恢复后人设全丢"没修好。
+        if registryRestored {
+            await MainActor.run { PersonaStore.shared.reloadFromDisk() }
+        }
         return report
     }
 
