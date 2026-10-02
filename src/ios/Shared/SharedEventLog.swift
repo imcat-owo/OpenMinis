@@ -48,8 +48,11 @@ final class SharedEventLog {
         // key = value / "key": "value" — mask the value, keep the key name.
         // The value swallows an optional second token so
         // "Authorization: Bearer <token>" is fully masked.
+        // 中文键（口令/密码/密钥，AI-P2-8）：\b 在中文字符间没有词边界，
+        // 所以中文分支不用 \b；分隔符认全角冒号和"是"（"密码是 xxx"）。
+        // 两个分支的键分别进 $1/$3，模板 "$1$3=***REDACTED***" 两边都成立。
         try? NSRegularExpression(
-            pattern: #"(?i)\b(api[_-]?key|secret|token|password|passwd|pwd|authorization|bearer|client[_-]?secret)\b(?=["']?\s*[:=])["']?\s*[:=]\s*("[^"]*"|'[^']*'|\S+(?:\s+\S+)?)"#)
+            pattern: #"(?i)\b(api[_-]?key|secret|token|password|passwd|pwd|authorization|bearer|client[_-]?secret)\b(?=["']?\s*[:=])["']?\s*[:=]\s*("[^"]*"|'[^']*'|\S+(?:\s+\S+)?)|(口令|密码|密钥)(?=["']?\s*(?:[:：=]|是))["']?\s*(?:[:：=]|是)\s*("[^"]*"|'[^']*'|\S+(?:\s+\S+)?)"#)
     }()
 
     private static let dataURIPattern: NSRegularExpression? = {
@@ -123,7 +126,7 @@ final class SharedEventLog {
             in: out, range: range, withTemplate: "<image>")
         range = NSRange(out.startIndex..., in: out)
         out = secretPattern.stringByReplacingMatches(
-            in: out, range: range, withTemplate: "$1=***REDACTED***")
+            in: out, range: range, withTemplate: "$1$3=***REDACTED***")
         range = NSRange(out.startIndex..., in: out)
         out = bareURLPattern.stringByReplacingMatches(
             in: out, range: range, withTemplate: "<url>")
