@@ -292,11 +292,18 @@ extension AIChatViewModel {
         }
         // Unknown-parameter rejections (the part of API-9 that can still
         // reach the user after the self-heal has had its one retry).
+        // The "turn thinking off" advice is only valid when the rejection
+        // actually names a thinking/reasoning parameter — a bare
+        // "unknown parameter: 'temperature'" must not tell the user to
+        // toggle thinking, so the generic case gets neutral guidance.
         let rejectionTokens = ["unknown", "unrecognized", "unrecognised", "unsupported",
                                "not allowed", "not permitted", "extra inputs", "additional properties"]
-        if (lower.contains("thinking") || lower.contains("reasoning") || lower.contains("parameter"))
-            && rejectionTokens.contains(where: { lower.contains($0) }) {
+        let isParamRejection = rejectionTokens.contains(where: { lower.contains($0) })
+        if (lower.contains("thinking") || lower.contains("reasoning")) && isParamRejection {
             return friendly("The provider doesn't recognize a parameter in the request (often a thinking parameter). Turn thinking off and resend, or switch models.")
+        }
+        if lower.contains("parameter") && isParamRejection {
+            return friendly("The provider doesn't recognize a parameter in the request. Check the settings for this model, or switch to another model.")
         }
         if lower.contains("network error") || lower.contains("offline")
             || lower.contains("could not connect") || lower.contains("connection was lost")

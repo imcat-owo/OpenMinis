@@ -104261,6 +104261,22 @@
         }
       }
     },
+    "The provider doesn't recognize a parameter in the request. Check the settings for this model, or switch to another model." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "供应商不认识请求里的某个参数。检查一下这个模型的设置，或者换个模型试试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "供應商不認識請求裡的某個參數。檢查一下這個模型的設置，或者換個模型試試。"
+          }
+        }
+      }
+    },
     "The network connection failed. Check your network or proxy, then resend." : {
       "localizations" : {
         "zh-Hans" : {
