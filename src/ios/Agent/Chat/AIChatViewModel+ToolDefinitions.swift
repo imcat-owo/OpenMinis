@@ -232,6 +232,10 @@ extension AIChatViewModel {
             ))
         }
 
+        // [mcp-agg] MCP 聚合点管理工具：小管家（MCP 小助手人设）给她接入/管理 MCP 用。
+        // add_mcp/remove_mcp 两段式（先探、请她确认再落盘）；skill 白名单门控在人设层。
+        tools.append(contentsOf: MCPManagementTools.dialogDefinitions())
+
         return tools
     }
 

@@ -944,6 +944,15 @@ extension AIChatViewModel {
                 }
             }
 
+        case "add_mcp", "list_mcp", "remove_mcp", "toggle_mcp":
+            // [mcp-agg] MCP 聚合点管理工具（小管家专用）：定义与实现在 MCPManagementTools。
+            let (mcpText, mcpOK) = await MCPManagementTools.handleDialogCall(name: tu.name, args: toolArgs)
+            toolOutput = mcpText
+            toolSuccess = mcpOK
+            if msgIdx < messages.count, blockIdx < messages[msgIdx].blocks.count {
+                messages[msgIdx].blocks[blockIdx].content = toolOutput
+            }
+
         default:
             toolOutput = "Error: Unknown tool '\(tu.name)'"
             toolSuccess = false
