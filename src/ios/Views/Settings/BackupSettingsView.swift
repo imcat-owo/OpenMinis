@@ -116,6 +116,15 @@ struct BackupSettingsView: View {
     /// placeholder jump to the automatic name mid-keystroke.
     @State private var deviceNameDraft = ""
 
+    /// [P3-10] Automatic-snapshot switch, mirrored into @State so toggling
+    /// redraws; the source of truth stays in
+    /// `BackupSnapshotService.isAutomaticSnapshotEnabled` (UserDefaults).
+    @State private var autoSnapshots = BackupSnapshotService.isAutomaticSnapshotEnabled
+    /// [P3-10] Live footprint of recognised snapshots for the subtitle
+    /// under the switch. Refreshed in onAppear.
+    @State private var snapshotCount = 0
+    @State private var snapshotBytes: Int64 = 0
+
     var body: some View {
         Form {
             deviceNameSection
@@ -366,6 +375,40 @@ struct BackupSettingsView: View {
                 }
             }
 
+            // [P3-10] Automatic snapshots used to run with no switch and no
+            // word anywhere: the user never asked for them and couldn't
+            // turn them off or see what they cost. The toggle gates both
+            // triggers in the service; the subtitle is the live footprint
+            // (count + bytes) of the snapshots in the Backups folder.
+            Section {
+                Toggle(isOn: $autoSnapshots.animation()) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 28, height: 28)
+                            .background(MinisTheme.accent, in: Circle())
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Automatic Snapshots")
+                            Group {
+                                if snapshotCount == 0 {
+                                    Text("No snapshots yet")
+                                } else {
+                                    Text("\(snapshotCount) snapshots · \(byteText(snapshotBytes))")
+                                }
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .onChange(of: autoSnapshots) { _ in
+                    BackupSnapshotService.isAutomaticSnapshotEnabled = autoSnapshots
+                }
+            } footer: {
+                Text("When on, the app takes a snapshot shortly after launch and when it returns to the foreground, whenever the newest one is stale. Keeps the 7 newest plus one weekly and one monthly copy (at most 9). Snapshots stay on this device in the Backups folder and open from Files like any other backup; switching off stops new snapshots but keeps the existing ones.")
+            }
+
             historySection
 
             if let result {
@@ -476,6 +519,7 @@ struct BackupSettingsView: View {
             // rclone's config is in-memory only, so it must be rebuilt each
             // time this screen appears (and after a relaunch).
             RcloneRemoteStore.syncToRclone()
+            refreshSnapshotUsage()
         }
         // Destination rows push their details through these hidden links
         // rather than wrapping the row in a visible NavigationLink, which would
@@ -1165,5 +1209,13 @@ struct BackupSettingsView: View {
 
     private func byteText(_ bytes: Int64) -> String {
         ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
+    /// [P3-10] Footprint for the Automatic Snapshots subtitle: how many
+    /// snapshots the service currently recognises and their total size.
+    private func refreshSnapshotUsage() {
+        let snaps = BackupSnapshotService.listSnapshots(in: BackupDelivery.backupsDirectory)
+        snapshotCount = snaps.count
+        snapshotBytes = snaps.reduce(into: Int64(0)) { $0 += $1.bytes }
     }
 }

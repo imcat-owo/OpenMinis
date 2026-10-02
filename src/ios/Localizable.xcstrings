@@ -104470,6 +104470,74 @@
         }
       }
     }
+  },
+  "Automatic Snapshots": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Automatic Snapshots"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "自动快照"
+        }
+      }
+    }
+  },
+  "No snapshots yet": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "No snapshots yet"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "暂无快照"
+        }
+      }
+    }
+  },
+  "%lld snapshots · %@": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "%lld snapshots · %@"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "%lld 个快照 · %@"
+        }
+      }
+    }
+  },
+  "When on, the app takes a snapshot shortly after launch and when it returns to the foreground, whenever the newest one is stale. Keeps the 7 newest plus one weekly and one monthly copy (at most 9). Snapshots stay on this device in the Backups folder and open from Files like any other backup; switching off stops new snapshots but keeps the existing ones.": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "When on, the app takes a snapshot shortly after launch and when it returns to the foreground, whenever the newest one is stale. Keeps the 7 newest plus one weekly and one monthly copy (at most 9). Snapshots stay on this device in the Backups folder and open from Files like any other backup; switching off stops new snapshots but keeps the existing ones."
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "开启后，App 会在启动后不久和回到前台时检查最新快照是否过旧，过旧就自动拍一份。最多保留 9 份：最新的 7 份，再加一份周快照和一份月快照。快照只保存在本机的 Backups 文件夹里，和普通备份一样从「文件」打开恢复；关闭后不再拍新的，已有的快照会保留。"
+        }
+      }
+    }
   }
   },
   "version" : "1.0"
