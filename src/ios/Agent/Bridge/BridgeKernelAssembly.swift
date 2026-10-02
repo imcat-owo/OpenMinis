@@ -49,9 +49,8 @@ final class BridgeKernelAssembly {
         Task { await self.registerToolsWithRetry() }
     }
 
-    /// 带重试的工具注册。每次重试前先注销已注册的设备工具名，保证
-    /// "上次注册到一半"不会以 duplicateName 堵死重试；报问题工具是
-    /// 单个注册，失败时注册中心里没有它，直接重跑即可。
+    /// 带重试的工具注册。每次重试前先注销已注册的工具名，保证
+    /// "上次注册到一半"不会以 duplicateName 堵死重试。
     private func registerToolsWithRetry() async {
         var deviceError: Error?
         for attempt in 1...Self.maxRegisterAttempts {
