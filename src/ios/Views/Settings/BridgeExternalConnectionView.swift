@@ -39,6 +39,16 @@ struct BridgeExternalConnectionView: View {
     @State private var githubTokenInput: String = ""
     @State private var hasGitHubToken: Bool = false
 
+    /// 用户-P3-1：打断是 destructive 操作，先弹确认再执行。
+    @State private var showInterruptConfirm = false
+
+    /// 用户-P3-3：清除令牌是不可逆的 destructive 操作，先弹确认再删。
+    @State private var showClearTokenConfirm = false
+
+    /// 用户-P3-2：保存按钮的成功/失败反馈（底部短暂浮现的提示条）。
+    @State private var saveFeedback: String?
+    @State private var saveFeedbackToken = 0
+
     var body: some View {
         Form {
             Section {
@@ -57,7 +67,7 @@ struct BridgeExternalConnectionView: View {
                     }
                     if hasActiveStewardTask {
                         Button(role: .destructive) {
-                            Task { await interruptSteward() }
+                            showInterruptConfirm = true
                         } label: {
                             Text(AppLocalized("打断小管家"))
                         }
@@ -84,18 +94,31 @@ struct BridgeExternalConnectionView: View {
                     }
                 }
                 LabeledContent(AppLocalized("中继地址")) {
-                    TextField("xxx.workers.dev", text: $host)
-                        .multilineTextAlignment(.trailing)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .submitLabel(.done)
-                        .onSubmit { applyConfigChange() }
+                    HStack(spacing: 8) {
+                        TextField("xxx.workers.dev", text: $host)
+                            .multilineTextAlignment(.trailing)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .submitLabel(.done)
+                            .onSubmit { applyConfigChange() }
+                        // 用户-P3-2：显眼的保存入口——光靠回车，用户粘贴完
+                        // 直接退出页面会丢输入。
+                        Button(AppLocalized("保存")) {
+                            applyConfigChange()
+                            flashSaveFeedback(AppLocalized("已保存"))
+                        }
+                        .buttonStyle(.bordered)
+                    }
                 }
                 tokenField
             } header: {
                 Text(AppLocalized("中继连接"))
             } footer: {
-                Text(AppLocalized("先填中继地址和口令，再打开中继连接；改完按回车生效。口令只存本机钥匙串，不会上传；中继只转手、不存任何内容。"))
+                // 用户-P3-7：两个开关是独立的——关「中继连接」只断开
+                // Cloudflare 中转，「本地服务」那节的 MCP 对外服务还会
+                // 继续在 127.0.0.1 监听；要全关，两个开关都要关。写清楚，
+                // 不让用户以为"桥关了"。
+                Text(AppLocalized("先填中继地址和口令，再打开中继连接；改完按「保存」或按回车生效。口令只存本机钥匙串，不会上传；中继只转手，防重发缓存最多保留 600 秒。注意：「中继连接」和上面「本地服务」里的 MCP 对外服务是两个独立开关——关掉中继只断开 Cloudflare 中转，本地的 MCP 入口还会继续在本机监听；要全关，两个开关都要关。"))
             }
 
             Section {
@@ -103,16 +126,21 @@ struct BridgeExternalConnectionView: View {
                     Text(hasGitHubToken ? AppLocalized("已填") : AppLocalized("未填"))
                         .foregroundStyle(.secondary)
                 }
-                SecureField(AppLocalized("粘贴令牌"), text: $githubTokenInput)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    // 这是 GitHub PAT（不是短信验证码），用 .password 语义才对。
-                    .textContentType(.password)
-                    .submitLabel(.done)
-                    .onSubmit { saveGitHubToken() }
+                HStack(spacing: 8) {
+                    SecureField(AppLocalized("粘贴令牌"), text: $githubTokenInput)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        // 这是 GitHub PAT（不是短信验证码），用 .password 语义才对。
+                        .textContentType(.password)
+                        .submitLabel(.done)
+                        .onSubmit { saveGitHubToken() }
+                    // 用户-P3-2：令牌框也要显眼的保存入口。
+                    Button(AppLocalized("保存")) { saveGitHubToken() }
+                        .buttonStyle(.bordered)
+                }
                 if hasGitHubToken {
                     Button(role: .destructive) {
-                        clearGitHubToken()
+                        showClearTokenConfirm = true
                     } label: {
                         Text(AppLocalized("清除报问题令牌"))
                     }
@@ -120,7 +148,7 @@ struct BridgeExternalConnectionView: View {
             } header: {
                 Text(AppLocalized("报问题到 GitHub"))
             } footer: {
-                Text(AppLocalized("在桥里跟小管家说哪里有问题，它会把问题连同当时的情况打包发到 GitHub 仓库 imcat-owo/OpenMinis 的问题列表里，不用填表。发送需要一把令牌：在 GitHub 里生成一个 fine-grained 个人访问令牌（PAT），只选 imcat-owo/OpenMinis 这一个仓库、权限只给 Issues 的读写。令牌只存本机钥匙串，界面不回显，也不会发到别处。填好按回车保存。"))
+                Text(AppLocalized("在桥里跟小管家说哪里有问题，它会把问题连同当时的情况打包发到 GitHub 仓库 imcat-owo/OpenMinis 的问题列表里，不用填表。发送需要一把令牌：在 GitHub 里生成一个 fine-grained 个人访问令牌（PAT），只选 imcat-owo/OpenMinis 这一个仓库、权限只给 Issues 的读写。令牌只存本机钥匙串，界面不回显，也不会发到别处。填好按「保存」或按回车保存。"))
             }
         }
         .navigationTitle(AppLocalized("桥·对外连接"))
@@ -143,10 +171,44 @@ struct BridgeExternalConnectionView: View {
             get: { mcpError != nil },
             set: { if !$0 { mcpError = nil } }
         )) {
-            Button("OK") { mcpError = nil }
+            // 用户-P3-6：按钮文案走本地化，不写死英文。
+            Button(AppLocalized("OK"), role: .cancel) { mcpError = nil }
         } message: {
             Text(mcpError ?? "")
         }
+        // 用户-P3-1：打断小管家二次确认——任务停掉后外部 AI 会收到
+        // 「主人打断」专属报错，是不可逆的 destructive 操作。用 .alert
+        //（不用 .confirmationDialog），iPad/Mac 上弹窗居中不乱飘。
+        .alert(AppLocalized("打断小管家"), isPresented: $showInterruptConfirm) {
+            Button(AppLocalized("打断"), role: .destructive) {
+                Task { await interruptSteward() }
+            }
+            Button(AppLocalized("取消"), role: .cancel) {}
+        } message: {
+            Text(AppLocalized("正在跑和排队的任务都会停掉，外部 AI 会收到「主人打断」。"))
+        }
+        // 用户-P3-3：清除令牌二次确认——钥匙串条目删掉就没了，
+        // 之后报问题前要重新填。
+        .alert(AppLocalized("清除报问题令牌"), isPresented: $showClearTokenConfirm) {
+            Button(AppLocalized("清除"), role: .destructive, action: clearGitHubToken)
+            Button(AppLocalized("取消"), role: .cancel) {}
+        } message: {
+            Text(AppLocalized("报问题令牌将从本机钥匙串删除，之后报问题前需要重新填写。"))
+        }
+        // 用户-P3-2：保存反馈条——保存成功/失败时在底部短暂浮现，
+        // 让用户明确知道"存上了"，不用靠猜。
+        .overlay(alignment: .bottom) {
+            if let fb = saveFeedback {
+                Text(fb)
+                    .font(.footnote)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(.bottom, 32)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: saveFeedback)
     }
 
     // MARK: 口令输入（默认 SecureField 遮住；眼睛按钮切明文，与 AddProviderView 同款）
@@ -165,11 +227,20 @@ struct BridgeExternalConnectionView: View {
                 .multilineTextAlignment(.trailing)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-                // 与 API Key 字段同口径：.oneTimeCode 把这个凭据框排除在
-                // AutoFill 密码配对之外，避免系统把别的字段当用户名栏。
-                .textContentType(.oneTimeCode)
+                // 用户-P3-5：这是手动粘贴的中继口令（不是短信验证码），
+                // 用 .password 语义才对——.oneTimeCode 会让 iOS 在收到
+                // 短信验证码时把"填充验证码"塞进这个框覆盖口令。
+                // 与报问题令牌框（b38d599）同口径。
+                .textContentType(.password)
                 .submitLabel(.done)
                 .onSubmit { applyConfigChange() }
+
+                // 用户-P3-2：口令框也要显眼的保存入口。
+                Button(AppLocalized("保存")) {
+                    applyConfigChange()
+                    flashSaveFeedback(AppLocalized("已保存"))
+                }
+                .buttonStyle(.bordered)
 
                 Button {
                     showTokenPlaintext.toggle()
@@ -255,13 +326,31 @@ struct BridgeExternalConnectionView: View {
         }
     }
 
+    /// 用户-P3-2：保存反馈条——2 秒后自动收起；用 token 防多次
+    /// 连点时旧的定时器把新的提示提前掐掉。
+    private func flashSaveFeedback(_ text: String) {
+        saveFeedbackToken += 1
+        let token = saveFeedbackToken
+        saveFeedback = text
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            if token == saveFeedbackToken {
+                saveFeedback = nil
+            }
+        }
+    }
+
     /// App 重启后回到本页时：开关期望值是开、服务却没在跑，就补起一次。
+    /// 用户-P3-4：补起失败不再静默灭开关——把失败原因弹给用户，
+    /// 让她知道"为什么起不来"；开关如实反映服务真实状态（确实没
+    /// 跑起来，开关亮着才是假象），但灭开关的同时必须说清原因。
     private func restoreMCPExternal() {
         if BridgeRelayPreferences.externalMCPEnabled, !BridgeExternalMCPService.shared.isRunning {
             do {
                 try BridgeExternalMCPService.shared.ensureRunning()
             } catch {
                 BridgeRelayPreferences.externalMCPEnabled = false
+                mcpError = error.localizedDescription
             }
         }
         refreshMCPStatus()
@@ -285,10 +374,15 @@ struct BridgeExternalConnectionView: View {
     /// 保存新令牌：落钥匙串后立刻清空输入框，界面只留「已填」状态。
     private func saveGitHubToken() {
         let trimmed = githubTokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else {
+            // 用户-P3-2：空输入点保存不再静默无事，给个反馈。
+            flashSaveFeedback(AppLocalized("令牌不能为空"))
+            return
+        }
         BridgeGitHubTokenStore.save(trimmed)
         githubTokenInput = ""
         hasGitHubToken = BridgeGitHubTokenStore.hasToken
+        flashSaveFeedback(AppLocalized("已保存"))
     }
 
     private func clearGitHubToken() {
