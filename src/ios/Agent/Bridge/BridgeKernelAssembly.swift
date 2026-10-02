@@ -6,16 +6,38 @@ import BridgeCore
 /// 只负责按依赖顺序造出三件套：工具注册中心 → 小管家 → 会话管理，
 /// 并把设备能力工具组（第 19 条，DeviceTools）与报问题工具（第 21 条，
 /// ReportIssueTool，需注入 steward 取活动任务）挂进注册中心——注册是
-/// 异步的（注册中心是 actor），组装时起一个任务完成，失败只记日志、
-/// 不影响三件套本身。对外入口（CF 中转/局域网）开启是第 17、18 条的事，
-/// 不在这里。本类目前只被对外服务（BridgeExternalMCPService）在用户
-/// 于设置页开启时构造，App 现有行为零变化。
+/// 异步的（注册中心是 actor），组装时起一个任务完成；单次失败自动重试
+/// （最多 3 次，间隔 1s/2s），重试前先清掉上次注册到一半的残留；仍失败
+/// 则状态置 failed，设置页会明确提示并给重试按钮，不再显示假"运行中"。
+/// 对外入口（CF 中转/局域网）开启是第 17、18 条的事，不在这里。
+/// 本类目前只被对外服务（BridgeExternalMCPService）在用户于设置页
+/// 开启时构造，App 现有行为零变化。
+
+/// 工具注册状态（设置页展示用）：注册中 / 就绪 / 失败（带原因）。
+enum BridgeToolRegistrationState: Sendable, Equatable {
+    case registering
+    case ready
+    case failed(String)
+}
+
 final class BridgeKernelAssembly {
     let registry: ToolRegistry
     let steward: Steward
     let sessionManager: MCPSessionManager
 
     private static let logger = AppLogger(category: "BridgeAssembly")
+
+    /// 注册重试参数：最多 3 次，两次等待间隔 1s、2s。
+    private static let maxRegisterAttempts = 3
+    private static let registerRetryDelays: [UInt64] = [1_000_000_000, 2_000_000_000]
+
+    private let stateLock = NSLock()
+    private var _registrationState: BridgeToolRegistrationState = .registering
+
+    /// 当前工具注册状态（线程安全读）。
+    var toolRegistrationState: BridgeToolRegistrationState {
+        stateLock.withLock { _registrationState }
+    }
 
     init() {
         let registry = ToolRegistry()
@@ -24,20 +46,73 @@ final class BridgeKernelAssembly {
         self.steward = steward
         self.sessionManager = MCPSessionManager(registry: registry, steward: steward)
 
-        Task {
+        Task { await self.registerToolsWithRetry() }
+    }
+
+    /// 带重试的工具注册。每次重试前先注销已注册的设备工具名，保证
+    /// "上次注册到一半"不会以 duplicateName 堵死重试；报问题工具是
+    /// 单个注册，失败时注册中心里没有它，直接重跑即可。
+    private func registerToolsWithRetry() async {
+        var deviceError: Error?
+        for attempt in 1...Self.maxRegisterAttempts {
+            for name in DeviceTools.toolNames {
+                _ = await registry.unregister(name: name)
+            }
             do {
                 try await DeviceTools.registerAll(into: registry)
+                deviceError = nil
+                break
             } catch {
-                Self.logger.error("设备能力工具注册失败：\(error)")
+                deviceError = error
+                Self.logger.error("设备能力工具注册失败（第 \(attempt) 次）：\(error)")
+                if attempt < Self.maxRegisterAttempts {
+                    try? await Task.sleep(nanoseconds: Self.registerRetryDelays[attempt - 1])
+                }
             }
+        }
+        if let deviceError {
+            stateLock.withLock {
+                _registrationState = .failed("设备能力工具注册失败：\(deviceError.localizedDescription)")
+            }
+            return
+        }
+
+        var reportError: Error?
+        for attempt in 1...Self.maxRegisterAttempts {
+            _ = await registry.unregister(name: ReportIssueTool.toolName)
             do {
                 // 报问题工具（第 21 条）需要 steward 取「当时在忙什么」，
                 // 不走 DeviceTools 的无依赖注册路径，单独在这里挂。
                 try await ReportIssueTool.register(into: registry, steward: steward)
+                reportError = nil
+                break
             } catch {
-                Self.logger.error("报问题工具注册失败：\(error)")
+                reportError = error
+                Self.logger.error("报问题工具注册失败（第 \(attempt) 次）：\(error)")
+                if attempt < Self.maxRegisterAttempts {
+                    try? await Task.sleep(nanoseconds: Self.registerRetryDelays[attempt - 1])
+                }
             }
         }
+        if let reportError {
+            stateLock.withLock {
+                _registrationState = .failed("报问题工具注册失败：\(reportError.localizedDescription)")
+            }
+            return
+        }
+        stateLock.withLock { _registrationState = .ready }
+    }
+
+    /// 设置页"重试"按钮用：只在失败态重跑（就绪态重跑会撞重复注册名，
+    /// 注册中则说明已经在跑了，都直接返回）。
+    func retryToolRegistration() {
+        let shouldRun = stateLock.withLock { () -> Bool in
+            guard case .failed = _registrationState else { return false }
+            _registrationState = .registering
+            return true
+        }
+        guard shouldRun else { return }
+        Task { await self.registerToolsWithRetry() }
     }
 
     // MARK: - 主人打断（第 20 条）
