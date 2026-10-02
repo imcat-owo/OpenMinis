@@ -42,6 +42,9 @@ struct BridgeExternalConnectionView: View {
     /// 用户-P3-1：打断是 destructive 操作，先弹确认再执行。
     @State private var showInterruptConfirm = false
 
+    /// 用户-P3-3：清除令牌是不可逆的 destructive 操作，先弹确认再删。
+    @State private var showClearTokenConfirm = false
+
     /// 用户-P3-2：保存按钮的成功/失败反馈（底部短暂浮现的提示条）。
     @State private var saveFeedback: String?
     @State private var saveFeedbackToken = 0
@@ -133,7 +136,7 @@ struct BridgeExternalConnectionView: View {
                 }
                 if hasGitHubToken {
                     Button(role: .destructive) {
-                        clearGitHubToken()
+                        showClearTokenConfirm = true
                     } label: {
                         Text(AppLocalized("清除报问题令牌"))
                     }
@@ -178,6 +181,14 @@ struct BridgeExternalConnectionView: View {
             Button(AppLocalized("取消"), role: .cancel) {}
         } message: {
             Text(AppLocalized("正在跑和排队的任务都会停掉，外部 AI 会收到「主人打断」。"))
+        }
+        // 用户-P3-3：清除令牌二次确认——钥匙串条目删掉就没了，
+        // 之后报问题前要重新填。
+        .alert(AppLocalized("清除报问题令牌"), isPresented: $showClearTokenConfirm) {
+            Button(AppLocalized("清除"), role: .destructive, action: clearGitHubToken)
+            Button(AppLocalized("取消"), role: .cancel) {}
+        } message: {
+            Text(AppLocalized("报问题令牌将从本机钥匙串删除，之后报问题前需要重新填写。"))
         }
         // 用户-P3-2：保存反馈条——保存成功/失败时在底部短暂浮现，
         // 让用户明确知道"存上了"，不用靠猜。
