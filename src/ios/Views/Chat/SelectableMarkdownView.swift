@@ -2003,6 +2003,7 @@ final class CodeBlockAttachment: NSTextAttachment {
         objc_setAssociatedObject(wrapper, &Self.settleWorkKey, work, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
     }
+}
 
 // MARK: - [chat-ui] Code syntax highlighter (Kelivo-style)
 
