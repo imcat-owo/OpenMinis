@@ -293,7 +293,11 @@ final class AppearanceStudio: ObservableObject {
 
     func hasWallpaper(_ scope: AppearanceScope) -> Bool {
         if FileManager.default.fileExists(atPath: wallpaperURL(scope).path) { return true }
-        guard scope != .global, !wallpaperClearedFallback.contains(scope) else { return false }
+        // [batch7 用户-P2-7] 底部栏永不继承全局图：没专属图就是纯透明，
+        // 否则全局图会被压成一条"邮票"小图（见 ContentView.homeBottomBarBackground
+        // "默认完全透明，只有放了壁纸才出图"）。
+        guard scope != .global, scope != .bottomBar,
+              !wallpaperClearedFallback.contains(scope) else { return false }
         return FileManager.default.fileExists(atPath: wallpaperURL(.global).path)
     }
 
@@ -305,7 +309,10 @@ final class AppearanceStudio: ObservableObject {
         if let cached = wallpaperCache[scope] { return cached }
         let own = wallpaperURL(scope)
         // [T-wallpaper-clear] A cleared page never inherits the global image.
-        let fallbackURL = (scope == .global || wallpaperClearedFallback.contains(scope))
+        // [batch7 用户-P2-7] 底部栏同样永不继承：无专属图时返回 nil（纯透明），
+        // 不拿全局图来凑。
+        let fallbackURL = (scope == .global || scope == .bottomBar
+                           || wallpaperClearedFallback.contains(scope))
             ? nil : wallpaperURL(.global)
         let url = FileManager.default.fileExists(atPath: own.path)
             ? own
