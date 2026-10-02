@@ -119,6 +119,7 @@
 		BC1900000000000000000112 /* PhotosDeviceTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC1900000000000000000111 /* PhotosDeviceTool.swift */; };
 		BC1900000000000000000114 /* BluetoothDeviceTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC1900000000000000000113 /* BluetoothDeviceTool.swift */; };
 		BC1900000000000000000116 /* WebSearchBridgeTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC1900000000000000000115 /* WebSearchBridgeTool.swift */; };
+		BC1900000000000000000118 /* StewardSensitiveApprovalGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC1900000000000000000117 /* StewardSensitiveApprovalGate.swift */; };
 		BC2100000000000000000102 /* ReportIssueTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC2100000000000000000101 /* ReportIssueTool.swift */; };
 		BC1700000000000000000003 /* BridgeExternalMCPService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC1700000000000000000002 /* BridgeExternalMCPService.swift */; };
 		BC18A0000000000000000102 /* BridgeRelayProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC18A0000000000000000101 /* BridgeRelayProtocol.swift */; };
@@ -816,6 +817,7 @@
 		BC1900000000000000000111 /* PhotosDeviceTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosDeviceTool.swift; sourceTree = "<group>"; };
 		BC1900000000000000000113 /* BluetoothDeviceTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BluetoothDeviceTool.swift; sourceTree = "<group>"; };
 		BC1900000000000000000115 /* WebSearchBridgeTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchBridgeTool.swift; sourceTree = "<group>"; };
+		BC1900000000000000000117 /* StewardSensitiveApprovalGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StewardSensitiveApprovalGate.swift; sourceTree = "<group>"; };
 		BC2100000000000000000101 /* ReportIssueTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportIssueTool.swift; sourceTree = "<group>"; };
 		BC1700000000000000000002 /* BridgeExternalMCPService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeExternalMCPService.swift; sourceTree = "<group>"; };
 		BC18A0000000000000000101 /* BridgeRelayProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeRelayProtocol.swift; sourceTree = "<group>"; };
@@ -1701,6 +1703,7 @@
 				BC1900000000000000000111 /* PhotosDeviceTool.swift */,
 				BC1900000000000000000113 /* BluetoothDeviceTool.swift */,
 				BC1900000000000000000115 /* WebSearchBridgeTool.swift */,
+				BC1900000000000000000117 /* StewardSensitiveApprovalGate.swift */,
 				BC2100000000000000000101 /* ReportIssueTool.swift */,
 				BC1700000000000000000001 /* ExternalMCP */,
 				BC18A0000000000000000100 /* Relay */,
@@ -2893,6 +2896,7 @@
 				BC1900000000000000000112 /* PhotosDeviceTool.swift in Sources */,
 				BC1900000000000000000114 /* BluetoothDeviceTool.swift in Sources */,
 				BC1900000000000000000116 /* WebSearchBridgeTool.swift in Sources */,
+				BC1900000000000000000118 /* StewardSensitiveApprovalGate.swift in Sources */,
 				BC2100000000000000000102 /* ReportIssueTool.swift in Sources */,
 				BC1700000000000000000003 /* BridgeExternalMCPService.swift in Sources */,
 				BC18A0000000000000000102 /* BridgeRelayProtocol.swift in Sources */,

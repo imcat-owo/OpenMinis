@@ -2436,7 +2436,9 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
             // threshold-gated and skips already-offloaded parts).
             trimOldImagesFromHistory()
             let preCheckModel = resolveCurrentEntry()?.model ?? selectedModel
-            offloadContextIfNeeded(model: preCheckModel, lastContextTokens: turnUsage.latestContextTokens)
+            // [batch7-fix] send() 入口还没有 turnUsage（它是 agent-loop 里的局部量）；
+            // 传 0 表"无 API 基线"，offloadContextIfNeeded 会用字符估算兜底。
+            offloadContextIfNeeded(model: preCheckModel, lastContextTokens: 0)
             switch checkContextBeforeSend() {
             case .ok:
                 break
