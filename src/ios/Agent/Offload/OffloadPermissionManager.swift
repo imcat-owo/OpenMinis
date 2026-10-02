@@ -131,6 +131,9 @@ final class OffloadPermissionManager: ObservableObject {
         .init(name: "apple-location", displayLabel: "Location", description: "Current GPS coordinates and location history", category: .privacy, showInSettings: true),
         .init(name: "apple-homekit", displayLabel: "HomeKit", description: "Smart home devices, rooms, and scenes", category: .privacy, showInSettings: true),
         .init(name: "apple-clipboard", displayLabel: "Clipboard", description: "Text and images copied to the clipboard", category: .privacy, showInSettings: true),
+        // [batch7 用户-P2-1] 蓝牙 BLE：扫描附近设备、连接并读写特征——隐私敏感，
+        // 登记进权限表后，聊天流与桥管线（OffloadToolRunner）都会走权限关卡。
+        .init(name: "apple-bluetooth", displayLabel: "Bluetooth", description: "BLE 扫描、连接并读写附近蓝牙设备", category: .privacy, showInSettings: true),
         // Media — no personal data, always bypass
         .init(name: "apple-speak", displayLabel: "Speak", description: "", category: .media, showInSettings: false),
         .init(name: "apple-speech", displayLabel: "Speech", description: "", category: .media, showInSettings: false),

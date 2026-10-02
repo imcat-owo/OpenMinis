@@ -219,7 +219,7 @@ static BOOL requestCalendarAccess(NSString **outError) {
         NSString *reason = authError.localizedDescription ?: @"Calendar access not granted";
         *outError = [NSString stringWithFormat:
             @"%@. To grant access, open Settings > Privacy & Security > Calendars "
-             "and enable 我的小家.", reason];
+             "and enable 分身版.", reason];
     }
     return granted;
 }
@@ -254,7 +254,7 @@ static BOOL requestRemindersAccess(NSString **outError) {
         NSString *reason = authError.localizedDescription ?: @"Reminders access not granted";
         *outError = [NSString stringWithFormat:
             @"%@. To grant access, open Settings > Privacy & Security > Reminders "
-             "and enable 我的小家.", reason];
+             "and enable 分身版.", reason];
     }
     return granted;
 }
@@ -1214,7 +1214,7 @@ static BOOL reminders_location_auth(NSString **errMsg) {
     if (errMsg) {
         *errMsg = @"Location access is required for location-based reminders. "
                    "To grant access, open Settings > Privacy & Security > "
-                   "Location Services and enable 我的小家. "
+                   "Location Services and enable 分身版. "
                    "Time-based reminders (--due) work without location access.";
     }
     return NO;

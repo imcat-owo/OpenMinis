@@ -34,6 +34,10 @@ struct BridgeExternalConnectionView: View {
     @State private var stewardStatusText: String = ""
     @State private var hasActiveStewardTask: Bool = false
 
+    /// 桥工具注册状态（批七 P2-4）：页面在屏时随小管家状态一起轮询刷新。
+    @State private var toolRegText: String = ""
+    @State private var toolRegFailed: Bool = false
+
     /// GitHub 报问题令牌（第 21 条）：输入框只收新令牌，已存的只显示
     /// 已填/未填，绝不把钥匙串里的明文读回界面。
     @State private var githubTokenInput: String = ""
@@ -71,6 +75,20 @@ struct BridgeExternalConnectionView: View {
                     LabeledContent(AppLocalized("小管家")) {
                         Text(stewardStatusText)
                             .foregroundStyle(.secondary)
+                    }
+                    // 批七 P2-4：工具注册失败不再只记日志——这里明确提示，
+                    // 不让"运行中"掩盖工具没挂上的事实。
+                    LabeledContent(AppLocalized("工具注册")) {
+                        Text(toolRegText)
+                            .foregroundStyle(toolRegFailed ? .red : .secondary)
+                    }
+                    if toolRegFailed {
+                        Button {
+                            BridgeExternalMCPService.shared.retryToolRegistration()
+                            Task { await refreshToolRegistration() }
+                        } label: {
+                            Text(AppLocalized("重试注册工具"))
+                        }
                     }
                     if hasActiveStewardTask {
                         Button(role: .destructive) {
@@ -190,6 +208,7 @@ struct BridgeExternalConnectionView: View {
         .task {
             while !Task.isCancelled {
                 await refreshStewardStatus()
+                await refreshToolRegistration()
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
             }
         }
@@ -487,5 +506,26 @@ struct BridgeExternalConnectionView: View {
     private func interruptSteward() async {
         _ = await BridgeExternalMCPService.shared.interruptStewardTasksByOwner()
         await refreshStewardStatus()
+    }
+
+    /// 工具注册状态刷新（批七 P2-4）：服务没在跑就不显示该行；
+    /// 注册失败时红字报原因，并露出"重试注册工具"按钮。
+    private func refreshToolRegistration() async {
+        guard let state = BridgeExternalMCPService.shared.toolRegistrationState() else {
+            toolRegText = ""
+            toolRegFailed = false
+            return
+        }
+        switch state {
+        case .registering:
+            toolRegText = AppLocalized("注册中…")
+            toolRegFailed = false
+        case .ready:
+            toolRegText = AppLocalized("就绪")
+            toolRegFailed = false
+        case .failed(let reason):
+            toolRegText = AppLocalized("注册失败：\(reason)")
+            toolRegFailed = true
+        }
     }
 }

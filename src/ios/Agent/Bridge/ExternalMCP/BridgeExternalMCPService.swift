@@ -112,4 +112,18 @@ public final class BridgeExternalMCPService: @unchecked Sendable {
         guard let current else { return 0 }
         return await current.interruptStewardTasksByOwner().count
     }
+
+    // MARK: - 工具注册状态（批七 P2-4，设置页用）
+
+    /// 桥工具注册状态；服务未运行时为 nil。
+    public func toolRegistrationState() -> BridgeToolRegistrationState? {
+        let current: BridgeKernelAssembly? = lock.withLock { assembly }
+        return current?.toolRegistrationState
+    }
+
+    /// 工具注册失败后的手动重试；服务未运行或状态不是失败时无操作。
+    public func retryToolRegistration() {
+        let current: BridgeKernelAssembly? = lock.withLock { assembly }
+        current?.retryToolRegistration()
+    }
 }

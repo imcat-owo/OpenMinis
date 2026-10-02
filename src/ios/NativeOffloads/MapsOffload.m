@@ -138,6 +138,27 @@ static MKDirectionsTransportType transport_type_for_mode(NSString *mode) {
     self.error = error;
     dispatch_semaphore_signal(self.semaphore);
 }
+/// [batch7 用户-P2-7] 授权变化回调：用户在系统弹窗上晚点"允许"，
+/// 这里收到 authorized 就立刻发起定位请求——不再靠 2 秒后无条件
+/// requestLocation 碰运气；用户点了"不允许"则直接报错收尾，
+/// 不用等满 15 秒超时。
+- (void)locationManagerDidChangeAuthorization:(CLLocationManager *)manager {
+    CLAuthorizationStatus status = manager.authorizationStatus;
+    if (status == kCLAuthorizationStatusAuthorizedWhenInUse ||
+        status == kCLAuthorizationStatusAuthorizedAlways) {
+        [manager requestLocation];
+    } else if (status == kCLAuthorizationStatusDenied ||
+               status == kCLAuthorizationStatusRestricted) {
+        self.error = [NSError errorWithDomain:@"NativeOffload" code:3
+                           userInfo:@{NSLocalizedDescriptionKey:
+                               @"Location access denied. To grant access, open "
+                                "Settings > Privacy & Security > Location Services "
+                                "and enable 分身版 — or pass --lat/--lon to search "
+                                "around a specific point."}];
+        dispatch_semaphore_signal(self.semaphore);
+    }
+    // NotDetermined：等用户在弹窗上作答，不做任何事。
+}
 @end
 
 /// One-shot current location. On failure returns nil and sets *outError to
@@ -153,11 +174,10 @@ static CLLocation *current_location_sync(NSError **outError) {
 
         CLAuthorizationStatus status = manager.authorizationStatus;
         if (status == kCLAuthorizationStatusNotDetermined) {
+            // [batch7 用户-P2-7] 只弹授权框，不再 2 秒后无条件 requestLocation：
+            // 用户作答后走上面的 locationManagerDidChangeAuthorization 回调，
+            // 晚点了"允许"也会触发新的定位请求。
             [manager requestWhenInUseAuthorization];
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC),
-                           dispatch_get_main_queue(), ^{
-                [manager requestLocation];
-            });
         } else if (status == kCLAuthorizationStatusAuthorizedWhenInUse ||
                    status == kCLAuthorizationStatusAuthorizedAlways) {
             [manager requestLocation];
@@ -166,7 +186,7 @@ static CLLocation *current_location_sync(NSError **outError) {
                                userInfo:@{NSLocalizedDescriptionKey:
                                    @"Location access denied. To grant access, open "
                                     "Settings > Privacy & Security > Location Services "
-                                    "and enable 我的小家 — or pass --lat/--lon to search "
+                                    "and enable 分身版 — or pass --lat/--lon to search "
                                     "around a specific point."}];
             dispatch_semaphore_signal(delegate.semaphore);
         }

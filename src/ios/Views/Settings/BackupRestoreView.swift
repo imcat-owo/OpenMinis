@@ -3,6 +3,40 @@ import UniformTypeIdentifiers
 
 private let logger = AppLogger(category: "Backup")
 
+// MARK: - 批七 P2-6：备份种类标注
+//
+// 恢复选择器行标注，让主人恢复前就知道区别：
+//   自动快照（不含 API Key）——快照服务的设计：凭据不进快照；
+//   手动备份（含凭据·加密）——带凭据的包必须加密（导出器硬规矩，见
+//     BackupExporter.exportBody 的 guard），加密包名带 `-encrypted` 后缀；
+//   手动备份（不含凭据）——未加密的手动包，按同一硬规矩不可能带凭据。
+//
+// 快照判定以快照台账（snapshot-manifest.json）为准：文件名前缀可伪造，
+// 台账是快照服务自己写下的才可信（见 BackupSnapshotService.listSnapshots）。
+// 服务器选择器够不到远端台账，那里退化为文件名前缀启发式（见调用处注释）。
+
+/// 备份包种类（恢复选择器标注用）。
+enum RestorePackageKind {
+    case snapshot
+    case manualEncrypted
+    case manualPlain
+
+    var label: String {
+        switch self {
+        case .snapshot: "自动快照（不含 API Key）"
+        case .manualEncrypted: "手动备份（含凭据·加密）"
+        case .manualPlain: "手动备份（不含凭据）"
+        }
+    }
+}
+
+/// fileName: 包文件名；isSnapshot: 是否被认定为自动快照（本地用台账，远端用前缀启发式）。
+func restorePackageKind(fileName: String, isSnapshot: Bool) -> RestorePackageKind {
+    if isSnapshot { return .snapshot }
+    if fileName.contains("-encrypted.") { return .manualEncrypted }
+    return .manualPlain
+}
+
 /// User-facing restore flow (docs/backup-restore-design.md §8.1).
 ///
 /// Follows the documented order exactly: pick a package → read its manifest and
@@ -823,6 +857,8 @@ struct FolderPackageListView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var packages: [BackupDestinations.FoundPackage] = []
     @State private var loading = true
+    /// 批七 P2-6：本目录快照台账里的包 URL（权威判定"自动快照"用）。
+    @State private var snapshotURLs: Set<URL> = []
 
     var body: some View {
         List {
@@ -873,7 +909,9 @@ struct FolderPackageListView: View {
                             .lineLimit(1)
                             .truncationMode(.middle)
                             .foregroundStyle(.primary)
-                        Text("\(ByteCountFormatter.string(fromByteCount: pkg.size, countStyle: .file)) · \(pkg.modified.formatted(date: .abbreviated, time: .shortened))")
+                        // 批七 P2-6：种类标注打头——自动快照/手动备份（含凭据·加密）
+                        // /手动备份（不含凭据），恢复前先看清。
+                        Text("\(restorePackageKind(fileName: pkg.url.lastPathComponent, isSnapshot: snapshotURLs.contains(pkg.url)).label) · \(ByteCountFormatter.string(fromByteCount: pkg.size, countStyle: .file)) · \(pkg.modified.formatted(date: .abbreviated, time: .shortened))")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -901,6 +939,15 @@ struct FolderPackageListView: View {
             BackupDestinations.listPackages(folderId: id)
         }.value
         packages = found
+        // 批七 P2-6：读本目录的快照台账，权威判定哪些是自动快照。
+        // 快照只存在本机，NAS 目录没有台账时就是空集，全按手动备份标。
+        // listSnapshots 是 @MainActor 隔离的，这里显式回到主线程读。
+        let dir = found.first?.url.deletingLastPathComponent()
+        let snapURLs: Set<URL> = await MainActor.run {
+            guard let dir else { return Set<URL>() }
+            return Set(BackupSnapshotService.listSnapshots(in: dir).map(\.url))
+        }
+        snapshotURLs = snapURLs
         loading = false
     }
 }
@@ -1378,7 +1425,12 @@ struct ServerPackageListView: View {
     }
 
     private func subtitle(_ pkg: RcloneTransfer.RemotePackage) -> String {
-        var bits = [ByteCountFormatter.string(fromByteCount: pkg.size, countStyle: .file)]
+        // 批七 P2-6：种类标注打头。远端够不到快照台账，快照判定退化为
+        // 文件名前缀启发式（本地选择器用台账权威判定）；加密判定看 -encrypted 后缀。
+        let kind = restorePackageKind(
+            fileName: pkg.displayName,
+            isSnapshot: pkg.displayName.hasPrefix(BackupSnapshotService.filePrefix))
+        var bits = [kind.label, ByteCountFormatter.string(fromByteCount: pkg.size, countStyle: .file)]
         if let m = pkg.modified {
             bits.append(m.formatted(date: .abbreviated, time: .shortened))
         }

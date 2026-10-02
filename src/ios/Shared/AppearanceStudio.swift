@@ -293,7 +293,11 @@ final class AppearanceStudio: ObservableObject {
 
     func hasWallpaper(_ scope: AppearanceScope) -> Bool {
         if FileManager.default.fileExists(atPath: wallpaperURL(scope).path) { return true }
-        guard scope != .global, !wallpaperClearedFallback.contains(scope) else { return false }
+        // [batch7 用户-P2-9] 底部栏永不继承全局图：没专属图就是纯透明，
+        // 否则全局图会被压成一条"邮票"小图（见 ContentView.homeBottomBarBackground
+        // "默认完全透明，只有放了壁纸才出图"）。
+        guard scope != .global, scope != .bottomBar,
+              !wallpaperClearedFallback.contains(scope) else { return false }
         return FileManager.default.fileExists(atPath: wallpaperURL(.global).path)
     }
 
@@ -305,7 +309,10 @@ final class AppearanceStudio: ObservableObject {
         if let cached = wallpaperCache[scope] { return cached }
         let own = wallpaperURL(scope)
         // [T-wallpaper-clear] A cleared page never inherits the global image.
-        let fallbackURL = (scope == .global || wallpaperClearedFallback.contains(scope))
+        // [batch7 用户-P2-9] 底部栏同样永不继承：无专属图时返回 nil（纯透明），
+        // 不拿全局图来凑。
+        let fallbackURL = (scope == .global || scope == .bottomBar
+                           || wallpaperClearedFallback.contains(scope))
             ? nil : wallpaperURL(.global)
         let url = FileManager.default.fileExists(atPath: own.path)
             ? own
@@ -346,6 +353,27 @@ final class AppearanceStudio: ObservableObject {
         persistWallpaperCleared()
         wallpaperCache.removeAll()
         wallpaperRevision += 1
+    }
+
+    /// [batch7 用户-P2-11] 恢复对齐：清除标记为准。恢复是 merge 语义（包里
+    /// 没提的文件原位保留），但清除标记恢复回来后、标记对应的本机壁纸文件
+    /// 若还在，"清除"就被悄悄撤销、标记变死标记。所以：包里没带某 scope
+    /// 壁纸文件、清除标记里却有它时，把本机残留的该文件删掉；包里带了的
+    /// scope 不动（显式内容优先）。
+    func reconcileClearedWallpapersAfterRestore(packagedScopes: Set<AppearanceScope>) {
+        var removed = false
+        for scope in wallpaperClearedFallback where scope != .global {
+            guard !packagedScopes.contains(scope) else { continue }
+            let url = wallpaperURL(scope)
+            if FileManager.default.fileExists(atPath: url.path) {
+                try? FileManager.default.removeItem(at: url)
+                removed = true
+            }
+        }
+        if removed {
+            wallpaperCache.removeAll()
+            wallpaperRevision += 1
+        }
     }
 
     private func persistWallpaperCleared() {
@@ -462,21 +490,43 @@ final class AppearanceStudio: ObservableObject {
     /// Runs once; the UserDefaults key is removed afterwards.
     /// Static because init calls it before all stored properties are
     /// initialized; it only touches UserDefaults and the icons directory.
+    ///
+    /// [batch7 用户-P2-12] 原子化：全部文件写完才删旧键、打已迁移标记。
+    /// 中途任何一张写失败（目录建不出来、编码失败、落盘抛错）都不删键、
+    /// 不打标记，下次启动重跑——不再是"defer 无条件清掉 + try? 静默吞错"。
     private static func migrateCustomIconsFromUserDefaults() {
         guard !UserDefaults.standard.bool(forKey: Self.customIconsMigratedKey) else { return }
-        defer {
-            UserDefaults.standard.removeObject(forKey: Keys.icons)
+        guard let data = UserDefaults.standard.data(forKey: Keys.icons) else {
+            // 从来没有旧 blob：无事可做，直接标记完成。
             UserDefaults.standard.set(true, forKey: Self.customIconsMigratedKey)
+            return
         }
-        guard let data = UserDefaults.standard.data(forKey: Keys.icons),
-              let value = try? JSONDecoder().decode([String: String].self, from: data),
+        // 旧 blob 存在但解不开：不删、不标记，留着证据等以后处理，
+        // 不像以前那样 defer 一把清掉。
+        guard let value = try? JSONDecoder().decode([String: String].self, from: data),
               !value.isEmpty else { return }
-        try? FileManager.default.createDirectory(at: customIconsDirectoryURL,
-                                                 withIntermediateDirectories: true)
-        for (id, uri) in value {
-            guard let png = SoulIconImage.pngData(from: uri) else { continue }
-            try? png.write(to: customIconFileURL(for: id), options: .atomic)
+        do {
+            try FileManager.default.createDirectory(at: customIconsDirectoryURL,
+                                                    withIntermediateDirectories: true)
+        } catch {
+            return // 目录都建不出来：下次启动重试。
         }
+        var failed = false
+        for (id, uri) in value {
+            guard let png = SoulIconImage.pngData(from: uri) else {
+                failed = true
+                continue
+            }
+            do {
+                try png.write(to: customIconFileURL(for: id), options: .atomic)
+            } catch {
+                failed = true
+            }
+        }
+        // 有一张没写完就不算完：旧键和标记都留着，下次启动重跑。
+        guard !failed else { return }
+        UserDefaults.standard.removeObject(forKey: Keys.icons)
+        UserDefaults.standard.set(true, forKey: Self.customIconsMigratedKey)
     }
 
     private static func loadCustomIconsFromDisk() -> [String: String] {
@@ -627,10 +677,23 @@ struct AppearanceBackdrop: View {
         ZStack {
             studio.color(.canvas, scope: scope)
             if let image = studio.wallpaper(for: scope) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .clipped()
+                // [batch7 用户-P2-10] 底部栏预览必须和真机渲染一致：
+                // 真机（ContentView.homeBottomBarBackground）是 scaledToFit +
+                // clipped 全幅贴底，预览用 scaledToFill 会骗人。只改预览，
+                // 不动真机已定的效果。
+                if scope == .bottomBar {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipped()
+                        .ignoresSafeArea(edges: .bottom)
+                } else {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .clipped()
+                }
                 studio.color(.canvas, scope: scope)
                     .opacity(studio.wallpaperShade)
             }
