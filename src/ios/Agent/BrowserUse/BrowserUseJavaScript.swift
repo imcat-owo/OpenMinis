@@ -143,7 +143,9 @@ enum BrowserUseJS {
                     viewportHeight: window.innerHeight
                 };
                 console.log('[getText selector] debug:', JSON.stringify(debug));
-                return JSON.stringify({text: text, length: text.length, debug: debug});
+                // [AI-P2-9] Hoist url/title to the top level — the native side
+                // only reads top-level keys; they used to hide inside `debug`.
+                return JSON.stringify({text: text, length: text.length, url: location.href, title: document.title, debug: debug});
             })()
             """
         }
@@ -175,7 +177,9 @@ enum BrowserUseJS {
                 title: document.title
             };
             console.log('[getText body] debug:', JSON.stringify(debug));
-            return JSON.stringify({text: text, length: text.length, debug: debug});
+            // [AI-P2-9] Hoist url/title to the top level — the native side
+            // only reads top-level keys; they used to hide inside `debug`.
+            return JSON.stringify({text: text, length: text.length, url: location.href, title: document.title, debug: debug});
         })()
         """
     }

@@ -2325,9 +2325,18 @@ final class BrowserUseManager: NSObject, ObservableObject {
             }
         }
         // getText results
+        // [AI-P2-9] url/title now ride top-level in the getText JSON (hoisted
+        // from `debug` in BrowserUseJavaScript). Render both so the model
+        // knows which page this text came from — the old code only looked
+        // for a top-level `title` that was never there, and the URL was
+        // invisible. The vendor wire conversions drop the toolResult
+        // pageURL field, so this text layer is the channel that survives.
         else if let text = json["text"] as? String, json["length"] != nil {
             if let title = json["title"] as? String, !title.isEmpty {
                 lines.append("Title: \(title)")
+            }
+            if let url = json["url"] as? String, !url.isEmpty {
+                lines.append("来源：\(url)")
             }
             let len = json["length"] as? Int ?? text.count
             lines.append("Text (\(len) chars):")

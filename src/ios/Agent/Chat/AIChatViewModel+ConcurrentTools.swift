@@ -631,6 +631,16 @@ extension AIChatViewModel {
             toolOutput = browserResult.text
             toolSuccess = browserResult.success
             toolPageURL = browserResult.pageURL
+            // [AI-P2-9] The toolResult pageURL field is dropped by the vendor
+            // wire conversions (tool_result has no URL slot on the wire), so
+            // surface it in the result text — one place covering all vendors.
+            // Skipped when a 来源 line is already present (e.g. getText
+            // renders its own above). Appended at the end so browser_use's
+            // prefix+suffix truncation keeps it.
+            if let pageURL = browserResult.pageURL, !pageURL.isEmpty,
+               !toolOutput.contains("来源：") {
+                toolOutput += "\n来源：\(pageURL)"
+            }
             if let b64 = browserResult.base64Image, let data = Data(base64Encoded: b64) {
                 // [IMG-10] Same gate as read_image, soft oversize policy:
                 // screenshots are app-produced, so an over-ceiling capture
