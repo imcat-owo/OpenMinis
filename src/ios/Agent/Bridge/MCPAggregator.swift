@@ -176,7 +176,7 @@ actor MCPAggregator {
             let toolName = entry.toolName
             do {
                 try await registry.register(descriptor: entry.descriptor) { arguments in
-                    await Self.call(serverId: serverId, toolName: toolName, arguments: arguments)
+                    try await Self.call(serverId: serverId, toolName: toolName, arguments: arguments)
                 }
             } catch {
                 Self.logger.warning("注册聚合工具 \(qname) 失败：\(error)")
