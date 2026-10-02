@@ -5557,7 +5557,11 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
             fallbackReasons.removeAll()
             // Phase B: route through effectiveAgentHistory() so compact summary is
             // synthesized at inference time instead of baked into agentHistory.
-            let contextHistory = effectiveAgentHistory()
+            // [AI-P2-1] First round used to skip the request image budget that
+            // every later round applies — wrap it here so round 1 sends the
+            // same budgeted history and can't blow past the image byte cap
+            // that later rounds respect.
+            let contextHistory = applyRequestImageBudget(effectiveAgentHistory())
             // [T-msgidx-oob] Re-resync before subscripting. The loop-top resync
             // (~line 4698) is not sufficient for this site: the in-loop
             // compaction guard above runs `await compactBefore(...)` in between,
