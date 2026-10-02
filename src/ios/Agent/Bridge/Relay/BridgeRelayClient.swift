@@ -82,6 +82,13 @@ final class BridgeRelayClient: NSObject, ObservableObject {
     private override init() {
         super.init()
         isEnabled = BridgeRelayPreferences.relayEnabled
+        syncKeepAliveDemand()
+    }
+
+    /// PM-P1-2：把中继连接注册成保活要保的对象——开关开着就保，
+    /// 不管有没有聊天会话。关开关 / App 侧停掉时撤回。
+    private func syncKeepAliveDemand() {
+        BackgroundKeepAliveManager.shared.relayKeepAliveNeeded = isEnabled
     }
 
     // MARK: - 对外开关与生命周期
@@ -90,6 +97,7 @@ final class BridgeRelayClient: NSObject, ObservableObject {
     func setEnabled(_ on: Bool) {
         BridgeRelayPreferences.relayEnabled = on
         isEnabled = on
+        syncKeepAliveDemand()
         if on {
             startConnecting()
         } else {
@@ -118,6 +126,7 @@ final class BridgeRelayClient: NSObject, ObservableObject {
     /// 设置页出现时调用：把持久化的开关值同步进来，开着且离线就连上。
     func restoreFromPreferences() {
         isEnabled = BridgeRelayPreferences.relayEnabled
+        syncKeepAliveDemand()
         if isEnabled, state == .offline {
             startConnecting()
         }
