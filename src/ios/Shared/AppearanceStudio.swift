@@ -293,7 +293,7 @@ final class AppearanceStudio: ObservableObject {
 
     func hasWallpaper(_ scope: AppearanceScope) -> Bool {
         if FileManager.default.fileExists(atPath: wallpaperURL(scope).path) { return true }
-        // [batch7 用户-P2-7] 底部栏永不继承全局图：没专属图就是纯透明，
+        // [batch7 用户-P2-9] 底部栏永不继承全局图：没专属图就是纯透明，
         // 否则全局图会被压成一条"邮票"小图（见 ContentView.homeBottomBarBackground
         // "默认完全透明，只有放了壁纸才出图"）。
         guard scope != .global, scope != .bottomBar,
@@ -309,7 +309,7 @@ final class AppearanceStudio: ObservableObject {
         if let cached = wallpaperCache[scope] { return cached }
         let own = wallpaperURL(scope)
         // [T-wallpaper-clear] A cleared page never inherits the global image.
-        // [batch7 用户-P2-7] 底部栏同样永不继承：无专属图时返回 nil（纯透明），
+        // [batch7 用户-P2-9] 底部栏同样永不继承：无专属图时返回 nil（纯透明），
         // 不拿全局图来凑。
         let fallbackURL = (scope == .global || scope == .bottomBar
                            || wallpaperClearedFallback.contains(scope))
@@ -491,7 +491,7 @@ final class AppearanceStudio: ObservableObject {
     /// Static because init calls it before all stored properties are
     /// initialized; it only touches UserDefaults and the icons directory.
     ///
-    /// [batch7 用户-P2-10] 原子化：全部文件写完才删旧键、打已迁移标记。
+    /// [batch7 用户-P2-12] 原子化：全部文件写完才删旧键、打已迁移标记。
     /// 中途任何一张写失败（目录建不出来、编码失败、落盘抛错）都不删键、
     /// 不打标记，下次启动重跑——不再是"defer 无条件清掉 + try? 静默吞错"。
     private static func migrateCustomIconsFromUserDefaults() {
