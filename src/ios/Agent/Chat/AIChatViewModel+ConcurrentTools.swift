@@ -1054,7 +1054,11 @@ extension AIChatViewModel {
         // so other sessions can see it in /var/minis/shared/events.jsonl.
         // The output excerpt goes through SharedEventLog.redact().
         let toolDur = toolDuration ?? 0
-        if SharedEventLog.heavyToolNames.contains(tu.name) || toolDur >= SharedEventLog.heavyDurationThreshold {
+        // 轻量工具平时不记，但失败了要记——跨会话排障时"谁挂了"
+        // 比"谁跑得久"更重要（AI-P2-13）。
+        if !toolSuccess
+            || SharedEventLog.heavyToolNames.contains(tu.name)
+            || toolDur >= SharedEventLog.heavyDurationThreshold {
             let outcome = cancelledHere ? "cancelled" : (toolSuccess ? "ok" : "failed")
             let firstLine = toolOutput.components(separatedBy: "\n").first?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

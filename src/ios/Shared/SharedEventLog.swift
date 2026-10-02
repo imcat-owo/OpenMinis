@@ -92,25 +92,36 @@ final class SharedEventLog {
 
     // MARK: - reading (merge s21: report_issue 附上下文用)
 
-    /// 最近 `limit` 条事件，格式化成 "[时间] 事件名 — 摘要" 文本行
-    /// （保持日志原有先后顺序）。读不到文件返回空数组。
+    /// 最近 `limit` 条、且在 `within` 时间窗口内（默认 1 小时）的事件，
+    /// 格式化成 "[时间] 事件名 @会话 — 摘要" 文本行（保持日志原有先后顺序）。
+    /// 读不到文件返回空数组。时间戳解析失败的老行不丢（解析失败不等于过期）。
     /// 走同一条串行队列读，与写入互斥，不会读到写一半的行；
     /// 日记内容落盘时已脱敏，这里只做格式化、不再加工原文。
-    func recentEntries(limit: Int = 20) -> [String] {
-        queue.sync { readRecentEntries(limit: limit) }
+    func recentEntries(limit: Int = 20, within: TimeInterval = 3600) -> [String] {
+        queue.sync { readRecentEntries(limit: limit, within: within) }
     }
 
-    private func readRecentEntries(limit: Int) -> [String] {
+    private func readRecentEntries(limit: Int, within: TimeInterval) -> [String] {
         guard limit > 0,
               let data = try? Data(contentsOf: logURL),
               let text = String(data: data, encoding: .utf8) else { return [] }
+        let cutoff = Date().addingTimeInterval(-within)
         return text.split(separator: "\n").suffix(limit).compactMap { line in
             guard let lineData = line.data(using: .utf8),
                   let obj = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
                   let ts = obj["ts"] as? String,
                   let event = obj["event"] as? String else { return nil }
+            // 时间窗口：窗口外的条目不要；时间戳解析失败的老行保留。
+            if let date = Self.iso.date(from: ts), date < cutoff { return nil }
             let summary = obj["summary"] as? String ?? ""
-            return "[\(ts)] \(event) — \(summary)"
+            // session 字段是跨会话排障的线索，格式化时保留。
+            let who: String
+            if let session = obj["session"] as? String, !session.isEmpty {
+                who = " @\(session)"
+            } else {
+                who = ""
+            }
+            return "[\(ts)] \(event)\(who) — \(summary)"
         }
     }
 
