@@ -186,7 +186,7 @@ static CLLocation *current_location_sync(NSError **outError) {
                                userInfo:@{NSLocalizedDescriptionKey:
                                    @"Location access denied. To grant access, open "
                                     "Settings > Privacy & Security > Location Services "
-                                    "and enable 我的小家 — or pass --lat/--lon to search "
+                                    "and enable 分身版 — or pass --lat/--lon to search "
                                     "around a specific point."}];
             dispatch_semaphore_signal(delegate.semaphore);
         }

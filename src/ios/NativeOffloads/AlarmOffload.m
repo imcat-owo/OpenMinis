@@ -171,10 +171,10 @@ static BOOL ensureAuthorization(int stdout_fd, NSString *action, BOOL compact, B
     if (!authorized) {
         NSString *msg = authError
             ? [NSString stringWithFormat:@"AlarmKit authorization failed: %@. "
-                "To grant access, open Settings > Privacy & Security > Alarms and enable 我的小家.",
+                "To grant access, open Settings > Privacy & Security > Alarms and enable 分身版.",
                 authError.localizedDescription]
             : @"AlarmKit authorization denied. "
-               "To grant access, open Settings > Privacy & Security > Alarms and enable 我的小家.";
+               "To grant access, open Settings > Privacy & Security > Alarms and enable 分身版.";
         NSDictionary *err = noff_json_error(TOOL_NAME, action,
                                              NOFF_ERR_AUTHORIZATION_DENIED, msg);
         noff_emit_json(stdout_fd, err, compact, quiet);

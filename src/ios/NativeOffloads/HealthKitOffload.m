@@ -387,7 +387,7 @@ static BOOL requestHealthKitAccess(NSSet<HKObjectType *> *readTypes,
     if (!granted && outError) {
         NSString *reason = authError.localizedDescription ?: @"HealthKit access not granted";
         *outError = [NSString stringWithFormat:
-            @"%@. To grant access, open Settings > Health > Data Access & Devices > 我的小家 "
+            @"%@. To grant access, open Settings > Health > Data Access & Devices > 分身版 "
              "and enable the required categories.", reason];
     }
     return granted;
@@ -2925,7 +2925,7 @@ static int cmd_log_blood_pressure(int argc, char **argv, int stdout_fd, BOOL com
         NSString *msg = saveErr.localizedDescription ?: @"Failed to save blood-pressure correlation";
         if (authDenied) {
             msg = [NSString stringWithFormat:
-                @"%@. Open Settings > Health > Data Access & Devices > 我的小家 "
+                @"%@. Open Settings > Health > Data Access & Devices > 分身版 "
                  "and enable write access for 'Blood Pressure', then retry.", msg];
         }
         noff_emit_json(stdout_fd, noff_json_error(TOOL_NAME, @"log-blood-pressure",
@@ -3037,7 +3037,7 @@ static int cmd_log(int argc, char **argv, int stdout_fd, int stderr_fd, BOOL com
             NSString *msg = saveErr.localizedDescription ?: @"Failed to save sample";
             if (authDenied) {
                 msg = [NSString stringWithFormat:
-                    @"%@. Open Settings > Health > Data Access & Devices > 我的小家 "
+                    @"%@. Open Settings > Health > Data Access & Devices > 分身版 "
                      "and enable write access for '%@', then retry.", msg, typeName];
             }
             noff_emit_json(stdout_fd, noff_json_error(TOOL_NAME, @"log",
@@ -3120,7 +3120,7 @@ static int cmd_log(int argc, char **argv, int stdout_fd, int stderr_fd, BOOL com
             NSString *msg = saveErr.localizedDescription ?: @"Failed to save category sample";
             if (authDenied) {
                 msg = [NSString stringWithFormat:
-                    @"%@. Open Settings > Health > Data Access & Devices > 我的小家 "
+                    @"%@. Open Settings > Health > Data Access & Devices > 分身版 "
                      "and enable write access for '%@', then retry.", msg, typeName];
             }
             noff_emit_json(stdout_fd, noff_json_error(TOOL_NAME, @"log",
@@ -3315,7 +3315,7 @@ static int cmd_delete(int argc, char **argv, int stdout_fd, int stderr_fd, BOOL 
         NSString *msg = deleteErr.localizedDescription ?: @"Failed to delete samples";
         if (authDenied) {
             msg = [NSString stringWithFormat:
-                @"%@. Open Settings > Health > Data Access & Devices > 我的小家 "
+                @"%@. Open Settings > Health > Data Access & Devices > 分身版 "
                  "and enable write access for '%@', then retry.", msg, typeName];
         }
         noff_emit_json(stdout_fd, noff_json_error(TOOL_NAME, @"delete",
