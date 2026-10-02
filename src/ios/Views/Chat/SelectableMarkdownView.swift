@@ -1471,7 +1471,9 @@ final class CodeBlockAttachment: NSTextAttachment {
     }
 
     static func setCollapseState(fingerprint fp: Int, collapsed: Bool, manual: Bool) {
-        if collapseState.count > 400 { collapseState.removeFirst() }
+        if collapseState.count > 400, let oldest = collapseState.keys.first {
+            collapseState.removeValue(forKey: oldest)
+        }
         collapseState[fp] = collapsed
         if manual {
             if manualCollapse.count > 400 { manualCollapse.removeFirst() }
