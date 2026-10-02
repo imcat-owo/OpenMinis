@@ -145,7 +145,9 @@ enum BrowserUseJS {
                 console.log('[getText selector] debug:', JSON.stringify(debug));
                 // [AI-P2-9] Hoist url/title to the top level — the native side
                 // only reads top-level keys; they used to hide inside `debug`.
-                return JSON.stringify({text: text, length: text.length, url: location.href, title: document.title, debug: debug});
+                // [AI-P3-12] `length` is the PRE-truncation count so the native
+                // side can tell the model when the 10000-char cap cut text.
+                return JSON.stringify({text: text, length: innerTextVal.length, url: location.href, title: document.title, debug: debug});
             })()
             """
         }
@@ -179,7 +181,9 @@ enum BrowserUseJS {
             console.log('[getText body] debug:', JSON.stringify(debug));
             // [AI-P2-9] Hoist url/title to the top level — the native side
             // only reads top-level keys; they used to hide inside `debug`.
-            return JSON.stringify({text: text, length: text.length, url: location.href, title: document.title, debug: debug});
+            // [AI-P3-12] `length` is the PRE-truncation count so the native
+            // side can tell the model when the 10000-char cap cut text.
+            return JSON.stringify({text: text, length: innerTextVal.length, url: location.href, title: document.title, debug: debug});
         })()
         """
     }

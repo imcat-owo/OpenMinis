@@ -2376,8 +2376,17 @@ final class BrowserUseManager: NSObject, ObservableObject {
             if let url = json["url"] as? String, !url.isEmpty {
                 lines.append("来源：\(url)")
             }
+            // [AI-P3-12] The JS caps getText at 10000 chars and `length` now
+            // carries the pre-truncation count — when the cap cut text, say
+            // so explicitly instead of letting the model believe this is the
+            // whole page. (UTF-16 vs grapheme-cluster counting can differ by
+            // a hair on emoji-heavy pages; the `> 10000` gate is exact.)
             let len = json["length"] as? Int ?? text.count
-            lines.append("Text (\(len) chars):")
+            if len > 10000 {
+                lines.append("Text (\(text.prefix(10000).count) of \(len) chars — TRUNCATED, not the full text):")
+            } else {
+                lines.append("Text (\(len) chars):")
+            }
             lines.append(String(text.prefix(10000)))
         }
         // findElements results
