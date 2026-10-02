@@ -132,7 +132,20 @@ public enum BridgeMetaTools {
         guard let instruction = try? arguments.requireString("instruction") else {
             return errorResult("「命令」缺少必填参数 instruction（字符串）")
         }
-        let timeoutSeconds = arguments.double("timeoutSeconds") ?? 30
+        // 类型写错不许静默回默认值：传了字符串 "60" 调用方会以为生效、
+        // 实际跑 30 秒——和 query 缺必填一样，明确报错。
+        let timeoutSeconds: Double
+        if arguments.contains("timeoutSeconds") {
+            guard let parsed = arguments.double("timeoutSeconds") else {
+                let actual = StrictJSON.typeName(
+                    of: arguments.value("timeoutSeconds") ?? NSNull())
+                return errorResult(
+                    "「命令」timeoutSeconds 类型不对：需要数字（秒），你传了\(actual)")
+            }
+            timeoutSeconds = parsed
+        } else {
+            timeoutSeconds = 30
+        }
         guard timeoutSeconds <= Steward.maxTimeoutSeconds else {
             return errorResult(
                 "「命令」timeoutSeconds 不能超过 \(Int(Steward.maxTimeoutSeconds)) 秒（你传了 \(timeoutSeconds)），已拒绝。")
