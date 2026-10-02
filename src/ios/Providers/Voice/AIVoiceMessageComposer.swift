@@ -126,19 +126,76 @@ enum AIVoiceMessageComposer {
     /// past the vendor's per-request cap (Doubao 1024, OpenAI 4096, …)
     /// the whole bubble failed and the reply stayed text-only. Any
     /// chunk failing fails the whole bubble, same as before.
+    /// [AI-P2-4] Each chunk now goes through `synthWithRetry` below —
+    /// same-text retries with backoff, then split-smaller — mirroring
+    /// read-aloud's `VoiceOutputPlayer.synthWithRetry` instead of the old
+    /// single attempt per chunk (one network hiccup used to kill the
+    /// whole long-reply bubble).
     private static func synthesizeChunked(
         _ text: String, limit: Int,
         _ synth: (String) async throws -> Data
     ) async throws -> Data {
         let chunks = VoiceOutputPlayer.splitText(text, maxChars: limit)
-        guard chunks.count > 1 else { return try await synth(text) }
+        guard chunks.count > 1 else { return try await synthWithRetry(text, synth) }
         var pieces: [Data] = []
         for chunk in chunks {
-            let d = try await synth(chunk)
+            let d = try await synthWithRetry(chunk, synth)
             guard !d.isEmpty else { throw VoiceProviderError.noAudioData }
             pieces.append(d)
         }
         logger.info("[AIVoice] long reply synthesized in \(chunks.count) chunks (limit \(limit))")
+        return VoiceOutputPlayer.concatPieces(pieces)
+    }
+
+    /// [AI-P2-4] Two-phase resilience for one chunk, mirroring read-aloud's
+    /// `VoiceOutputPlayer.synthWithRetry` (same retry counts/backoff/split
+    /// size, shared constants): Phase 1 retries the SAME text with backoff;
+    /// Phase 2 splits into smaller pieces and synthesizes those. Empty audio
+    /// counts as a failed attempt. Throws only when both phases fail.
+    private static func synthWithRetry(
+        _ text: String,
+        _ synth: (String) async throws -> Data
+    ) async throws -> Data {
+        let maxAttempts = VoiceOutputPlayer.synthRetriesSameText
+        var lastError: Error?
+        // Phase 1: retry the same text.
+        for attempt in 0...maxAttempts {
+            if Task.isCancelled { throw CancellationError() }
+            do {
+                let d = try await synth(text)
+                if !d.isEmpty { return d }
+                lastError = VoiceProviderError.noAudioData
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                lastError = error
+            }
+            logger.warning("[AIVoice] chunk synth attempt \(attempt + 1)/\(maxAttempts + 1) failed: \(lastError?.localizedDescription ?? "?")")
+            let backoff = VoiceOutputPlayer.synthRetryBackoff * Double(attempt + 1)
+            try? await Task.sleep(nanoseconds: UInt64(backoff * 1e9))
+        }
+        // Phase 2: split smaller and synthesize each piece.
+        let small = VoiceOutputPlayer.splitText(text, maxChars: VoiceOutputPlayer.synthSplitChunkChars)
+        guard small.count > 1 else { throw lastError ?? VoiceProviderError.parseError("chunk synth failed") }
+        logger.info("[AIVoice] chunk still failing — retrying as \(small.count) smaller pieces")
+        var pieces: [Data] = []
+        for piece in small {
+            if Task.isCancelled { throw CancellationError() }
+            var ok = false
+            for _ in 0...maxAttempts {
+                do {
+                    let d = try await synth(piece)
+                    if !d.isEmpty { pieces.append(d); ok = true; break }
+                    lastError = VoiceProviderError.noAudioData
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    lastError = error
+                }
+                try? await Task.sleep(nanoseconds: UInt64(VoiceOutputPlayer.synthRetryBackoff * 1e9))
+            }
+            guard ok else { throw lastError ?? VoiceProviderError.parseError("small-piece synth failed") }
+        }
         return VoiceOutputPlayer.concatPieces(pieces)
     }
 
