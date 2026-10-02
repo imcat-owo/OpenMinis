@@ -4,6 +4,7 @@ import CoreText
 import Photos
 import SwiftUI
 import UIKit
+import WebKit
 
 private let imgLogger = AppLogger(category: "MinisImage")
 private let attachLogger = AppLogger(category: "AttachDebug")
@@ -1432,6 +1433,226 @@ final class CodeBlockAttachment: NSTextAttachment {
     /// Associated-object key retaining the copy-tap gesture target
     /// for the button's lifetime (see makeView).
     static var copyTapHandlerKey: UInt8 = 0
+    /// Associated-object key for the settle `DispatchWorkItem`
+    /// (debounced highlight + auto-collapse after streaming stops).
+    static var settleWorkKey: UInt8 = 0
+    /// Associated-object key for the wrapper's collapsed flag (Bool).
+    static var wrapperCollapsedKey: UInt8 = 0
+    /// Associated-object key for the wrapper's full content height (CGFloat).
+    static var wrapperFullHeightKey: UInt8 = 0
+    /// Associated-object key for the `onHeightChanged: () -> Void` closure,
+    /// wired by the renderer (see updateAttachmentViews) — called after a
+    /// manual collapse toggle so the host cell re-measures.
+    static var heightChangedKey: UInt8 = 0
+    /// Tag for the collapsed-state fade mask inside the container.
+    static let fadeViewTag = 9871
+    /// Tag for the header collapse chevron.
+    static let chevronTag = 9872
+
+    // MARK: [chat-ui] collapse state (Kelivo-style)
+
+    /// Lines beyond which a code block becomes collapsible.
+    static let collapseLineThreshold = 12
+    /// Lines shown while collapsed.
+    static let collapsedVisibleLines = 8
+    /// fingerprint(code+language) → collapsed. Bounded (400) like the tool-group map.
+    static var collapseState: [Int: Bool] = [:]
+    /// Fingerprints the user toggled manually — the settle pass won't override these.
+    static var manualCollapse: Set<Int> = []
+    /// Bumped on every manual toggle; folded into the cell-size dedup
+    /// fingerprint so a toggle defeats SKIP-DEDUPE and re-measures.
+    static var collapseGeneration: UInt64 = 0
+
+    static func fingerprint(code: String, language: String?) -> Int {
+        var hasher = Hasher()
+        hasher.combine(code)
+        hasher.combine(language ?? "")
+        return hasher.finalize()
+    }
+
+    static func setCollapseState(fingerprint fp: Int, collapsed: Bool, manual: Bool) {
+        if collapseState.count > 400 { collapseState.removeFirst() }
+        collapseState[fp] = collapsed
+        if manual {
+            if manualCollapse.count > 400 { manualCollapse.removeFirst() }
+            manualCollapse.insert(fp)
+        }
+    }
+
+    static var metricsKey: UInt8 = 0
+    static var toggleDebounceKey: UInt8 = 0
+
+    /// Layout inputs cached on the wrapper so collapse toggles and streaming
+    /// growth can re-layout without the attachment instance.
+    final class CodeLayoutMetrics {
+        let fullWidth: CGFloat
+        let inset: CGFloat
+        let contentWidth: CGFloat
+        let topOffset: CGFloat
+        var fullHeight: CGFloat
+        var fittingWidth: CGFloat
+        var collapsedHeight: CGFloat
+        let maxCodeHeight: CGFloat
+        let bottomPadding: CGFloat
+        let language: String?
+        let theme: SelectableMarkdownTheme
+        init(fullWidth: CGFloat, inset: CGFloat, contentWidth: CGFloat, topOffset: CGFloat,
+             fullHeight: CGFloat, fittingWidth: CGFloat, collapsedHeight: CGFloat,
+             maxCodeHeight: CGFloat, bottomPadding: CGFloat,
+             language: String?, theme: SelectableMarkdownTheme) {
+            self.fullWidth = fullWidth
+            self.inset = inset
+            self.contentWidth = contentWidth
+            self.topOffset = topOffset
+            self.fullHeight = fullHeight
+            self.fittingWidth = fittingWidth
+            self.collapsedHeight = collapsedHeight
+            self.maxCodeHeight = maxCodeHeight
+            self.bottomPadding = bottomPadding
+            self.language = language
+            self.theme = theme
+        }
+    }
+
+    /// Height of the first `lines` source lines (collapsed viewport).
+    /// Same measurer as measureCodeHeight so the numbers agree.
+    private func measurePrefixHeight(lines: Int) -> CGFloat {
+        let prefix = code.components(separatedBy: "\n").prefix(lines).joined(separator: "\n")
+        let codeStyle = NSMutableParagraphStyle()
+        codeStyle.lineSpacing = 4
+        codeStyle.lineBreakMode = .byClipping
+        let attrStr = NSAttributedString(string: prefix.isEmpty ? " " : prefix, attributes: [
+            .font: theme.codeBlockFont,
+            .paragraphStyle: codeStyle,
+        ])
+        let tv = UITextView()
+        tv.isScrollEnabled = false
+        tv.textContainerInset = UIEdgeInsets(top: 0, left: 8, bottom: 0, right: 8)
+        tv.textContainer.lineFragmentPadding = 0
+        tv.textContainer.lineBreakMode = .byClipping
+        tv.attributedText = attrStr
+        return tv.sizeThatFits(CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)).height
+    }
+
+    /// Re-layout the code view for a collapsed/expanded state.
+    /// The wrapper's LOGICAL height is set immediately (the renderer reads
+    /// view.frame right after layout to place the TextKit slot — same rule
+    /// as the [CodeBlockGrow] comment in updateExistingView); only the
+    /// visible children animate.
+    static func applyCollapsedLayout(to wrapper: UIView, collapsed: Bool, animated: Bool) {
+        guard let metrics = objc_getAssociatedObject(wrapper, &metricsKey) as? CodeLayoutMetrics,
+              let container = wrapper.subviews.first,
+              let scrollView = container.subviews.first(where: { $0 is UIScrollView }) as? UIScrollView else { return }
+        let visibleHeight = collapsed ? metrics.collapsedHeight : min(metrics.fullHeight, metrics.maxCodeHeight)
+        let totalHeight = metrics.topOffset + visibleHeight + metrics.bottomPadding
+        let applyFrames = {
+            scrollView.frame = CGRect(x: 0, y: metrics.topOffset, width: metrics.contentWidth,
+                                      height: visibleHeight + metrics.bottomPadding)
+            // Collapsed: shrink the scrollable height so vertical scroll is
+            // impossible, but keep horizontal panning for long lines.
+            scrollView.contentSize = CGSize(width: metrics.fittingWidth,
+                                            height: collapsed ? visibleHeight + metrics.bottomPadding : metrics.fullHeight)
+            if collapsed { scrollView.contentOffset = .zero }
+            if let fade = container.viewWithTag(fadeViewTag) {
+                fade.isHidden = !collapsed
+                fade.frame = CGRect(x: 0, y: metrics.topOffset + visibleHeight - 24,
+                                    width: metrics.contentWidth, height: 24)
+                fade.layer.sublayers?.first?.frame = fade.bounds
+            }
+            if let chevron = container.viewWithTag(chevronTag) as? UIImageView {
+                chevron.image = UIImage(systemName: collapsed ? "chevron.down" : "chevron.up",
+                                        withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .semibold))
+            }
+            container.frame = CGRect(x: metrics.inset, y: topMargin, width: metrics.contentWidth, height: totalHeight)
+        }
+        // The wrapper's LOGICAL size is set immediately (the caller reads
+        // view.frame right after layout to place the TextKit slot — same rule
+        // as the [CodeBlockGrow] comment in updateExistingView); only the
+        // visible children animate.
+        wrapper.frame.size = CGSize(width: metrics.fullWidth, height: totalHeight + topMargin + bottomMargin)
+        if animated {
+            UIView.animate(withDuration: 0.22, delay: 0,
+                           options: [.curveEaseOut, .allowUserInteraction, .beginFromCurrentState],
+                           animations: applyFrames)
+        } else {
+            applyFrames()
+        }
+        objc_setAssociatedObject(wrapper, &wrapperCollapsedKey, collapsed as Bool, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+    }
+
+    /// Header-tap handler: flip the collapse state, re-layout, and ask the
+    /// host cell to re-measure (via the generation-folded dedupe fingerprint).
+    static func toggleCollapse(wrapper: UIView?, codeTextView: UITextView?) {
+        guard let wrapper,
+              let metrics = objc_getAssociatedObject(wrapper, &metricsKey) as? CodeLayoutMetrics else { return }
+        let code = codeTextView?.text ?? ""
+        let fp = fingerprint(code: code, language: metrics.language)
+        let next = !(collapseState[fp] ?? false)
+        setCollapseState(fingerprint: fp, collapsed: next, manual: true)
+        collapseGeneration &+= 1
+        applyCollapsedLayout(to: wrapper, collapsed: next, animated: true)
+        var host: UIView? = wrapper.superview
+        while let h = host, !(h is SelectableMarkdownTextView) { host = h.superview }
+        (host as? SelectableMarkdownTextView)?.invalidateCellSizeIfNeeded()
+    }
+
+    /// Render `code` in a modal WKWebView (HTML preview entry).
+    static func presentHTMLPreview(from button: UIButton, code: String) {
+        let vc = UIViewController()
+        vc.title = "HTML 预览"
+        vc.view.backgroundColor = .systemBackground
+        let webView = WKWebView(frame: .zero)
+        webView.translatesAutoresizingMaskIntoConstraints = false
+        vc.view.addSubview(webView)
+        NSLayoutConstraint.activate([
+            webView.topAnchor.constraint(equalTo: vc.view.safeAreaLayoutGuide.topAnchor),
+            webView.leadingAnchor.constraint(equalTo: vc.view.leadingAnchor),
+            webView.trailingAnchor.constraint(equalTo: vc.view.trailingAnchor),
+            webView.bottomAnchor.constraint(equalTo: vc.view.bottomAnchor),
+        ])
+        webView.loadHTMLString(code, baseURL: nil)
+        let nav = UINavigationController(rootViewController: vc)
+        vc.navigationItem.leftBarButtonItem = UIBarButtonItem(
+            systemItem: .close,
+            primaryAction: UIAction { _ in nav.dismiss(animated: true) })
+        var presenter = button.window?.rootViewController
+        while let next = presenter?.presentedViewController { presenter = next }
+        presenter?.present(nav, animated: true)
+    }
+
+    /// Settle pass: runs 0.6s after the last streaming chunk (debounced).
+    /// Applies syntax highlighting (skipped while streaming to avoid per-chunk
+    /// re-tokenizing jank — Kelivo does the same) and auto-collapses long
+    /// blocks unless the user manually toggled.
+    static func applySettledState(to wrapper: UIView) {
+        guard let metrics = objc_getAssociatedObject(wrapper, &metricsKey) as? CodeLayoutMetrics,
+              let container = wrapper.subviews.first,
+              let scrollView = container.subviews.first(where: { $0 is UIScrollView }) as? UIScrollView,
+              let codeTextView = scrollView.subviews.first(where: { $0 is UITextView }) as? UITextView else { return }
+        let code = codeTextView.text ?? ""
+        guard !code.isEmpty else { return }
+        let highlighted = CodeSyntaxHighlighter.highlight(
+            code, language: metrics.language, font: metrics.theme.codeBlockFont,
+            plainColor: metrics.theme.codeBlockTextColor, background: metrics.theme.codeBlockBackground)
+        let codeAttr = NSMutableAttributedString(attributedString: highlighted)
+        let codeStyle = NSMutableParagraphStyle()
+        codeStyle.lineSpacing = 4
+        codeStyle.lineBreakMode = .byClipping
+        codeAttr.addAttribute(.paragraphStyle, value: codeStyle,
+                             range: NSRange(location: 0, length: codeAttr.length))
+        codeTextView.attributedText = codeAttr
+
+        let fp = fingerprint(code: code, language: metrics.language)
+        let lines = code.components(separatedBy: "\n").count
+        if lines > collapseLineThreshold, !manualCollapse.contains(fp), !(collapseState[fp] ?? false) {
+            setCollapseState(fingerprint: fp, collapsed: true, manual: false)
+            collapseGeneration &+= 1
+            applyCollapsedLayout(to: wrapper, collapsed: true, animated: true)
+            var host: UIView? = wrapper.superview
+            while let h = host, !(h is SelectableMarkdownTextView) { host = h.superview }
+            (host as? SelectableMarkdownTextView)?.invalidateCellSizeIfNeeded()
+        }
+    }
 
     /// Target object for the fallback tap gesture on the copy button —
     /// UITapGestureRecognizer needs an @objc target/action pair.
@@ -1477,7 +1698,9 @@ final class CodeBlockAttachment: NSTextAttachment {
     override func attachmentBounds(for textContainer: NSTextContainer?, proposedLineFragment lineFrag: CGRect, glyphPosition position: CGPoint, characterIndex charIndex: Int) -> CGRect {
         let width = lineFrag.width
         let topOffset: CGFloat = (language != nil && !language!.isEmpty) ? 28 : 12
-        let contentHeight = measureCodeHeight()
+        // [chat-ui] Collapsed blocks measure the 8-line viewport, not the full text.
+        let collapsed = Self.collapseState[contentFingerprint] ?? false
+        let contentHeight = collapsed ? measurePrefixHeight(lines: Self.collapsedVisibleLines) : measureCodeHeight()
         let bottomPadding: CGFloat = 12
         let maxCodeHeight: CGFloat = 400 - topOffset - bottomPadding
         let scrollHeight = min(contentHeight, maxCodeHeight)
@@ -1499,17 +1722,31 @@ final class CodeBlockAttachment: NSTextAttachment {
         container.clipsToBounds = true
 
         var topOffset: CGFloat = 12
+        let hasLanguage = language != nil && !language!.isEmpty
 
         // Language label
-        if let language, !language.isEmpty {
+        if hasLanguage {
             let langLabel = UILabel()
-            langLabel.text = language.lowercased()
+            langLabel.text = language!.lowercased()
             langLabel.font = .systemFont(ofSize: 11, weight: .medium)
             langLabel.textColor = .white.withAlphaComponent(0.4)
             langLabel.frame = CGRect(x: 12, y: 8, width: contentWidth - 60, height: 16)
             container.addSubview(langLabel)
             topOffset = 28
         }
+
+        // [chat-ui] Collapse bookkeeping (Kelivo-style). Fresh renders start
+        // collapsed when long; a streaming first chunk is short, so this
+        // doesn't fight the stream. State key = the attachment's content
+        // fingerprint, like Kelivo's language+code-hash key.
+        let lineCount = code.components(separatedBy: "\n").count
+        let collapsible = lineCount > Self.collapseLineThreshold
+        let fp = contentFingerprint
+        if Self.collapseState[fp] == nil {
+            Self.setCollapseState(fingerprint: fp, collapsed: collapsible, manual: false)
+        }
+        let collapsed = Self.collapseState[fp] ?? false
+        let isHTML = (language ?? "").lowercased() == "html"
 
         // Scrollable code area (own the pan gesture here for reliable horizontal scroll)
         let scrollView = UIScrollView()
@@ -1528,14 +1765,17 @@ final class CodeBlockAttachment: NSTextAttachment {
         codeTextView.textContainer.lineFragmentPadding = 0
         codeTextView.textContainer.lineBreakMode = .byClipping
 
+        // [chat-ui] Syntax-highlighted text (falls back to plain for
+        // unknown languages / over-long input — never crashes).
         let codeStyle = NSMutableParagraphStyle()
         codeStyle.lineSpacing = 4
         codeStyle.lineBreakMode = .byClipping
-        let codeAttr = NSAttributedString(string: code, attributes: [
-            .font: theme.codeBlockFont,
-            .foregroundColor: theme.codeBlockTextColor,
-            .paragraphStyle: codeStyle,
-        ])
+        let highlighted = CodeSyntaxHighlighter.highlight(
+            code, language: language, font: theme.codeBlockFont,
+            plainColor: theme.codeBlockTextColor, background: theme.codeBlockBackground)
+        let codeAttr = NSMutableAttributedString(attributedString: highlighted)
+        codeAttr.addAttribute(.paragraphStyle, value: codeStyle,
+                             range: NSRange(location: 0, length: codeAttr.length))
         codeTextView.attributedText = codeAttr
 
         // Measure content size (unconstrained width)
@@ -1545,24 +1785,76 @@ final class CodeBlockAttachment: NSTextAttachment {
         codeTextView.frame = CGRect(x: 0, y: 0, width: fittingWidth, height: contentHeight)
 
         let maxCodeHeight: CGFloat = 400 - topOffset - 12
-        let scrollHeight = min(contentHeight, maxCodeHeight)
         let bottomPadding: CGFloat = 12
-        scrollView.frame = CGRect(x: 0, y: topOffset, width: contentWidth, height: scrollHeight + bottomPadding)
-        scrollView.contentInset = UIEdgeInsets(top: 0, left: 0, bottom: bottomPadding, right: 0)
-        scrollView.scrollIndicatorInsets = .zero
+        let metrics = CodeLayoutMetrics(
+            fullWidth: width, inset: inset, contentWidth: contentWidth, topOffset: topOffset,
+            fullHeight: contentHeight, fittingWidth: fittingWidth,
+            collapsedHeight: min(measurePrefixHeight(lines: Self.collapsedVisibleLines), maxCodeHeight),
+            maxCodeHeight: maxCodeHeight, bottomPadding: bottomPadding,
+            language: language, theme: theme)
+        objc_setAssociatedObject(wrapper, &Self.metricsKey, metrics, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+
         scrollView.addSubview(codeTextView)
         scrollView.contentSize = CGSize(width: fittingWidth, height: contentHeight)
+        container.addSubview(scrollView)
+        wrapper.addSubview(container)
 
-        // Auto-scroll to bottom during streaming
-        let bottomY = scrollView.contentSize.height - scrollView.bounds.height
-        if bottomY > 0 {
-            scrollView.contentOffset = CGPoint(x: 0, y: bottomY)
+        // Collapsed fade mask (static gradient — never animated, so no
+        // CAGradientLayer colorspace race; see ShimmerOverlay's note).
+        let fade = UIView()
+        fade.tag = Self.fadeViewTag
+        fade.isUserInteractionEnabled = false
+        let gradient = CAGradientLayer()
+        let resolvedBg = theme.codeBlockBackground.resolvedColor(with: UITraitCollection.current)
+        gradient.colors = [UIColor.clear.cgColor, resolvedBg.cgColor]
+        fade.layer.addSublayer(gradient)
+        container.addSubview(fade)
+
+        // Initial layout (no animation on first paint).
+        Self.applyCollapsedLayout(to: wrapper, collapsed: collapsed, animated: false)
+
+        // Auto-scroll to bottom during streaming (only when expanded).
+        if !collapsed {
+            let bottomY = scrollView.contentSize.height - scrollView.bounds.height
+            if bottomY > 0 {
+                scrollView.contentOffset = CGPoint(x: 0, y: bottomY)
+            }
         }
 
-        container.addSubview(scrollView)
+        // [chat-ui] Header tap → collapse toggle (long blocks only).
+        if collapsible {
+            let headerButton = UIButton(type: .custom)
+            headerButton.backgroundColor = .clear
+            headerButton.frame = CGRect(x: 0, y: 0, width: contentWidth, height: 28)
+            headerButton.accessibilityLabel = collapsed ? "Expand code block" : "Collapse code block"
+            let toggle: () -> Void = { [weak wrapper, weak codeTextView, weak headerButton] in
+                guard let headerButton else { return }
+                // Debounce: the dual bind below can deliver one physical tap twice.
+                let now = Date()
+                if let last = objc_getAssociatedObject(headerButton, &Self.toggleDebounceKey) as? Date,
+                   now.timeIntervalSince(last) < 0.3 { return }
+                objc_setAssociatedObject(headerButton, &Self.toggleDebounceKey, now, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+                Self.toggleCollapse(wrapper: wrapper, codeTextView: codeTextView)
+            }
+            headerButton.addAction(UIAction { _ in toggle() }, for: .touchUpInside)
+            let tapHandler = CodeCopyTapHandler(perform: toggle)
+            let tap = UITapGestureRecognizer(target: tapHandler, action: #selector(CodeCopyTapHandler.handleTap))
+            tap.cancelsTouchesInView = false
+            headerButton.addGestureRecognizer(tap)
+            objc_setAssociatedObject(headerButton, &Self.copyTapHandlerKey, tapHandler, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            container.addSubview(headerButton)
 
-        let totalHeight = topOffset + scrollHeight + bottomPadding
-        container.frame = CGRect(x: inset, y: 0, width: contentWidth, height: totalHeight)
+            let chevron = UIImageView()
+            chevron.tag = Self.chevronTag
+            chevron.tintColor = .white.withAlphaComponent(0.4)
+            chevron.contentMode = .center
+            let rightButtons: CGFloat = isHTML ? 88 : 44
+            chevron.frame = CGRect(x: contentWidth - rightButtons - 24, y: 6, width: 24, height: 16)
+            container.addSubview(chevron)
+            // Image (up/down) is set by applyCollapsedLayout — refresh once more
+            // now that the chevron exists.
+            Self.applyCollapsedLayout(to: wrapper, collapsed: collapsed, animated: false)
+        }
 
         // Copy button — 44x44 hit area per Apple HIG, icon stays small visually
         let iconConfig = UIImage.SymbolConfiguration(pointSize: 9, weight: .medium)
@@ -1616,18 +1908,44 @@ final class CodeBlockAttachment: NSTextAttachment {
         objc_setAssociatedObject(copyButton, &Self.copyTapHandlerKey, tapHandler, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         container.addSubview(copyButton)
 
-        container.frame.origin.y = Self.topMargin
-        wrapper.addSubview(container)
-        wrapper.frame = CGRect(x: 0, y: 0, width: width, height: totalHeight + Self.topMargin + Self.bottomMargin)
+        // [chat-ui] HTML preview button — renders the code in a WKWebView sheet.
+        if isHTML {
+            let previewButton = UIButton(type: .system)
+            previewButton.setImage(UIImage(systemName: "eye", withConfiguration: iconConfig), for: .normal)
+            previewButton.tintColor = .white.withAlphaComponent(0.5)
+            previewButton.frame = CGRect(x: contentWidth - 88, y: 0, width: 44, height: 44)
+            previewButton.accessibilityLabel = "Preview HTML"
+            let showPreview: () -> Void = { [weak codeTextView, weak previewButton] in
+                guard let previewButton else { return }
+                let now = Date()
+                if let last = objc_getAssociatedObject(previewButton, &Self.toggleDebounceKey) as? Date,
+                   now.timeIntervalSince(last) < 0.5 { return }
+                objc_setAssociatedObject(previewButton, &Self.toggleDebounceKey, now, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+                Self.presentHTMLPreview(from: previewButton, code: codeTextView?.text ?? "")
+            }
+            previewButton.addAction(UIAction { _ in showPreview() }, for: .touchUpInside)
+            let pvTapHandler = CodeCopyTapHandler(perform: showPreview)
+            let pvTap = UITapGestureRecognizer(target: pvTapHandler, action: #selector(CodeCopyTapHandler.handleTap))
+            pvTap.cancelsTouchesInView = false
+            previewButton.addGestureRecognizer(pvTap)
+            objc_setAssociatedObject(previewButton, &Self.copyTapHandlerKey, pvTapHandler, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            container.addSubview(previewButton)
+        }
 
         return wrapper
     }
 
     /// Update the code text in an existing view created by `makeView(width:)` without recreating.
+    ///
+    /// [chat-ui] Streaming path: plain text only (highlighting is deferred to
+    /// the debounced settle pass so per-chunk re-tokenizing doesn't jank the
+    /// stream — Kelivo does the same). The view's current collapsed state is
+    /// preserved and synced into the static map under the new fingerprint.
     func updateExistingView(_ wrapper: UIView) {
         guard let container = wrapper.subviews.first else { return }
         guard let scrollView = container.subviews.first(where: { $0 is UIScrollView }) as? UIScrollView else { return }
         guard let codeTextView = scrollView.subviews.first(where: { $0 is UITextView }) as? UITextView else { return }
+        guard var metrics = objc_getAssociatedObject(wrapper, &Self.metricsKey) as? CodeLayoutMetrics else { return }
 
         let codeStyle = NSMutableParagraphStyle()
         codeStyle.lineSpacing = 4
@@ -1640,45 +1958,219 @@ final class CodeBlockAttachment: NSTextAttachment {
         codeTextView.attributedText = codeAttr
 
         let fitting = codeTextView.sizeThatFits(CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude))
-        codeTextView.frame.size = fitting
+        codeTextView.frame = CGRect(x: 0, y: 0, width: fitting.width, height: fitting.height)
         scrollView.contentSize = fitting
 
-        // Recalculate heights to match attachmentBounds logic
-        let topOffset: CGFloat = (language != nil && !language!.isEmpty) ? 28 : 12
-        let maxCodeHeight: CGFloat = 400 - topOffset - 12
-        let scrollHeight = min(fitting.height, maxCodeHeight)
-        let bottomPadding: CGFloat = 12
-        let newScrollFrame = CGRect(x: 0, y: topOffset, width: container.frame.width, height: scrollHeight + bottomPadding)
-        let totalHeight = topOffset + scrollHeight + bottomPadding
+        // The fresh attachment has a new fingerprint, but the VIEW's visual
+        // state is the truth mid-stream — sync the map so attachmentBounds
+        // (called on the new attachment) agrees with the view.
+        let fp = contentFingerprint
+        let wrapperCollapsed = (objc_getAssociatedObject(wrapper, &Self.wrapperCollapsedKey) as? Bool) ?? false
+        Self.setCollapseState(fingerprint: fp, collapsed: wrapperCollapsed,
+                              manual: Self.manualCollapse.contains(fp))
 
-        // [CodeBlockGrow] Animate the visible code-frame growing taller as more
-        // lines stream in, instead of snapping. The wrapper's LOGICAL height is
-        // set immediately (synchronously) because the caller reads
-        // `view.frame.size.height` right after this returns to lay out the
-        // TextKit attachment slot + the enclosing cell — animating that would
-        // desync the code frame from the text flow. Only the wrapper's visible
-        // children (the rounded background container + its scroll view) animate
-        // their height, so the box smoothly extends while layout stays exact.
-        let heightGrew = totalHeight > container.frame.size.height + 0.5
-        wrapper.frame.size.height = totalHeight + Self.topMargin + Self.bottomMargin
-        let applyChildFrames = {
-            scrollView.frame = newScrollFrame
-            container.frame.size.height = totalHeight
-        }
-        if heightGrew {
-            UIView.animate(withDuration: 0.20,
-                           delay: 0,
-                           options: [.curveEaseOut, .allowUserInteraction, .beginFromCurrentState],
-                           animations: applyChildFrames)
-        } else {
-            applyChildFrames()
+        // Refresh metrics (content grew) and re-layout, preserving state.
+        // [CodeBlockGrow] The wrapper's LOGICAL height is set immediately
+        // (synchronously) because the caller reads `view.frame.size.height`
+        // right after this returns to lay out the TextKit attachment slot +
+        // the enclosing cell — animating that would desync the code frame
+        // from the text flow. Only the visible children animate.
+        let oldVisible = wrapperCollapsed ? metrics.collapsedHeight : min(metrics.fullHeight, metrics.maxCodeHeight)
+        let oldTotal = metrics.topOffset + oldVisible + metrics.bottomPadding
+        metrics.fullHeight = fitting.height
+        metrics.fittingWidth = fitting.width
+        metrics.collapsedHeight = min(measurePrefixHeight(lines: Self.collapsedVisibleLines), metrics.maxCodeHeight)
+        let newTotal = metrics.topOffset + min(metrics.fullHeight, metrics.maxCodeHeight) + metrics.bottomPadding
+        let heightGrew = newTotal > oldTotal + 0.5
+        Self.applyCollapsedLayout(to: wrapper, collapsed: wrapperCollapsed, animated: heightGrew)
+
+        // Auto-scroll to bottom during streaming (only when expanded).
+        if !wrapperCollapsed {
+            let bottomY = scrollView.contentSize.height - scrollView.bounds.height
+            if bottomY > 0 {
+                scrollView.contentOffset = CGPoint(x: scrollView.contentOffset.x, y: bottomY)
+            }
         }
 
-        // Auto-scroll to bottom during streaming
-        let bottomY = scrollView.contentSize.height - scrollView.bounds.height
-        if bottomY > 0 {
-            scrollView.contentOffset = CGPoint(x: scrollView.contentOffset.x, y: bottomY)
+        // Debounced settle: highlight + auto-collapse long blocks.
+        if let old = objc_getAssociatedObject(wrapper, &Self.settleWorkKey) as? DispatchWorkItem {
+            old.cancel()
         }
+        let work = DispatchWorkItem { [weak wrapper] in
+            guard let wrapper else { return }
+            Self.applySettledState(to: wrapper)
+        }
+        objc_setAssociatedObject(wrapper, &Self.settleWorkKey, work, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
+    }
+
+// MARK: - [chat-ui] Code syntax highlighter (Kelivo-style)
+
+/// Lightweight regex-based syntax highlighter for code blocks — Kelivo's
+/// look (dark atomOneDark-ish / light github-ish, transparent background)
+/// without external dependencies.
+///
+/// Single combined regex per language, comment/string alternatives first so
+/// they win over keywords inside them. Unknown languages and very long
+/// inputs fall back to plain text (never crash, never hang).
+private enum CodeSyntaxHighlighter {
+    /// Max characters to highlight — longer inputs stay plain (perf guard).
+    private static let maxHighlightLength = 120_000
+
+    private struct LanguageSpec {
+        /// Comment/string master pattern (alternation, comments first).
+        let literalPattern: String
+        /// Extra identifier-ish patterns applied in the gaps.
+        let gapPattern: String?
+        let keywords: Set<String>
+    }
+
+    // MARK: keyword tables
+
+    private static let swiftKW: Set<String> = ["let","var","func","class","struct","enum","protocol","extension","import","return","if","else","for","while","in","guard","switch","case","default","break","continue","do","try","catch","throw","throws","async","await","self","Self","true","false","nil","is","as","init","deinit","where","override","final","private","public","internal","open","fileprivate","typealias","associatedtype","subscript","operator","inout","defer","repeat","rethrows","static","some","any","mutating","nonmutating","lazy","weak","unowned","required","convenience","dynamic","indirect","fallthrough","type","actor","precedencegroup","associativity"]
+    private static let pythonKW: Set<String> = ["def","class","import","from","return","if","elif","else","for","while","in","not","and","or","is","None","True","False","pass","break","continue","try","except","finally","raise","with","as","lambda","yield","global","nonlocal","assert","del","async","await","self","cls"]
+    private static let jsKW: Set<String> = ["function","return","if","else","for","while","do","switch","case","default","break","continue","var","let","const","new","delete","typeof","instanceof","in","of","this","true","false","null","undefined","try","catch","finally","throw","class","extends","super","import","export","from","default","async","await","yield","static","get","set","debugger","void"]
+    private static let tsKW: Set<String> = ["interface","type","enum","namespace","declare","abstract","readonly","keyof","infer","is","as","satisfies","implements","private","public","protected","override"]
+    private static let javaKW: Set<String> = ["class","interface","enum","extends","implements","import","package","return","if","else","for","while","do","switch","case","default","break","continue","new","this","super","true","false","null","try","catch","finally","throw","throws","static","final","public","private","protected","abstract","synchronized","volatile","transient","native","strictfp","void","int","long","double","float","boolean","char","byte","short","instanceof","assert","record","sealed","permits","var"]
+    private static let kotlinKW: Set<String> = ["fun","class","interface","object","val","var","return","if","else","for","while","do","when","is","in","as","break","continue","true","false","null","this","super","try","catch","finally","throw","import","package","data","sealed","enum","annotation","companion","const","constructor","by","out","inner","internal","private","protected","public","open","final","abstract","override","lateinit","suspend","inline","noinline","crossinline","reified","tailrec","operator","infix","vararg"]
+    private static let cKW: Set<String> = ["if","else","for","while","do","switch","case","default","break","continue","return","struct","union","enum","typedef","sizeof","static","extern","const","volatile","register","auto","void","int","char","short","long","float","double","signed","unsigned","goto","true","false","NULL","inline","_Bool","_Static_assert"]
+    private static let cppKW: Set<String> = ["class","namespace","template","typename","public","private","protected","virtual","override","final","new","delete","this","true","false","nullptr","try","catch","throw","noexcept","constexpr","consteval","static_assert","using","friend","explicit","mutable","operator","if","else","for","while","do","switch","case","default","break","continue","return","struct","union","enum","typedef","sizeof","static","extern","const","volatile","void","int","char","short","long","float","double","signed","unsigned","goto","bool","wchar_t","auto","decltype","requires","concept","co_await","co_return","co_yield","import","module","export"]
+    private static let csharpKW: Set<String> = ["class","interface","struct","enum","namespace","using","return","if","else","for","foreach","while","do","switch","case","default","break","continue","new","this","base","true","false","null","try","catch","finally","throw","static","readonly","const","public","private","protected","internal","sealed","abstract","virtual","override","void","int","long","double","float","bool","char","byte","short","decimal","string","object","var","dynamic","async","await","get","set","event","delegate","params","ref","out","in","is","as","nameof","record","init","required","file"]
+    private static let goKW: Set<String> = ["func","package","import","return","if","else","for","range","switch","case","default","break","continue","go","defer","chan","map","struct","interface","type","var","const","true","false","nil","iota","select","fallthrough","goto"]
+    private static let rustKW: Set<String> = ["fn","let","mut","return","if","else","for","while","loop","in","match","break","continue","struct","enum","impl","trait","use","mod","pub","crate","self","Self","true","false","as","ref","move","where","type","const","static","unsafe","extern","dyn","async","await","move","box","try","union"]
+    private static let phpKW: Set<String> = ["function","class","interface","trait","extends","implements","return","if","else","elseif","endif","for","foreach","while","do","switch","case","default","break","continue","new","true","false","null","try","catch","finally","throw","echo","print","include","require","include_once","require_once","namespace","use","public","private","protected","static","final","abstract","const","var","global","static","instanceof","clone","declare","enddeclare","endfor","endforeach","endswitch","endwhile","fn","match"]
+    private static let rubyKW: Set<String> = ["def","class","module","end","return","if","elsif","else","unless","for","while","until","do","case","when","break","next","redo","retry","true","false","nil","self","super","begin","rescue","ensure","raise","yield","then","and","or","not","in","defined?","alias","attr_reader","attr_writer","attr_accessor","private","public","protected","include","extend","require","lambda","proc"]
+    private static let shellKW: Set<String> = ["if","then","else","elif","fi","for","while","until","do","done","case","esac","in","function","return","break","continue","exit","export","local","readonly","declare","typeset","select","time","coproc","true","false"]
+    private static let sqlKW: Set<String> = ["select","from","where","join","left","right","inner","outer","full","on","group","by","order","having","limit","offset","insert","into","values","update","set","delete","create","table","alter","drop","index","view","as","and","or","not","null","is","in","like","between","exists","distinct","union","all","case","when","then","else","end","primary","key","foreign","references","constraint","unique","check","default","not","asc","desc","count","sum","avg","min","max"]
+    private static let cssKW: Set<String> = ["import","media","font-face","keyframes","supports","charset","namespace","page"]
+
+    // MARK: literal patterns (comments + strings, comments first)
+
+    private static let cLiterals = #"(?<comment>//[^\n]*|/\*[\s\S]*?\*/)|(?<string>"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\]|\\.)*`)"#
+    private static let hashLiterals = #"(?<comment>#[^\n]*)|(?<string>"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*')"#
+    private static let sqlLiterals = #"(?<comment>--[^\n]*|/\*[\s\S]*?\*/)|(?<string>'(?:[^'\\]|\\.)*')"#
+    private static let htmlLiterals = #"(?<comment><!--[\s\S]*?-->)|(?<string>"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')"#
+    private static let cssLiterals = #"(?<comment>/\*[\s\S]*?\*/)|(?<string>"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*')"#
+    private static let stringsOnlyLiterals = #"(?<string>"(?:[^"\\\n]|\\.)*")"#
+
+    private static func spec(for language: String?) -> LanguageSpec? {
+        let lang = (language ?? "").lowercased()
+        switch lang {
+        case "swift": return LanguageSpec(literalPattern: cLiterals, gapPattern: cGap, keywords: swiftKW)
+        case "python", "py": return LanguageSpec(literalPattern: hashLiterals, gapPattern: hashGap, keywords: pythonKW)
+        case "javascript", "js", "jsx": return LanguageSpec(literalPattern: cLiterals, gapPattern: cGap, keywords: jsKW)
+        case "typescript", "ts", "tsx": return LanguageSpec(literalPattern: cLiterals, gapPattern: cGap, keywords: jsKW.union(tsKW))
+        case "java": return LanguageSpec(literalPattern: cLiterals, gapPattern: cGap, keywords: javaKW)
+        case "kotlin", "kt": return LanguageSpec(literalPattern: cLiterals, gapPattern: cGap, keywords: kotlinKW)
+        case "c", "h": return LanguageSpec(literalPattern: cLiterals, gapPattern: cGap, keywords: cKW)
+        case "cpp", "c++", "cc", "cxx", "hpp", "hh": return LanguageSpec(literalPattern: cLiterals, gapPattern: cGap, keywords: cppKW)
+        case "csharp", "cs": return LanguageSpec(literalPattern: cLiterals, gapPattern: cGap, keywords: csharpKW)
+        case "go": return LanguageSpec(literalPattern: cLiterals, gapPattern: cGap, keywords: goKW)
+        case "rust", "rs": return LanguageSpec(literalPattern: cLiterals, gapPattern: cGap, keywords: rustKW)
+        case "php": return LanguageSpec(literalPattern: phpLiterals, gapPattern: cGap, keywords: phpKW)
+        case "ruby", "rb": return LanguageSpec(literalPattern: hashLiterals, gapPattern: hashGap, keywords: rubyKW)
+        case "shell", "sh", "bash", "zsh", "fish": return LanguageSpec(literalPattern: hashLiterals, gapPattern: hashGap, keywords: shellKW)
+        case "sql": return LanguageSpec(literalPattern: sqlLiterals, gapPattern: sqlGap, keywords: sqlKW)
+        case "html", "xml", "vue", "svelte": return LanguageSpec(literalPattern: htmlLiterals, gapPattern: htmlGap, keywords: [])
+        case "css", "scss", "less": return LanguageSpec(literalPattern: cssLiterals, gapPattern: cssGap, keywords: cssKW)
+        case "json", "jsonc": return LanguageSpec(literalPattern: stringsOnlyLiterals, gapPattern: jsonGap, keywords: [])
+        case "yaml", "yml", "toml", "ini", "cfg", "dockerfile": return LanguageSpec(literalPattern: hashLiterals, gapPattern: nil, keywords: [])
+        default: return nil
+        }
+    }
+
+    // PHP allows //, # and /* */ comments.
+    private static let phpLiterals = #"(?<comment>//[^\n]*|#[^\n]*|/\*[\s\S]*?\*/)|(?<string>"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')"#
+
+    // Gap patterns (numbers / calls / types), applied where no literal matched.
+    private static let cGap = #"(?<number>\b\d[\d_]*(?:\.\d+)?\b)|(?<call>\b[A-Za-z_]\w*(?=\())|(?<type>\b[A-Z][A-Za-z0-9_]*\b)"#
+    private static let hashGap = cGap
+    private static let sqlGap = #"(?<number>\b\d[\d_]*(?:\.\d+)?\b)"#
+    private static let htmlGap = #"(?<tag></?[A-Za-z][A-Za-z0-9-]*)|(?<number>\b\d[\d_]*(?:\.\d+)?\b)"#
+    private static let cssGap = #"(?<number>\b\d[\d_]*(?:\.\d+)?(?:px|em|rem|%|vh|vw|pt)?\b)"#
+    private static let jsonGap = #"(?<number>\b-?\d+(?:\.\d+)?\b)|(?<keyword>\b(?:true|false|null)\b)"#
+
+    private static var regexCache: [String: NSRegularExpression] = [:]
+
+    private static func masterRegex(for spec: LanguageSpec, language: String) -> NSRegularExpression? {
+        if let cached = regexCache[language] { return cached }
+        var pattern = spec.literalPattern
+        if let gap = spec.gapPattern { pattern += "|" + gap }
+        if !spec.keywords.isEmpty {
+            let kw = spec.keywords.sorted { $0.count > $1.count }
+                .map { NSRegularExpression.escapedPattern(for: $0) }
+                .joined(separator: "|")
+            pattern += "|(?<keyword>\\b(?:\(kw))\\b)"
+        }
+        guard let re = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
+        regexCache[language] = re
+        return re
+    }
+
+    private struct Palette {
+        let keyword, string, comment, number, typeName, functionCall: UIColor
+    }
+
+    private static func palette(dark: Bool) -> Palette {
+        if dark {
+            return Palette(
+                keyword: UIColor(red: 0xC6/255, green: 0x78/255, blue: 0xDD/255, alpha: 1),
+                string: UIColor(red: 0x98/255, green: 0xC3/255, blue: 0x79/255, alpha: 1),
+                comment: UIColor(red: 0x7F/255, green: 0x84/255, blue: 0x8E/255, alpha: 1),
+                number: UIColor(red: 0xD1/255, green: 0x9A/255, blue: 0x66/255, alpha: 1),
+                typeName: UIColor(red: 0xE5/255, green: 0xC0/255, blue: 0x7B/255, alpha: 1),
+                functionCall: UIColor(red: 0x61/255, green: 0xAF/255, blue: 0xEF/255, alpha: 1))
+        }
+        return Palette(
+            keyword: UIColor(red: 0xCF/255, green: 0x22/255, blue: 0x2E/255, alpha: 1),
+            string: UIColor(red: 0x0A/255, green: 0x30/255, blue: 0x69/255, alpha: 1),
+            comment: UIColor(red: 0x59/255, green: 0x63/255, blue: 0x6E/255, alpha: 1),
+            number: UIColor(red: 0x05/255, green: 0x50/255, blue: 0xAE/255, alpha: 1),
+            typeName: UIColor(red: 0x95/255, green: 0x38/255, blue: 0x00/255, alpha: 1),
+            functionCall: UIColor(red: 0x82/255, green: 0x50/255, blue: 0xDF/255, alpha: 1))
+    }
+
+    private static func isDarkBackground(_ bg: UIColor) -> Bool {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        guard bg.resolvedColor(with: UITraitCollection.current).getRed(&r, green: &g, blue: &b, alpha: &a) else {
+            return true // code blocks default to the dark aesthetic
+        }
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.5
+    }
+
+    /// Highlight `code`; falls back to plain (font + plainColor) for unknown
+    /// languages, over-long input, or regex failures. Never throws.
+    static func highlight(_ code: String, language: String?, font: UIFont, plainColor: UIColor, background: UIColor) -> NSAttributedString {
+        let result = NSMutableAttributedString(string: code, attributes: [.font: font, .foregroundColor: plainColor])
+        guard code.count <= maxHighlightLength,
+              let spec = spec(for: language),
+              let re = masterRegex(for: spec, language: (language ?? "").lowercased()) else {
+            return result
+        }
+        let pal = palette(dark: isDarkBackground(background))
+        let ns = code as NSString
+        let full = NSRange(location: 0, length: ns.length)
+        let commentFont: UIFont = {
+            let desc = font.fontDescriptor.withSymbolicTraits(.traitItalic)
+            return desc.map { UIFont(descriptor: $0, size: 0) } ?? font
+        }()
+        re.enumerateMatches(in: code, options: [], range: full) { m, _, _ in
+            guard let m else { return }
+            func apply(_ name: String, color: UIColor, font overrideFont: UIFont? = nil) {
+                let r = m.range(withName: name)
+                guard r.location != NSNotFound else { return }
+                result.addAttribute(.foregroundColor, value: color, range: r)
+                if let f = overrideFont { result.addAttribute(.font, value: f, range: r) }
+            }
+            apply("comment", color: pal.comment, font: commentFont)
+            apply("string", color: pal.string)
+            apply("number", color: pal.number)
+            apply("keyword", color: pal.keyword)
+            apply("call", color: pal.functionCall)
+            apply("type", color: pal.typeName)
+            apply("tag", color: pal.keyword)
+        }
+        return result
     }
 }
 
@@ -7149,6 +7641,9 @@ final class SelectableMarkdownTextView: UITextView, UIGestureRecognizerDelegate 
                 sum &+= UInt64(bitPattern: Int64(code.contentFingerprint))
             }
         }
+        // [chat-ui] A manual code-block collapse toggle changes no content —
+        // fold the generation in so the toggle defeats SKIP-DEDUPE.
+        sum &+= CodeBlockAttachment.collapseGeneration
         return sum
     }
 
