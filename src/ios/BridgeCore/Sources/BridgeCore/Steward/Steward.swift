@@ -160,14 +160,23 @@ public actor Steward {
     /// nil = 没装门，敏感工具一律拒绝（默认安全）。
     private let approvalGate: (any SensitiveApprovalGate)?
 
+    /// 运行中任务被取消/打断时的"硬停"钩子（宿主 App 注入）：直接杀底层
+    /// 执行资源（如 iSH 沙箱里的进程组）。nil = 没装钩子，只靠 Swift
+    /// 任务取消传播。钩子在 runningTask?.cancel() 之后调——取消传播是主
+    /// 路径，钩子是兜底（任务若卡在不响应取消的环节，进程不会自己停）；
+    /// 两者都幂等（重复杀已死的进程组无害）。
+    private let hardStopHook: (@Sendable () -> Void)?
+
     public init(
         registry: ToolRegistry,
         cleaner: ResultCleaner = ResultCleaner(),
-        approvalGate: (any SensitiveApprovalGate)? = nil
+        approvalGate: (any SensitiveApprovalGate)? = nil,
+        hardStopHook: (@Sendable () -> Void)? = nil
     ) {
         self.registry = registry
         self.cleaner = cleaner
         self.approvalGate = approvalGate
+        self.hardStopHook = hardStopHook
     }
 
     // MARK: - 提交与查询
@@ -216,11 +225,14 @@ public actor Steward {
     }
 
     /// 取消任务：排队中的立刻收尾；运行中的标记并取消其任务，由运行流程收尾。
+    /// [T-bridge-kill] 运行中的任务还会走 hardStopHook 显式硬停底层进程
+    /// （取消传播是主路径，钩子是兜底——卡在不响应取消环节的进程不会自己停）。
     public func cancel(_ id: UUID) {
         guard let result = results[id], !result.state.isTerminal else { return }
         cancelRequested.insert(id)
         if runningID == id {
             runningTask?.cancel()
+            hardStopHook?()
         } else if queue.contains(id) {
             queue.removeAll { $0 == id }
             finish(
@@ -232,11 +244,15 @@ public actor Steward {
     /// 主人打断（App 内主人手动触发）：停任务的动作与 `cancel` 相同，
     /// 但终态是 `.interruptedByOwner`、回给外部调用方的是
     /// `ownerInterruptedText`，与一般取消/超时/失败明确区分。
+    /// [T-bridge-kill] 同 cancel，运行中的任务走 hardStopHook 显式硬停
+    /// 底层进程；终态语义不变（`.interruptedByOwner`，外部 AI 照样收到
+    /// "主人打断"报错），只是沙箱里的进程也真停。
     public func interruptByOwner(_ id: UUID) {
         guard let result = results[id], !result.state.isTerminal else { return }
         ownerInterruptRequested.insert(id)
         if runningID == id {
             runningTask?.cancel()
+            hardStopHook?()
         } else if queue.contains(id) {
             queue.removeAll { $0 == id }
             finish(

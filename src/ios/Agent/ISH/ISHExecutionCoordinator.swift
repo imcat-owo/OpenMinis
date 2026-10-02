@@ -10,6 +10,78 @@ struct ISHCommandResult {
     let exitCode: Int
 }
 
+/// [T-bridge-kill] 单命令的 resume 所有权盒：completion / 超时 / pid<0
+/// 三条原有路径与任务取消 handler 共用"恰好一次 resume"。
+/// 取消 handler 是 @Sendable，不能捕获 runCommand 闭包里的局部
+/// claimResume 函数，所以锁、标记与 continuation 都搬到这个盒子里；
+/// resume 一律在锁外执行（沿用 T-ish-continuation-double-resume 的教训：
+/// 锁内 resume 等于在持锁时跑任意调用方代码）。
+/// 只杀本命令自己的 pid——同会话里并发的其他命令不受影响。
+/// 每条命令一个盒子，无跨命令竞争。
+final class ISHCommandResumeBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<ISHCommandResult, Error>?
+    private var resumed = false
+    /// 已知的进程组根 pid；0 = 进程还没创建出来。
+    private var pid: Int32 = 0
+    /// pid 未知时到来的取消请求（落在创建窗口内）；setup 路补兑现。
+    private var cancelRequested = false
+
+    func store(_ c: CheckedContinuation<ISHCommandResult, Error>) {
+        lock.lock()
+        continuation = c
+        lock.unlock()
+    }
+
+    func setPid(_ p: Int32) {
+        lock.lock()
+        pid = p
+        lock.unlock()
+    }
+
+    /// 恰好一个调用者拿走 resume 权；在锁外 resume。
+    func claim() -> CheckedContinuation<ISHCommandResult, Error>? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !resumed, let c = continuation else { return nil }
+        resumed = true
+        continuation = nil
+        return c
+    }
+
+    /// @Sendable 取消 handler 入口：pid 已知就地杀进程组并以
+    /// CancellationError 唤醒；pid 还没出来只记请求，setup 路在拿到
+    /// pid 后立刻补杀（见 consumePendingCancel）。
+    func handleCancel() {
+        lock.lock()
+        cancelRequested = true
+        guard !resumed, let c = continuation, pid > 0 else {
+            lock.unlock()
+            return
+        }
+        resumed = true
+        continuation = nil
+        let p = pid
+        lock.unlock()
+        ISHShellExecutor.killProcessGroup(p)
+        // 与超时路径同理：kill 激起的退出通知在僵尸场景下可能永远不来，
+        // 自己释放执行上下文（幂等，已释放就是 no-op）。
+        ISHShellExecutor.finalizeTimedOutPid(p)
+        c.resume(throwing: CancellationError())
+    }
+
+    /// setup 路：pid 刚拿到时，兑现在创建窗口内到达的取消。
+    /// 返回非 nil 时调用方必须立刻杀进程组、resume 并 return。
+    func consumePendingCancel() -> CheckedContinuation<ISHCommandResult, Error>? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard cancelRequested, !resumed, let c = continuation else { return nil }
+        resumed = true
+        continuation = nil
+        return c
+    }
+}
+
 /// Errors specific to the execution coordinator.
 enum ISHCoordinatorError: Error, LocalizedError {
     case kernelNotBooted
@@ -129,15 +201,26 @@ actor ISHExecutionCoordinator {
 
         let fsContext = MinisFsRouter.shared.context(for: sessionId)
 
-        return try await runCommand(
-            sessionId: sessionId,
-            myId: myId,
-            fsContext: fsContext,
-            command: command,
-            timeout: timeout,
-            lineCallback: lineCallback,
-            pidCallback: pidCallback
-        )
+        // [T-bridge-kill] 取消即真停：等命令的任务被取消时，杀掉本命令的
+        // 进程组并以 CancellationError 唤醒——否则任务只在 Swift 层翻状态，
+        // 沙箱里的进程跑到它自己的超时（30–120 秒）才停，而且挂起的
+        // continuation 永远没人 resume（任务链泄漏）。只杀本命令自己的
+        // pid，同会话并发的其他命令不受影响。
+        let resumeBox = ISHCommandResumeBox()
+        return try await withTaskCancellationHandler {
+            try await self.runCommand(
+                sessionId: sessionId,
+                myId: myId,
+                fsContext: fsContext,
+                command: command,
+                timeout: timeout,
+                lineCallback: lineCallback,
+                pidCallback: pidCallback,
+                resumeBox: resumeBox
+            )
+        } onCancel: {
+            resumeBox.handleCancel()
+        }
     }
 
     /// Called from loadSession() for UI readiness. Per-session buckets are
@@ -284,7 +367,8 @@ actor ISHExecutionCoordinator {
         command: String,
         timeout: TimeInterval?,
         lineCallback: @escaping (String) -> Void,
-        pidCallback: @escaping (Int32) -> Void
+        pidCallback: @escaping (Int32) -> Void,
+        resumeBox: ISHCommandResumeBox
     ) async throws -> ISHCommandResult {
         let effectiveTimeout = timeout ?? 300 // 5 minute default
 
@@ -314,10 +398,12 @@ actor ISHExecutionCoordinator {
         let stdinData = scriptContent.data(using: .utf8)
 
         return try await withCheckedThrowingContinuation { continuation in
+            resumeBox.store(continuation)
             // [T-ish-continuation-double-resume] `resumed` is read and written
-            // from up to four different threads, so a bare `var` cannot guard
-            // the continuation: the check and the set are separate operations
-            // and two racers can both pass the check. Resuming a
+            // from up to five different threads now (completion / sweeper /
+            // pid<0 / timeout / task-cancel handler), so a bare `var` cannot
+            // guard the continuation: the check and the set are separate
+            // operations and two racers can both pass the check. Resuming a
             // CheckedContinuation twice is a fatalError — the EXC_BREAKPOINT
             // (SIGTRAP) crash reported 2026-08-14 21:26 on iOS 27 under
             // "github triggered action", i.e. a long command finishing right at
@@ -330,23 +416,16 @@ actor ISHExecutionCoordinator {
             //                 why "both are on main" is not true
             //   pid < 0     — the calling thread, synchronously
             //   timeout     — main queue, via asyncAfter
+            //   task cancel — any thread, via withTaskCancellationHandler
             //
             // The lock covers ONLY the test-and-set. `continuation.resume` is
             // deliberately called OUTSIDE it: that hands control back to the
             // suspended async function, and running it under a lock is exactly
             // the "arbitrary caller code while holding a lock" hazard that
-            // ISHShellExecutor's own sweeper documents. Both the lock and the
-            // flag are per-call locals, so there is no cross-command contention.
-            let resumeLock = NSLock()
-            var resumed = false
-            /// True for exactly one caller — the one that owns the resume.
-            func claimResume() -> Bool {
-                resumeLock.lock()
-                defer { resumeLock.unlock() }
-                if resumed { return false }
-                resumed = true
-                return true
-            }
+            // ISHShellExecutor's own sweeper documents. Ownership lives in
+            // ISHCommandResumeBox (per-call, so no cross-command contention)
+            // because the @Sendable cancel handler can't capture a local
+            // claim closure.
             var timeoutWork: DispatchWorkItem?
 
             let pid = ISHShellExecutor.executeExecutable(
@@ -358,7 +437,7 @@ actor ISHExecutionCoordinator {
                 lineCallback: { line, _ in
                 lineCallback(line)
             }, completion: { [weak self] result in
-                guard claimResume() else { return }
+                guard let cont = resumeBox.claim() else { return }
                 timeoutWork?.cancel()
 
                 Task { await self?.recordInflightPid(sessionId: sessionId, id: myId, pid: 0) }
@@ -378,11 +457,11 @@ actor ISHExecutionCoordinator {
                 }
 
                 logger.info("Command completed. Exit code: \(result.exitCode), output: \(output.count) chars")
-                continuation.resume(returning: ISHCommandResult(output: output, exitCode: Int(result.exitCode)))
+                cont.resume(returning: ISHCommandResult(output: output, exitCode: Int(result.exitCode)))
             })
 
             if pid < 0 {
-                guard claimResume() else { return }
+                guard let cont = resumeBox.claim() else { return }
                 let errorMsg: String
                 switch ISHShellExecutorError(rawValue: Int(pid)) {
                 case .processCreationFailed:
@@ -397,7 +476,7 @@ actor ISHExecutionCoordinator {
                     errorMsg = "Execution error (code: \(pid))"
                 }
                 logger.error("ISHShellExecutor failed: \(errorMsg)")
-                continuation.resume(returning: ISHCommandResult(output: "Error: \(errorMsg)", exitCode: -1))
+                cont.resume(returning: ISHCommandResult(output: "Error: \(errorMsg)", exitCode: -1))
                 return
             }
 
@@ -410,10 +489,22 @@ actor ISHExecutionCoordinator {
             // Track PID
             Task { await self.recordInflightPid(sessionId: sessionId, id: myId, pid: pid) }
             pidCallback(pid)
+            resumeBox.setPid(pid)
+
+            // [T-bridge-kill] 取消落在"进程创建窗口"内时，cancel handler
+            // 还拿不到 pid（只记了请求）；这里拿到 pid 后立刻补杀并唤醒，
+            // 否则进程刚生下来就没人认领、跑到它自己的超时。
+            if let cont = resumeBox.consumePendingCancel() {
+                ISHShellExecutor.killProcessGroup(pid)
+                ISHShellExecutor.finalizeTimedOutPid(pid)
+                pidCallback(0)
+                cont.resume(throwing: CancellationError())
+                return
+            }
 
             // Timeout safety net
             let work = DispatchWorkItem { [weak self] in
-                guard claimResume() else { return }
+                guard let cont = resumeBox.claim() else { return }
                 // [T-ish-thread-leak] Reap the WHOLE process group, not just the
                 // root pid. A bare killProcess(pid, SIGTERM) leaves children +
                 // their emu task threads alive after the continuation resumes —
@@ -437,7 +528,7 @@ actor ISHExecutionCoordinator {
                 Task { await self?.recordInflightPid(sessionId: sessionId, id: myId, pid: 0) }
                 pidCallback(0)
                 logger.warning("Command timed out after \(effectiveTimeout)s — killing process group pid=\(pid)")
-                continuation.resume(returning: ISHCommandResult(output: "(command timed out after \(Int(effectiveTimeout))s)", exitCode: -1))
+                cont.resume(returning: ISHCommandResult(output: "(command timed out after \(Int(effectiveTimeout))s)", exitCode: -1))
             }
             timeoutWork = work
             DispatchQueue.main.asyncAfter(

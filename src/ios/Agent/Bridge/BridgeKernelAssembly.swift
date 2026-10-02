@@ -45,7 +45,16 @@ final class BridgeKernelAssembly {
         self.registry = registry
         // 敏感审批门：敏感工具执行前走手机侧弹框请主人确认，
         // 外部 AI 传进来的任何标记都不被信任（用户-P1）。
-        let steward = Steward(registry: registry, approvalGate: StewardSensitiveApprovalGate())
+        // [T-bridge-kill] 硬停钩子：主人打断/取消在跑任务时，直杀桥会话
+        // 里沙箱命令的进程组（只停桥这一条，不碰 Swift 任务取消的主路径；
+        // 坐标层 execute 的取消 handler 是更精准的主路径，这里是兜底）。
+        let steward = Steward(
+            registry: registry,
+            approvalGate: StewardSensitiveApprovalGate(),
+            hardStopHook: {
+                ISHExecutionCoordinator.stopAllNonisolated(sessionId: OffloadToolRunner.bridgeSessionId)
+            }
+        )
         self.steward = steward
         self.sessionManager = MCPSessionManager(registry: registry, steward: steward)
 
