@@ -265,7 +265,7 @@ struct BridgeExternalConnectionView: View {
                 pendingNewToken = nil
             }
         } message: {
-            Text(AppLocalized("两步才算换完：① App 这边已换上新口令（中继开着的话已自动重连）；② 去 Cloudflare 控制台 → bridge-relay → 设置 → 环境变量，把 RELAY_TOKEN 改成刚复制的新口令并保存。两步都做完，旧口令立刻作废。"))
+            Text(AppLocalized("两步才算换完：① App 这边已换上新口令，已用新口令自动重连（去 CF 更新前显示「启动中」，更新完自动连上，不用手动开关中继）；② 去 Cloudflare 控制台 → bridge-relay → 设置 → 环境变量，把 RELAY_TOKEN 改成刚复制的新口令并保存。两步都做完，旧口令立刻作废。"))
         }
     }
 
@@ -421,15 +421,17 @@ struct BridgeExternalConnectionView: View {
 
     // MARK: 口令换新
 
-    /// 一键换新：生成强口令→落钥匙串→输入框同步→开着中继就断开旧通道
-    /// 用新口令重连（worker 侧每帧验口令，旧口令立刻作废）；然后弹指引
-    /// 让她去 CF 控制台把 RELAY_TOKEN 也换成新的，两步才算换完。
+    /// 一键换新：生成强口令→落钥匙串→输入框同步→开着中继就走
+    /// beginTokenRotation 置"换新中"标记并用新口令重连（worker 侧每帧
+    /// 验口令，旧口令立刻作废）；标记起效期间 CF 侧的拒绝按退避重试、
+    /// 不进永久口令错误，所以弹指引让她去 CF 控制台把 RELAY_TOKEN 也
+    /// 换成新的，两步才算换完，回来时 App 已自动连上。
     private func rotateToken() {
         let newToken = BridgeRelayTokenStore.generateStrongToken()
         BridgeRelayTokenStore.save(newToken)
         tokenInput = newToken
         if relay.isEnabled {
-            relay.reconnect()
+            relay.beginTokenRotation()
         }
         pendingNewToken = newToken
         showRotationGuide = true

@@ -58,6 +58,16 @@ final class BridgeRelayClient: NSObject, ObservableObject {
     private var handshakeAuthRejected = false
 
     private var backoff = RelayBackoff()
+    /// 口令换新标记：设置页 rotateToken 置起。换新后 CF 侧 RELAY_TOKEN
+    /// 还没更新前，中继必然用 4401/401/403 拒绝新口令——这是换新中途
+    /// 的必然阶段，不是口令配错，所以这期间的拒绝不进永久 .authError，
+    /// 而是走 .starting＋退避重试，等她在 CF 更新完自动连上。
+    /// 清标记：连上（handleDidOpen）、手动改口令/手动开关中继（reconnect/
+    /// setEnabled/stopAll）、30 分钟超时兜底（expireTokenRotation）。
+    private var tokenRotationPending = false
+    /// 换新超时兜底计时器：30 分钟还没连上就清标记、按正常口令错误停，
+    /// 防的是她一直没去 CF 更新导致无限重试。
+    private var rotationTimeoutTask: Task<Void, Never>?
     /// 请求去重台账（五-1）：按 req 编号记「处理中 / 已完成＋响应帧」。
     /// 跨连接代次存活（编号本身就是幂等键，换连接不换账），
     /// 有界淘汰在台账内部。线程安全（内部加锁），detached 转发
@@ -97,7 +107,10 @@ final class BridgeRelayClient: NSObject, ObservableObject {
     // MARK: - 对外开关与生命周期
 
     /// 设置页开关入口：持久化后期望状态，开→连，关→停（且不再重连）。
+    /// 手动开关中继时清掉"换新中"标记——用户亲自接管了，就不再按
+    /// 换新语义宽限口令拒绝（见 beginTokenRotation）。
     func setEnabled(_ on: Bool) {
+        clearTokenRotation()
         BridgeRelayPreferences.relayEnabled = on
         isEnabled = on
         syncKeepAliveDemand()
@@ -120,10 +133,57 @@ final class BridgeRelayClient: NSObject, ObservableObject {
 
     /// 配置变了（地址/口令改完提交）时调用：开着就用新配置重连，
     /// 停在口令错误时也借此再试一次；关着则什么都不做。
+    /// 手动改配置时清掉"换新中"标记（见 setEnabled 注释）。
     func reconnect() {
+        clearTokenRotation()
         guard isEnabled else { return }
         teardownSocket()
         startConnecting()
+    }
+
+    /// 口令换新入口（设置页 rotateToken 调）：置"换新中"标记＋断开
+    /// 旧通道用新口令重连。标记起效期间，4401/4403/401/403 不进
+    /// 永久 .authError，而是 .starting＋退避重试——CF 侧更新完立刻
+    /// 自动连上，不用她手动开关中继。
+    func beginTokenRotation() {
+        tokenRotationPending = true
+        armRotationTimeout()
+        guard isEnabled else { return }
+        teardownSocket()
+        startConnecting()
+    }
+
+    /// 清"换新中"标记＋掐掉超时计时器。手动改口令、手动开关中继时
+    /// 调用——用户亲自接管后不再按换新语义宽限。
+    private func clearTokenRotation() {
+        tokenRotationPending = false
+        rotationTimeoutTask?.cancel()
+        rotationTimeoutTask = nil
+    }
+
+    /// 30 分钟超时兜底计时器。超时时若还没连上：清标记、停掉退避、
+    /// 按正常口令错误停（大概率她忘了去 CF 更新，不许无限重试）。
+    private func armRotationTimeout() {
+        rotationTimeoutTask?.cancel()
+        rotationTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 30 * 60 * 1_000_000_000)
+            guard !Task.isCancelled else { return }
+            await self?.expireTokenRotation()
+        }
+    }
+
+    private func expireTokenRotation() {
+        guard tokenRotationPending else { return }
+        clearTokenRotation()
+        // P2-6 的 .starting 是钥匙串暂不可读（标记为 false），和换新
+        // 场景互斥；能到这里的 .starting 就是换新重试中。把它停成
+        // 正常口令错误，让她去对口令。
+        if isEnabled, state == .starting {
+            reconnectTask?.cancel()
+            reconnectTask = nil
+            relayLog.error("relay token rotation timed out without reconnect; treating as auth error")
+            publish(.authError)
+        }
     }
 
     /// 用户-P2-6：可恢复的失败（钥匙串暂不可读）按退避稍后自动重试。
@@ -225,6 +285,8 @@ final class BridgeRelayClient: NSObject, ObservableObject {
                 // await 期间连接可能已被换掉，对完代次才许落在线。
                 guard self.generation == gen, self.state == .connecting else { return }
                 self.backoff.reset()
+                // 口令换新成功：CF 侧已认新口令，清"换新中"标记。
+                self.clearTokenRotation()
                 self.publish(.online)
                 relayLog.info("relay online")
                 self.startPingLoop(generation: gen)
@@ -319,6 +381,16 @@ final class BridgeRelayClient: NSObject, ObservableObject {
 
         let code = closeCode?.rawValue ?? 0
         if authRejected || code == 4401 || code == 4403 {
+            // 口令换新中：CF 侧还没更新到新口令，拒绝是必然阶段——
+            // 不进永久 .authError，走 .starting＋退避重试（和 P2-6 的
+            // 钥匙串暂不可读同一套），CF 更新完立刻自动连上。
+            // 非换新场景的口令拒绝：照常停在 .authError 不再重试。
+            if tokenRotationPending {
+                relayLog.warning("relay rejected during token rotation (closeCode=\(code)); retrying with backoff")
+                publish(.starting)
+                scheduleRetry()
+                return
+            }
             relayLog.error("relay rejected credentials (closeCode=\(code)); stopping until token is fixed")
             publish(.authError)
             return
@@ -339,8 +411,10 @@ final class BridgeRelayClient: NSObject, ObservableObject {
         }
     }
 
-    /// 用户关开关 / 主动断开：拆掉一切，落离线，退避清零。
+    /// 用户关开关 / 主动断开：拆掉一切，落离线，退避清零，
+    /// 顺带清"换新中"标记（见 setEnabled 注释）。
     private func stopAll() {
+        clearTokenRotation()
         reconnectTask?.cancel()
         reconnectTask = nil
         teardownSocket()
