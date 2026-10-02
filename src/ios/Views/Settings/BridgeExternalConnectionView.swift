@@ -227,6 +227,7 @@ struct BridgeExternalConnectionView: View {
         switch relay.state {
         case .online: return AppLocalized("在线")
         case .connecting: return AppLocalized("连接中")
+        case .starting: return AppLocalized("启动中")
         case .offline: return AppLocalized("离线")
         case .authError: return AppLocalized("口令错误")
         }
@@ -235,7 +236,7 @@ struct BridgeExternalConnectionView: View {
     private var relayStatusColor: Color {
         switch relay.state {
         case .online: return .green
-        case .connecting: return .orange
+        case .connecting, .starting: return .orange
         case .offline: return .gray
         case .authError: return .red
         }

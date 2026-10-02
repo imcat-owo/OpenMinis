@@ -29,8 +29,27 @@ enum BridgeRelayTokenStore {
 
     /// 读口令。取不到（没填 / 钥匙串异常）返回 nil；调用方据此提示
     /// 「口令错误 / 未配置」，不要拿空串去连——那只会白撞一次中继。
+    /// 需要区分"没配"和"钥匙串暂不可读"时用 loadDetailed()。
     static func load() -> String? {
-        keychainGet().flatMap { String(data: $0, encoding: .utf8) }
+        if case .configured(let token) = loadDetailed() { return token }
+        return nil
+    }
+
+    /// 口令读取的细分结果（用户-P2-6）：把"没配过"和"钥匙串暂不可读
+    /// （冷启动、锁屏中等，可稍后重试）"区分开，调用方别把后者报成
+    /// 红色"口令错误"吓她。
+    enum TokenLoadResult {
+        case configured(String)
+        case notConfigured
+        case readFailed
+    }
+
+    static func loadDetailed() -> TokenLoadResult {
+        let (data, readFailed) = keychainGetDetailed()
+        if let data, let token = String(data: data, encoding: .utf8), !token.isEmpty {
+            return .configured(token)
+        }
+        return readFailed ? .readFailed : .notConfigured
     }
 
     static func delete() {
@@ -83,7 +102,9 @@ enum BridgeRelayTokenStore {
         }
     }
 
-    private static func keychainGet() -> Data? {
+    /// 钥匙串读取（含状态区分）：errSecSuccess→值；errSecItemNotFound→没配过；
+    /// 其他状态码→暂不可读（冷启动等），调用方可稍后重试。只记状态码，不记口令。
+    private static func keychainGetDetailed() -> (data: Data?, readFailed: Bool) {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -92,8 +113,15 @@ enum BridgeRelayTokenStore {
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
         var result: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else { return nil }
-        return result as? Data
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecSuccess {
+            return (result as? Data, false)
+        }
+        if status == errSecItemNotFound {
+            return (nil, false)
+        }
+        log.error("[Keychain] relay token read failed status=\(status)")
+        return (nil, true)
     }
 }
 
