@@ -348,7 +348,12 @@ final class BackupSnapshotService {
             BackupHistory.shared.remove(runId)
             logger.info("[Backup] snapshot cancelled")
         } catch {
-            BackupHistory.shared.fail(runId, message: error.localizedDescription)
+            // [P3-11] The user never started this run — a "failed" history
+            // entry for an automatic snapshot they didn't ask for reads as
+            // something THEY did wrong. Same shape as the busy / cancelled
+            // branches above: leave no history record behind, keep it in
+            // the log.
+            BackupHistory.shared.remove(runId)
             logger.error("[Backup] snapshot failed: \(error.localizedDescription)")
         }
     }
