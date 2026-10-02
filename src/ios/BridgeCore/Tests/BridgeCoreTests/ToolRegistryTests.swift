@@ -95,6 +95,35 @@ final class ToolRegistryTests: XCTestCase {
         XCTAssertEqual(hits.first?.summary, "等待指定的毫秒数后返回（验证超时与取消用）")
     }
 
+    func testSearchHitCarriesParameterBrief() async throws {
+        // AI-P1-6：搜索命中要带参数简述（参数名/类型/必填），保持短。
+        let registry = ToolRegistry()
+        try await registry.register(
+            descriptor: ToolDescriptor(
+                name: "brief_tool", summary: "参数简述假工具",
+                parameterSchemaJSON: #"""
+                    {"type":"object","properties":{
+                      "title":{"type":"string"},
+                      "count":{"type":"integer"},
+                      "verbose":{"type":"boolean"}},
+                     "required":["title"]}
+                    """#)
+        ) { _ in ToolOutput(text: "ok") }
+        let hits = await registry.search("简述")
+        let brief = try XCTUnwrap(hits.first?.parameterBrief)
+        XCTAssertTrue(brief.contains("title(字符串,必填)"), "实际：\(brief)")
+        XCTAssertTrue(brief.contains("count(整数)"), "实际：\(brief)")
+        XCTAssertTrue(brief.contains("verbose(布尔)"), "实际：\(brief)")
+        XCTAssertFalse(brief.contains("description"), "不能把完整 schema 倒出来")
+    }
+
+    func testSearchHitParameterBriefEmptyWhenNoSchema() async throws {
+        // 没有 properties 的 schema：简述为空，不污染结果。
+        let registry = try await makeRegistry()
+        let hits = await registry.search("回声")
+        XCTAssertEqual(hits.first?.parameterBrief, "")
+    }
+
     func testDisableHidesFromSearchAndInvoke() async throws {
         let registry = try await makeRegistry()
         try await registry.setEnabled(false, for: FakeTools.echoName)

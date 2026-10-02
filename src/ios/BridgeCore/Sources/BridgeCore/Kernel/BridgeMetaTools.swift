@@ -17,7 +17,7 @@ public enum BridgeMetaTools {
             title: "桥",
             instructions: """
                 你连上的是「桥」。桥对外只有两个工具：
-                先用「搜」按关键词找到能干活的工具（返回名字与一句话简介），
+                先用「搜」按关键词找到能干活的工具（返回名字、一句话简介与参数简述），
                 再用「命令」下指令让桥里的小管家执行，只回清洗后的高密度结果。
                 """,
             capabilities: .init(tools: .init(listChanged: false))
@@ -25,7 +25,7 @@ public enum BridgeMetaTools {
 
         let searchTool = Tool(
             name: searchName,
-            description: "在桥的工具库里按关键词搜索可用工具，返回短清单（名字 + 一句话简介）。先搜再执行。",
+            description: "在桥的工具库里按关键词搜索可用工具，返回短清单（名字 + 一句话简介 + 参数简述）。先搜再执行。",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -110,7 +110,13 @@ public enum BridgeMetaTools {
         guard !hits.isEmpty else {
             return textResult("没有找到与「\(query)」匹配的工具。")
         }
-        let lines = hits.map { "- \($0.name)：\($0.summary)" }
+        let lines = hits.map { hit -> String in
+            var line = "- \(hit.name)：\(hit.summary)"
+            if !hit.parameterBrief.isEmpty {
+                line += "\n  参数：\(hit.parameterBrief)"
+            }
+            return line
+        }
         return textResult("找到 \(hits.count) 个工具：\n" + lines.joined(separator: "\n"))
     }
 
