@@ -49,6 +49,13 @@ struct BridgeExternalConnectionView: View {
     @State private var saveFeedback: String?
     @State private var saveFeedbackToken = 0
 
+    /// PM-P1-1：刚复制过外部连接地址时的短暂提示。
+    @State private var justCopiedExternalURL: Bool = false
+
+    /// 口令换新指引：刚生成的口令（供"复制新口令"按钮用）与指引弹窗开关。
+    @State private var pendingNewToken: String? = nil
+    @State private var showRotationGuide: Bool = false
+
     var body: some View {
         Form {
             Section {
@@ -111,6 +118,25 @@ struct BridgeExternalConnectionView: View {
                     }
                 }
                 tokenField
+                // PM-P1-1：外部 AI 连的是 worker 的 POST /mcp/<token>（见
+                // BridgeRelayProtocol.externalMcpURLString），拼好一键复制。
+                Button {
+                    copyExternalConnectionURL()
+                } label: {
+                    Text(AppLocalized("复制外部连接地址"))
+                }
+                .disabled(externalConnectionURLString == nil)
+                if justCopiedExternalURL {
+                    Text(AppLocalized("已复制，去外部 AI 的 MCP 设置里粘贴即可"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                // 口令换新：一键生成强口令并换上（见 rotateToken）。
+                Button {
+                    rotateToken()
+                } label: {
+                    Text(AppLocalized("生成强口令"))
+                }
             } header: {
                 Text(AppLocalized("中继连接"))
             } footer: {
@@ -209,6 +235,19 @@ struct BridgeExternalConnectionView: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: saveFeedback)
+        // 口令换新指引：两步都做完旧口令才彻底作废。
+        .alert(AppLocalized("口令已换新"), isPresented: $showRotationGuide) {
+            Button(AppLocalized("复制新口令")) {
+                if let token = pendingNewToken {
+                    UIPasteboard.general.string = token
+                }
+            }
+            Button(AppLocalized("知道了"), role: .cancel) {
+                pendingNewToken = nil
+            }
+        } message: {
+            Text(AppLocalized("两步才算换完：① App 这边已换上新口令（中继开着的话已自动重连）；② 去 Cloudflare 控制台 → bridge-relay → 设置 → 环境变量，把 RELAY_TOKEN 改成刚复制的新口令并保存。两步都做完，旧口令立刻作废。"))
+        }
     }
 
     // MARK: 口令输入（默认 SecureField 遮住；眼睛按钮切明文，与 AddProviderView 同款）
@@ -259,6 +298,7 @@ struct BridgeExternalConnectionView: View {
         switch relay.state {
         case .online: return AppLocalized("在线")
         case .connecting: return AppLocalized("连接中")
+        case .starting: return AppLocalized("启动中")
         case .offline: return AppLocalized("离线")
         case .authError: return AppLocalized("口令错误")
         }
@@ -267,7 +307,7 @@ struct BridgeExternalConnectionView: View {
     private var relayStatusColor: Color {
         switch relay.state {
         case .online: return .green
-        case .connecting: return .orange
+        case .connecting, .starting: return .orange
         case .offline: return .gray
         case .authError: return .red
         }
@@ -338,6 +378,42 @@ struct BridgeExternalConnectionView: View {
                 saveFeedback = nil
             }
         }
+    }
+
+    // MARK: 复制外部连接地址（PM-P1-1）
+
+    /// 当前输入框里的地址+口令拼出的外部 AI 连接地址。
+    /// 口令优先取输入框（她可能刚改了还没回车），框空了才回落钥匙串。
+    private var externalConnectionURLString: String? {
+        let token = tokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let effectiveToken = token.isEmpty ? (BridgeRelayTokenStore.load() ?? "") : token
+        return RelayEndpoint.externalMcpURLString(host: host, token: effectiveToken)
+    }
+
+    private func copyExternalConnectionURL() {
+        guard let urlString = externalConnectionURLString else { return }
+        UIPasteboard.general.string = urlString
+        justCopiedExternalURL = true
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            justCopiedExternalURL = false
+        }
+    }
+
+    // MARK: 口令换新
+
+    /// 一键换新：生成强口令→落钥匙串→输入框同步→开着中继就断开旧通道
+    /// 用新口令重连（worker 侧每帧验口令，旧口令立刻作废）；然后弹指引
+    /// 让她去 CF 控制台把 RELAY_TOKEN 也换成新的，两步才算换完。
+    private func rotateToken() {
+        let newToken = BridgeRelayTokenStore.generateStrongToken()
+        BridgeRelayTokenStore.save(newToken)
+        tokenInput = newToken
+        if relay.isEnabled {
+            relay.reconnect()
+        }
+        pendingNewToken = newToken
+        showRotationGuide = true
     }
 
     /// App 重启后回到本页时：开关期望值是开、服务却没在跑，就补起一次。

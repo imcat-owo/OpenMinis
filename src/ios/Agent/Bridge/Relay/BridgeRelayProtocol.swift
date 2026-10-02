@@ -340,6 +340,17 @@ enum RelayEndpoint {
         return components.url
     }
 
+    /// 拼外部 AI 连接地址：`https://<host>/mcp/<token>`（纯字符串，不经过
+    /// URLComponents——token 是 base64url 字符集，本身 URL-safe）。
+    /// 对应 worker.js 的 `POST /mcp/<token>`：外部 AI 的 MCP 设置里填的
+    /// 就是这一串。host / token 任一缺失返回 nil。
+    static func externalMcpURLString(host rawHost: String, token: String) -> String? {
+        guard let authority = normalizedHost(rawHost) else { return nil }
+        let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedToken.isEmpty else { return nil }
+        return "https://\(authority)/mcp/\(trimmedToken)"
+    }
+
     /// 仅供日志与界面提示的脱敏 host：只露头部与尾部域名，中段打码。
     /// 口令永远不经过这个函数、也不会出现在任何展示里。
     static func maskedHost(_ raw: String) -> String {

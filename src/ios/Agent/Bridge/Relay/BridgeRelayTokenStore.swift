@@ -4,8 +4,10 @@ import Security
 // MARK: - 中继口令的钥匙串存取（合并第 18(a) 条）
 //
 // 协议 v1 约定：kSecClassGenericPassword，service "bridge.relay"，
-// account "token"。口令由用户在设置页粘贴填入（本任务不生成口令），
-// 只存钥匙串、不进 UserDefaults、不进日志、不进界面默认明文展示。
+// account "token"。口令只存钥匙串、不进 UserDefaults、不进日志、
+// 不进界面默认明文展示。
+// 口令来源有两条：她在设置页粘贴填入，或点"生成强口令"由本机生成
+// （generateStrongToken，32 随机字节 base64url 无 padding，与协议一致）。
 // 写法沿用 MCPOAuthController 的仓内现成套路：不可同步（不走 iCloud）、
 // AfterFirstUnlock 可读（后台重连时也能取到）。
 
@@ -27,8 +29,27 @@ enum BridgeRelayTokenStore {
 
     /// 读口令。取不到（没填 / 钥匙串异常）返回 nil；调用方据此提示
     /// 「口令错误 / 未配置」，不要拿空串去连——那只会白撞一次中继。
+    /// 需要区分"没配"和"钥匙串暂不可读"时用 loadDetailed()。
     static func load() -> String? {
-        keychainGet().flatMap { String(data: $0, encoding: .utf8) }
+        if case .configured(let token) = loadDetailed() { return token }
+        return nil
+    }
+
+    /// 口令读取的细分结果（用户-P2-6）：把"没配过"和"钥匙串暂不可读
+    /// （冷启动、锁屏中等，可稍后重试）"区分开，调用方别把后者报成
+    /// 红色"口令错误"吓她。
+    enum TokenLoadResult {
+        case configured(String)
+        case notConfigured
+        case readFailed
+    }
+
+    static func loadDetailed() -> TokenLoadResult {
+        let (data, readFailed) = keychainGetDetailed()
+        if let data, let token = String(data: data, encoding: .utf8), !token.isEmpty {
+            return .configured(token)
+        }
+        return readFailed ? .readFailed : .notConfigured
     }
 
     static func delete() {
@@ -38,6 +59,23 @@ enum BridgeRelayTokenStore {
             kSecAttrAccount as String: account,
         ]
         SecItemDelete(query as CFDictionary)
+    }
+
+    /// 生成强口令：32 随机字节 base64url（无 padding，约 43 字符），与
+    /// 协议 v1 的口令格式约定一致，够长够随机。随机源失败时回退两段
+    /// UUID 拼接（仍具足够随机性），绝不返回空串。只返回口令本身，
+    /// 不记日志——调用方负责落钥匙串。
+    static func generateStrongToken() -> String {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        if SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess {
+            let b64 = Data(bytes).base64EncodedString()
+                .replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_")
+                .replacingOccurrences(of: "=", with: "")
+            if !b64.isEmpty { return b64 }
+        }
+        return UUID().uuidString.replacingOccurrences(of: "-", with: "")
+            + UUID().uuidString.replacingOccurrences(of: "-", with: "")
     }
 
     // MARK: Keychain primitives（与 MCPOAuthController 同形）
@@ -64,7 +102,9 @@ enum BridgeRelayTokenStore {
         }
     }
 
-    private static func keychainGet() -> Data? {
+    /// 钥匙串读取（含状态区分）：errSecSuccess→值；errSecItemNotFound→没配过；
+    /// 其他状态码→暂不可读（冷启动等），调用方可稍后重试。只记状态码，不记口令。
+    private static func keychainGetDetailed() -> (data: Data?, readFailed: Bool) {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -73,8 +113,15 @@ enum BridgeRelayTokenStore {
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
         var result: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else { return nil }
-        return result as? Data
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecSuccess {
+            return (result as? Data, false)
+        }
+        if status == errSecItemNotFound {
+            return (nil, false)
+        }
+        log.error("[Keychain] relay token read failed status=\(status)")
+        return (nil, true)
     }
 }
 

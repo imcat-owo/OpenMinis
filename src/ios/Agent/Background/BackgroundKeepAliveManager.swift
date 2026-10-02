@@ -19,6 +19,12 @@ final class BackgroundKeepAliveManager: NSObject, ObservableObject, CLLocationMa
     /// Used by `waitIfBackgroundSuspended()` to skip suspension.
     @Published private(set) var isActive = false
 
+    /// PM-P1-2：中继连接的保活需求。BridgeRelayClient 在中继开关打开时置
+    /// true、关闭时置 false——无聊天会话、只开中继时，保活也不停，保证
+    /// 手机挂在中继后面不断线。注意这是「要保的连接」不是聊天会话，所以
+    /// 不进 SessionActivityTracker（进了会污染 Live Activity 快照和角标计数）。
+    @Published var relayKeepAliveNeeded: Bool = false
+
     /// [T-keepalive-survival-tier] Background-survival capability shown in
     /// Settings → Background → Status. Independent of whether a task is
     /// running right now — it answers "if the app backgrounds at this moment,
@@ -496,15 +502,17 @@ final class BackgroundKeepAliveManager: NSObject, ObservableObject, CLLocationMa
             }
             .store(in: &cancellables)
 
-        // Re-evaluate keep-alive whenever sessions or toggle change
-        Publishers.CombineLatest(
+        // Re-evaluate keep-alive whenever sessions, the master toggle, or the
+        // relay-connection demand changes (PM-P1-2: 中继连接本身就是保活对象)
+        Publishers.CombineLatest3(
             SessionActivityTracker.shared.$activeSessions,
-            $enhancedBackgroundEnabled
+            $enhancedBackgroundEnabled,
+            $relayKeepAliveNeeded
         )
         .receive(on: DispatchQueue.main)
-        .sink { [weak self] sessions, enabled in
+        .sink { [weak self] sessions, enabled, relayNeeded in
             guard let self else { return }
-            self.reevaluate(sessions: sessions, enabled: enabled)
+            self.reevaluate(sessions: sessions, enabled: enabled, relayNeeded: relayNeeded)
         }
         .store(in: &cancellables)
 
@@ -769,7 +777,7 @@ final class BackgroundKeepAliveManager: NSObject, ObservableObject, CLLocationMa
 
     // MARK: - Evaluate State
 
-    private func reevaluate(sessions: Set<String>, enabled: Bool) {
+    private func reevaluate(sessions: Set<String>, enabled: Bool, relayNeeded: Bool = false) {
         // [T-ios-scenephase-active-sigkill] If we're mid foreground transition
         // (between willEnterForeground and its deferred yield), defer this
         // reevaluation. It writes @Published isActive; doing so on the
@@ -778,12 +786,13 @@ final class BackgroundKeepAliveManager: NSObject, ObservableObject, CLLocationMa
         if pendingForegroundTransition {
             Task { @MainActor in
                 await Task.yield()
-                self.reevaluate(sessions: sessions, enabled: enabled)
+                self.reevaluate(sessions: sessions, enabled: enabled, relayNeeded: relayNeeded)
             }
             return
         }
 
-        let shouldBeActive = !sessions.isEmpty && enabled
+        // PM-P1-2：中继连接本身就是保活对象——无聊天会话、只开中继时也保活。
+        let shouldBeActive = (!sessions.isEmpty || relayNeeded) && enabled
         let sessionList = sessions.prefix(5).joined(separator: ",")
         // [T-ios-log-noise-reduction] INFO→DEBUG: reevaluate runs on every
         // session-set / toggle change and was ~482 lines/day even when nothing

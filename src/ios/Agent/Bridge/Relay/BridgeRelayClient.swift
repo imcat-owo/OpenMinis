@@ -34,9 +34,12 @@ private let relayLog = AppLogger(category: "BridgeRelay")
 final class BridgeRelayClient: NSObject, ObservableObject {
     static let shared = BridgeRelayClient()
 
-    /// 对外状态机（协议约定四态）。界面状态行直接映射这四态。
+    /// 对外状态机（协议约定四态＋一个启动态）。界面状态行直接映射这些态。
     enum ConnectionState: Equatable {
         case offline
+        /// 用户-P2-6：钥匙串暂不可读 / 启动中——不是口令错，稍后自动重试，
+        /// 界面显示"启动中"而不是红色"口令错误"。
+        case starting
         case connecting
         case online
         case authError
@@ -82,6 +85,13 @@ final class BridgeRelayClient: NSObject, ObservableObject {
     private override init() {
         super.init()
         isEnabled = BridgeRelayPreferences.relayEnabled
+        syncKeepAliveDemand()
+    }
+
+    /// PM-P1-2：把中继连接注册成保活要保的对象——开关开着就保，
+    /// 不管有没有聊天会话。关开关 / App 侧停掉时撤回。
+    private func syncKeepAliveDemand() {
+        BackgroundKeepAliveManager.shared.relayKeepAliveNeeded = isEnabled
     }
 
     // MARK: - 对外开关与生命周期
@@ -90,6 +100,7 @@ final class BridgeRelayClient: NSObject, ObservableObject {
     func setEnabled(_ on: Bool) {
         BridgeRelayPreferences.relayEnabled = on
         isEnabled = on
+        syncKeepAliveDemand()
         if on {
             startConnecting()
         } else {
@@ -115,9 +126,25 @@ final class BridgeRelayClient: NSObject, ObservableObject {
         startConnecting()
     }
 
+    /// 用户-P2-6：可恢复的失败（钥匙串暂不可读）按退避稍后自动重试。
+    /// 关开关 / stopAll 会取消这个待重试任务；连上后退避清零（见 handleDidOpen）。
+    private func scheduleRetry() {
+        reconnectTask?.cancel()
+        let delay = backoff.nextDelay()
+        relayLog.info("relay retrying in \(Int(delay))s")
+        reconnectTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled, let self else { return }
+            // 先自清再发起——startConnecting 以「无待重连任务」为前提。
+            self.reconnectTask = nil
+            self.startConnecting()
+        }
+    }
+
     /// 设置页出现时调用：把持久化的开关值同步进来，开着且离线就连上。
     func restoreFromPreferences() {
         isEnabled = BridgeRelayPreferences.relayEnabled
+        syncKeepAliveDemand()
         if isEnabled, state == .offline {
             startConnecting()
         }
@@ -153,10 +180,21 @@ final class BridgeRelayClient: NSObject, ObservableObject {
         reconnectTask = nil
         publish(.connecting)
 
-        guard let token = BridgeRelayTokenStore.load(), !token.isEmpty else {
+        // 用户-P2-6：区分"没配口令"和"钥匙串暂不可读"。后者不是口令错，
+        // 显示"启动中"并按退避自动重试——别让她去改一个没错的口令。
+        let token: String
+        switch BridgeRelayTokenStore.loadDetailed() {
+        case .configured(let t):
+            token = t
+        case .notConfigured:
             // 没填口令：连上去也必然被拒，直接落口令错误，停。
             relayLog.error("relay token missing in keychain; not connecting")
             publish(.authError)
+            return
+        case .readFailed:
+            relayLog.warning("relay token keychain temporarily unreadable; will retry")
+            publish(.starting)
+            scheduleRetry()
             return
         }
         let host = BridgeRelayPreferences.host
