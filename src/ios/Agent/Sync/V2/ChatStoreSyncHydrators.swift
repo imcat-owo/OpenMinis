@@ -1111,8 +1111,23 @@ enum ChatStoreSyncHydrators {
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else { return nil }
 
-        let entries = parseMemoryEntries(from: text)
-        guard !entries.isEmpty else { return nil }
+        let entries: [MemoryEntry] = {
+            let parsed = parseMemoryEntries(from: text)
+            if !parsed.isEmpty { return parsed }
+            // 无 <!-- 时间戳 --> 标记的旧文件：整文件当一条传（时间戳取文件
+            // mtime），别让它卡在"已标脏但永远传不上去"。合并路径不动，
+            // 这里只修上传这一半。
+            let mtime: Date = {
+                if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+                   let d = attrs[.modificationDate] as? Date { return d }
+                return Date()
+            }()
+            let fmt = DateFormatter()
+            fmt.dateFormat = "yyyy-MM-dd HH:mm:ss"
+            return [MemoryEntry(
+                timestamp: fmt.string(from: mtime),
+                content: text.trimmingCharacters(in: .whitespacesAndNewlines))]
+        }()
 
         guard let jsonData = try? JSONEncoder().encode(entries),
               let jsonStr = String(data: jsonData, encoding: .utf8) else { return nil }
