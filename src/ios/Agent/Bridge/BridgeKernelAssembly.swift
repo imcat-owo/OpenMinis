@@ -35,6 +35,17 @@ final class BridgeKernelAssembly {
     private let stateLock = NSLock()
     private var _registrationState: BridgeToolRegistrationState = .registering
 
+    // MARK: - MCP 聚合点（[mcp-agg]）
+
+    /// 她接入的 MCP 工具聚合器（actor，工具清单缓存归它管）。
+    private let mcpAggregator = MCPAggregator()
+
+    /// 当前由聚合器管理的工具 `[聚合名: 指纹]`（stateLock 保护）。
+    private var mcpManagedTools: [String: String] = [:]
+
+    /// servers.json 变化观察者（设置页/CLI/add_mcp 改动 → 2s 去抖重聚合）。
+    private var mcpObserveTask: Task<Void, Never>?
+
     /// 当前工具注册状态（线程安全读）。
     var toolRegistrationState: BridgeToolRegistrationState {
         stateLock.withLock { _registrationState }
@@ -59,6 +70,11 @@ final class BridgeKernelAssembly {
         self.sessionManager = MCPSessionManager(registry: registry, steward: steward)
 
         Task { await self.registerToolsWithRetry() }
+        startMCPObserveTask()
+    }
+
+    deinit {
+        mcpObserveTask?.cancel()
     }
 
     /// 带重试的工具注册。每次重试前先注销已注册的工具名，保证
@@ -137,6 +153,14 @@ final class BridgeKernelAssembly {
             }
             return
         }
+        // MCP 聚合点：她接入并启用的 MCP 工具进注册表（搜/命令两口）。
+        // 单次尝试、永不拖垮整组注册：沙箱没启动、某家连不上都只记日志，
+        // servers.json 下次变化（或设置页手动重试）时再同步。
+        let managed = await mcpAggregator.sync(
+            into: registry,
+            previouslyManaged: stateLock.withLock { mcpManagedTools })
+        stateLock.withLock { mcpManagedTools = managed }
+
         stateLock.withLock { _registrationState = .ready }
     }
 
@@ -150,6 +174,32 @@ final class BridgeKernelAssembly {
         }
         guard shouldRun else { return }
         Task { await self.registerToolsWithRetry() }
+    }
+
+    // MARK: - MCP 聚合重同步（[mcp-agg]）
+
+    /// servers.json 变化观察：去抖 2s 后重聚合。首个值是订阅时的
+    /// 当前快照，跳过（初始同步已在 registerToolsWithRetry 里做过）。
+    private func startMCPObserveTask() {
+        mcpObserveTask = Task { @MainActor [weak self] in
+            var isFirst = true
+            for await _ in MCPStore.shared.$servers.values {
+                if isFirst { isFirst = false; continue }
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard !Task.isCancelled else { return }
+                await self?.resyncMCPAggregation()
+            }
+        }
+    }
+
+    /// MCP 聚合重同步（add_mcp / remove_mcp / toggle_mcp / 设置页改动后调）。
+    /// 服务未运行时（assembly 为 nil）调用方直接无操作；单 server 失败
+    /// 不影响其他 server。
+    func resyncMCPAggregation() async {
+        let managed = await mcpAggregator.sync(
+            into: registry,
+            previouslyManaged: stateLock.withLock { mcpManagedTools })
+        stateLock.withLock { mcpManagedTools = managed }
     }
 
     // MARK: - 主人打断（第 20 条）

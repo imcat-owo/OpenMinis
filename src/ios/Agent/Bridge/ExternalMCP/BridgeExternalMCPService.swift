@@ -126,4 +126,13 @@ public final class BridgeExternalMCPService: @unchecked Sendable {
         let current: BridgeKernelAssembly? = lock.withLock { assembly }
         current?.retryToolRegistration()
     }
+
+    // MARK: - MCP 聚合（[mcp-agg]，add_mcp/remove_mcp/toggle_mcp/设置页用）
+
+    /// MCP 聚合重同步：把 MCPStore 当前状态对齐进小管家注册表；
+    /// 服务未运行时无操作。
+    public func resyncMCPTools() {
+        let current: BridgeKernelAssembly? = lock.withLock { assembly }
+        Task { await current?.resyncMCPAggregation() }
+    }
 }
