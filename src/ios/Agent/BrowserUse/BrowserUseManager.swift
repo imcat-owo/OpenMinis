@@ -380,6 +380,9 @@ final class BrowserUseManager: NSObject, ObservableObject {
                 let fileURL = Self.screenshotsDir.appendingPathComponent(filename)
                 try jpegData.write(to: fileURL)
                 snapshotPath = fileURL.path
+                // [用户-P3-12] The post-action snapshot cache used to grow
+                // without bound — prune back to the cap after each new one.
+                Self.prunePostActionSnapshots()
             }
         } catch {
             logger.warning("Post-action snapshot failed: \(error.localizedDescription)")
@@ -836,6 +839,41 @@ final class BrowserUseManager: NSObject, ObservableObject {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }()
+
+    /// [用户-P3-12] Cap for post-action UI-preview snapshots (`snapshot_*.jpg`):
+    /// every visual action lands one and nothing ever deleted them, so the
+    /// cache grew without bound. Keep only the most recent N; the excess
+    /// (oldest first) is pruned right after each new snapshot lands.
+    /// Explicit `screenshot_*.jpg` files are user-requested artifacts and
+    /// are NOT capped here.
+    private static let maxPostActionSnapshots = 20
+
+    /// Remove post-action snapshots beyond `maxPostActionSnapshots`,
+    /// oldest first. Best-effort; failures are logged, never thrown.
+    private static func prunePostActionSnapshots() {
+        let fm = FileManager.default
+        guard let urls = try? fm.contentsOfDirectory(
+            at: Self.screenshotsDir,
+            includingPropertiesForKeys: [.creationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+        let snaps = urls.filter {
+            $0.lastPathComponent.hasPrefix("snapshot_") && $0.pathExtension.lowercased() == "jpg"
+        }
+        let excess = snaps.count - Self.maxPostActionSnapshots
+        guard excess > 0 else { return }
+        let oldestFirst = snaps.sorted {
+            let d0 = (try? $0.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
+            let d1 = (try? $1.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
+            if d0 != d1 { return d0 < d1 }
+            return $0.lastPathComponent < $1.lastPathComponent
+        }
+        var removed = 0
+        for url in oldestFirst.prefix(excess) {
+            if (try? fm.removeItem(at: url)) != nil { removed += 1 }
+        }
+        logger.info("[Browser] pruned \(removed) old post-action snapshot(s), kept \(Self.maxPostActionSnapshots)")
+    }
 
     /// Max captured page height in CSS pixels — guards against runaway memory
     /// allocation for infinite-scroll or pathologically tall pages. 32768 px ×
