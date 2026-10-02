@@ -161,4 +161,42 @@ extension AppearanceStudio {
         themePackRevision += 1
         objectWillChange.send()
     }
+
+    /// [P3-16] Delete saved-theme pack files in `library/` whose id is not
+    /// in the theme-library list, returning how many were removed.
+    ///
+    /// Restore merges the appearance file tree (package files overwrite;
+    /// unmentioned files are left alone), but the theme-library LIST in
+    /// UserDefaults is replaced wholesale by the backup's. A pack created
+    /// after the backup — or whose list entry was deleted while the file
+    /// lingered — therefore survives a restore as an orphan: not in the
+    /// list, but still on disk. The list is the registry the theme drawer
+    /// reads, so a pack with no list entry can never be opened, applied,
+    /// or deleted from the UI — unreachable clutter, and deleting it
+    /// loses nothing the user could touch.
+    ///
+    /// Only `library/*.json` pack files are touched. Wallpapers, icons
+    /// and category images have no registry to compare against, so they
+    /// keep merge semantics: deleting an unreferenced wallpaper could
+    /// destroy the live look.
+    @discardableResult
+    func removeOrphanedLibraryPacks() -> Int {
+        let validIds = Set(savedThemes().map(\.id))
+        let dir = libraryDirectory()
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
+        else { return 0 }
+        var removed = 0
+        for url in files where url.pathExtension.lowercased() == "json" {
+            let id = url.deletingPathExtension().lastPathComponent
+            guard !validIds.contains(id) else { continue }
+            do {
+                try FileManager.default.removeItem(at: url)
+                removed += 1
+            } catch {
+                // Leave it; the next restore or delete pass retries.
+            }
+        }
+        return removed
+    }
 }
