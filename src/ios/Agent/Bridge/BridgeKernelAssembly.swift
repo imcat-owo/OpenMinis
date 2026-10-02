@@ -72,7 +72,9 @@ final class BridgeKernelAssembly {
         }
         if let deviceError {
             stateLock.withLock {
-                _registrationState = .failed("设备能力工具注册失败：\(deviceError.localizedDescription)")
+                // 注意：用插值拿 CustomStringConvertible 的中文描述；
+                // localizedDescription 对 Swift 原生 Error 只给系统英文套话。
+                _registrationState = .failed("设备能力工具注册失败：\(deviceError)")
             }
             return
         }
@@ -96,7 +98,7 @@ final class BridgeKernelAssembly {
         }
         if let reportError {
             stateLock.withLock {
-                _registrationState = .failed("报问题工具注册失败：\(reportError.localizedDescription)")
+                _registrationState = .failed("报问题工具注册失败：\(reportError)")
             }
             return
         }
