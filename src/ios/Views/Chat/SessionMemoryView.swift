@@ -372,8 +372,9 @@ private struct MemoryWriteDetailView: View {
     @State private var showResultAlert = false
     @State private var saved = false
 
-    init(item: SessionMemoryView.ToolMemoryItem) {
+    init(item: SessionMemoryView.ToolMemoryItem, personaID: String) {
         self.item = item
+        self.personaID = personaID
         _currentWrittenContent = State(initialValue: item.writtenContent)
     }
 
