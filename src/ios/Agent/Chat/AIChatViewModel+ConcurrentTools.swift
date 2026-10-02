@@ -944,6 +944,66 @@ extension AIChatViewModel {
                 }
             }
 
+        case "send_voice":
+            // [voice-bubble-tool 2026-10-02] AI 主动发语音的正规链路：复用朗读同款 TTS
+            // 链路合成，气泡以 inline part 落进当前回复（UI block 立刻可见；DB 行在
+            // 本轮 batch 落盘后补气泡 part，见 runAgentLoop 的 pendingVoiceBubbles
+            // flush——agentHistory 永远不带气泡 part，沿用 context-clean 单一口径）。
+            // 合成走 AIVoiceMessageComposer.compose（service → group 候选链），
+            // 与"AI Voice Replies"自动气泡同一条路。
+            let speakText = (toolArgs["text"] as? String ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if speakText.isEmpty {
+                toolOutput = "Error: Missing required 'text' parameter. Please call send_voice again with the words to speak in `text`."
+                toolSuccess = false
+                if msgIdx < messages.count, blockIdx < messages[msgIdx].blocks.count {
+                    messages[msgIdx].blocks[blockIdx].content = toolOutput
+                }
+                break
+            }
+            guard let sid = sessionId else {
+                toolOutput = "Error: no active session — cannot send voice."
+                toolSuccess = false
+                if msgIdx < messages.count, blockIdx < messages[msgIdx].blocks.count {
+                    messages[msgIdx].blocks[blockIdx].content = toolOutput
+                }
+                break
+            }
+            if let voice = await AIVoiceMessageComposer.compose(for: speakText, sessionId: sid) {
+                let durParam = voice.duration > 0 ? Int(voice.duration.rounded()) : 0
+                let link = "![voice](\(voice.url)?voice_bubble=1&dur=\(durParam)&auto_play=true)"
+                // ① UI：气泡 block 直接进当前回复（用户立刻看见）。
+                if msgIdx < messages.count {
+                    messages[msgIdx].blocks.append(AssistantBlock(kind: .text, content: link))
+                }
+                // ② DB：deferred raw 建于工具执行前，这里只记账，落盘时统一补 part。
+                pendingVoiceBubbles.append(link)
+                voiceBubbleSentThisTurn = true
+                // ③ 自动播放（与 StreamEnd 自动气泡一致；录音中不抢麦）。
+                if !VoiceModePreference.shared.isCapturing {
+                    if let fileURL = await resolvePathForDirectRead(
+                        AIVoiceMessageComposer.linuxPathFor(url: voice.url)) {
+                        GlobalAudioPlayer.shared.play(url: fileURL)
+                    }
+                }
+                ctLogger.info("[VoiceBubbleTool] sent voice bubble dur=\(durParam)s")
+                let summary = "语音消息已发出（约\(durParam)秒），以语音气泡呈现并自动播放。"
+                toolOutput = summary
+                toolSuccess = true
+                if msgIdx < messages.count, blockIdx < messages[msgIdx].blocks.count {
+                    messages[msgIdx].blocks[blockIdx].content = summary
+                }
+            } else {
+                // 合成失败：明确告诉模型没发出去，别让它谎称已发送。
+                // （compose 内部已打日志；nil 的用户侧 trace 由调用方按需补——
+                // 这里 tool result 本身就是给模型的交代，不再另补 system-reminder。）
+                toolOutput = "Error: 语音合成失败（TTS 服务不可用或未配置）。请如实告诉用户这条语音没发出去，不要谎称已发送；可以建议用户检查 TTS 服务配置。"
+                toolSuccess = false
+                if msgIdx < messages.count, blockIdx < messages[msgIdx].blocks.count {
+                    messages[msgIdx].blocks[blockIdx].content = toolOutput
+                }
+            }
+
         case "add_mcp", "list_mcp", "remove_mcp", "toggle_mcp":
             // [mcp-agg] MCP 聚合点管理工具（小管家专用）：定义与实现在 MCPManagementTools。
             let (mcpText, mcpOK) = await MCPManagementTools.handleDialogCall(name: tu.name, args: toolArgs)

@@ -1975,6 +1975,8 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
             + "Starts with a desktop Safari user agent. Use screenshot to see the page.\n"
             + "- memory_write: Save a memory entry to today's daily log (YYYY-MM-DD.md). Use proactively to note user preferences, project patterns, and important context.\n"
             + "- memory_get: Recall memories with keyword search. Check memory at the start of new topics to leverage past knowledge.\n\n"
+            // [voice-bubble-tool 2026-10-02] 让模型知道有正规发语音链路，别再去沙箱手搓。
+            + "- send_voice: Send a voice message to the user (TTS voice bubble, auto-plays). When the user asks for a voice message, use this — never synthesize audio with shell commands.\n\n"
             + "Current time (approximate): \(approximateTimeString) (\(TimeZone.current.identifier)). "
             + "Device languages: \((UserDefaults.standard.object(forKey: "AppleLanguages") as? [String] ?? Locale.preferredLanguages).joined(separator: ", ")).\n\n"
             + "Shared directory /var/minis/ (bidirectional read/write between shell and app):\n"
@@ -2291,6 +2293,14 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
     /// 恢复时 DB 里有这条 tool_use）。记下 id，loop 尾的批量提交凭 id 跳过，不写两遍。
     /// 每轮工具执行前重置。
     var assistantMessagePersistedForSuspension: String? = nil
+    /// [voice-bubble-tool 2026-10-02] send_voice 在工具执行中途合成出的气泡 link。
+    /// deferred assistant raw 建于工具执行之前，DB 行在这里记账、loop 尾批量落盘
+    /// 时统一补气泡 part（agentHistory 永远不带气泡 part，沿用 context-clean 口径）。
+    /// 每轮 runAgentLoop 开始时重置。
+    var pendingVoiceBubbles: [String] = []
+    /// [voice-bubble-tool 2026-10-02] 本轮已用 send_voice 发过语音 → StreamEnd 的
+    /// "AI Voice Replies"自动气泡跳过，避免一轮出两个气泡两种声音。
+    var voiceBubbleSentThisTurn = false
     /// Set by cancel() so the task's error handler knows this was a user stop.
     /// Internal-access so concurrent tool extensions can read it. [T-concurrent-tools]
     var userDidCancel = false
@@ -5348,6 +5358,9 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
         // becomes false, never set false by any break path.
         var turnCount = 0
         var hitTurnLimit = true
+        // [voice-bubble-tool 2026-10-02] 新一轮开始：清掉上一轮的气泡记账。
+        pendingVoiceBubbles = []
+        voiceBubbleSentThisTurn = false
         // [T-chat-auto-compact-inloop] Count in-loop auto-compactions so a loop
         // that keeps hitting the threshold can't compact forever; when the cap
         // is reached and we're still near capacity, the loop stops as exhausted.
@@ -6191,7 +6204,10 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
                 // reply, zero special cases.
                 if let sid = sessionId,
                    AIVoiceMessageComposer.voiceRepliesEnabled(sessionId: sid),
-                   !assistantText.isEmpty {
+                   !assistantText.isEmpty,
+                   // [voice-bubble-tool 2026-10-02] 本轮已用 send_voice 发过语音：
+                   // 跳过自动气泡，避免一轮两个气泡两种声音。
+                   !voiceBubbleSentThisTurn {
                     if let voice = await AIVoiceMessageComposer.compose(
                         for: assistantText, sessionId: sid) {
                         let durParam = voice.duration > 0 ? Int(voice.duration.rounded()) : 0
@@ -6283,6 +6299,9 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
                     if msgIdx < messages.count { runMsgId = messages[msgIdx].id }
                     canResume = false
                     turnUsage = TokenUsage()
+                    // [voice-bubble-tool 2026-10-02] 排队消息开启的新一轮：同新 turn。
+                    pendingVoiceBubbles = []
+                    voiceBubbleSentThisTurn = false
                     continue
                 }
                 break
@@ -6497,6 +6516,19 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
                 // (assistantAgentIdx was already populated above via deferredAssistantRaw path)
             }
 
+            // [voice-bubble-tool 2026-10-02] send_voice 气泡落盘：deferred raw 建于
+            // 工具执行之前，不含气泡 part；在这里把记账的气泡补进 DB 行（UI block 在
+            // 工具执行时已 append 进当前回复）。agentHistory 不碰——沿用 context-clean
+            // 单一口径：气泡只进 DB（渲染用）和 UI，不进模型上下文。
+            if !pendingVoiceBubbles.isEmpty,
+               let assistantRaw = deferredAssistantRaw,
+               let raw = await buildRawMessage(agentHistory[assistantAgentIdx]) {
+                var dbParts = raw.parts
+                dbParts += pendingVoiceBubbles.map { .text($0) }
+                await ChatStore.shared.updateMessageParts(messageId: assistantRaw.id, parts: dbParts)
+                pendingVoiceBubbles.removeAll()
+            }
+
             // Signal that tools are done and we're waiting for the model's next response.
             guard msgIdx < messages.count else { break }
             messages[msgIdx].isAwaitingModelResponse = true
@@ -6549,6 +6581,9 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
                     if msgIdx < messages.count { runMsgId = messages[msgIdx].id }
                     canResume = false
                     turnUsage = TokenUsage()
+                    // [voice-bubble-tool 2026-10-02] 排队消息开启的新一轮：同新 turn。
+                    pendingVoiceBubbles = []
+                    voiceBubbleSentThisTurn = false
                     continue
                 }
             }

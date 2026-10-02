@@ -232,6 +232,21 @@ extension AIChatViewModel {
             ))
         }
 
+        // [voice-bubble-tool 2026-10-02] 醒醒：「AI 发语音没有语音气泡」——此前 AI 想发语音
+        // 只能去 iSH 沙箱里手搓命令合成音频，没有正规链路。send_voice 复用朗读同款 TTS
+        // 链路（AIVoiceMessageComposer：service → group），合成后以微信式语音气泡
+        // 落进当前回复并自动播放。模型侧：用户要你"发条语音"时调这个，别自己跑命令。
+        tools.append(AgentToolDefinition(
+            name: "send_voice",
+            description: "Send a voice message to the user. Synthesizes the given text with the configured TTS voice and delivers it as a WeChat-style voice bubble in the chat (it auto-plays for the user). Use this when the user asks you to send them a voice message — do NOT synthesize audio yourself with shell commands. Write `text` as natural spoken language in the user's language; it will be read aloud as-is. Returns the bubble duration on success.",
+            parameters: [
+                "tool_title": AgentToolParam(type: .string, description: "A concise 5-10 word summary of what you're sending, shown to the user (e.g. 'Send goodnight voice message'). Use the same language as the user."),
+                "text": AgentToolParam(type: .string, description: "The words to speak, in the user's language. Keep it conversational and reasonably short — this is what the user will hear."),
+            ],
+            required: ["tool_title", "text"],
+            propertyOrdering: ["tool_title", "text"]
+        ))
+
         // [mcp-agg] MCP 聚合点管理工具：小管家（MCP 小助手人设）给她接入/管理 MCP 用。
         // add_mcp/remove_mcp 两段式（先探、请她确认再落盘）；skill 白名单门控在人设层。
         tools.append(contentsOf: MCPManagementTools.dialogDefinitions())

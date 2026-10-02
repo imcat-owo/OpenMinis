@@ -4743,9 +4743,11 @@ final class AudioAttachment: NSTextAttachment {
         objc_setAssociatedObject(container, &VoiceBubbleAnimationController.associatedKey,
                                  controller, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
 
-        // Tap anywhere → play via the global player (shares session with previews).
+        // Tap anywhere → toggle play/pause via the global player (the arcs animate
+        // while THIS bubble's file is playing). No preview sheet — WX semantics.
         let tap = AudioTapGesture(target: nil, action: nil)
         tap.fileURL = resolvedURL
+        tap.togglePlayInsteadOfPreview = true
         tap.addTarget(tap, action: #selector(AudioTapGesture.handleTap))
         bubble.addGestureRecognizer(tap)
 
@@ -4824,9 +4826,21 @@ private final class VoiceBubbleAnimationController: NSObject {
 private final class AudioTapGesture: UITapGestureRecognizer {
     static var expandTapKey: UInt8 = 0
     var fileURL: URL?
+    /// [voice-bubble-tool 2026-10-02] WX 语音气泡点一下 = 播放/暂停（内联），
+    /// 不再弹预览 sheet。文件卡片那两处保持原来的预览行为。
+    var togglePlayInsteadOfPreview = false
 
     @objc func handleTap() {
         guard let url = fileURL else { return }
+        if togglePlayInsteadOfPreview {
+            let p = GlobalAudioPlayer.shared
+            if p.isActive(url: url) {
+                p.togglePlayPause()
+            } else {
+                p.play(url: url)
+            }
+            return
+        }
         guard let presenter = self.view?.nearestViewController() else { return }
         // Playback continues seamlessly — global player is shared with preview
         let preview = MinisAudioPreviewView(fileURL: url)
