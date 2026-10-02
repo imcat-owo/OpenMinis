@@ -219,6 +219,30 @@ final class StewardTests: XCTestCase {
         XCTAssertEqual(result.cleanedText, "超时钳制")
     }
 
+    func testRecentFinishedSummariesIncludeErrorText() async throws {
+        // AI-P1-4/AI-P2-7：最近终结的任务摘要要带上报错原文，新的在前。
+        let steward = try await makeSteward()
+        let okResult = await steward.execute(
+            StewardRequest(instruction: "复述", toolName: FakeTools.echoName,
+                           arguments: try StrictJSON.parseObject(#"{"text":"好"}"#)))
+        let failResult = await steward.execute(
+            StewardRequest(instruction: "执行", toolName: FakeTools.alwaysFailName))
+        XCTAssertEqual(okResult.state, .finished)
+        guard case .failed = failResult.state else {
+            return XCTFail("应失败，实际：\(failResult.state)")
+        }
+        let summaries = await steward.recentFinishedSummaries(limit: 5)
+        XCTAssertEqual(summaries.count, 2)
+        // 新的在前：失败的那个排第一，且带报错原文。
+        XCTAssertEqual(summaries[0].toolName, FakeTools.alwaysFailName)
+        XCTAssertTrue(summaries[0].errorText?.contains("FAKE_TOOL_FAILURE") ?? false)
+        // 成功的那个不带报错文本。
+        XCTAssertEqual(summaries[1].toolName, FakeTools.echoName)
+        XCTAssertNil(summaries[1].errorText)
+        // 正在跑/排队的任务不应出现在终结摘要里。
+        XCTAssertTrue((await steward.activeTaskSummaries()).isEmpty)
+    }
+
     func testTimeoutFuse() async throws {
         let steward = try await makeSteward()
         let started = Date()

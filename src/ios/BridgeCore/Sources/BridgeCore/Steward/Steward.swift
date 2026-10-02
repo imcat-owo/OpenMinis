@@ -88,6 +88,25 @@ public struct StewardTaskSummary: Sendable, Equatable {
     }
 }
 
+/// 一个已终结任务的摘要（「报问题」附上下文用，AI-P1-4/AI-P2-7）。
+/// 终结原因原文一起带上：主人报"刚才那个错"时，Issue 里有现场。
+public struct StewardFinishedSummary: Sendable, Equatable {
+    public var toolName: String?
+    public var instruction: String
+    public var state: StewardState
+    /// 终结原因原文（失败的 reason / 超时与取消的文案）；成功时为 nil。
+    public var errorText: String?
+
+    public init(
+        toolName: String?, instruction: String, state: StewardState, errorText: String?
+    ) {
+        self.toolName = toolName
+        self.instruction = instruction
+        self.state = state
+        self.errorText = errorText
+    }
+}
+
 /// 小管家调度：串行队列接单，逐个走完状态机。
 ///
 /// - 队列：一台在跑时后面的排队，不并发抢工具；
@@ -127,6 +146,10 @@ public actor Steward {
     private var requests: [UUID: StewardRequest] = [:]
     private var results: [UUID: StewardResult] = [:]
     private var histories: [UUID: [StewardState]] = [:]
+    /// 终结顺序（新的在尾）：recentFinishedSummaries 按它倒序取。
+    /// finish() 里 requests[id] 会被清掉，所以指令快照另存一份。
+    private var finishedOrder: [UUID] = []
+    private var finishedInstructions: [UUID: String] = [:]
     private var waiters: [UUID: [CheckedContinuation<StewardResult, Never>]] = [:]
     private var runningID: UUID?
     private var runningTask: Task<Void, Never>?
@@ -153,6 +176,7 @@ public actor Steward {
     public func submit(_ request: StewardRequest) -> UUID {
         let id = UUID()
         requests[id] = request
+        finishedInstructions[id] = request.instruction
         let initial = StewardResult(
             id: id, state: .queued, toolName: request.toolName,
             rawText: nil, cleanedText: nil, isError: false)
@@ -234,6 +258,25 @@ public actor Steward {
             return StewardTaskSummary(
                 id: id, state: result.state, toolName: result.toolName,
                 instruction: requests[id]?.instruction ?? "")
+        }
+    }
+
+    /// 最近终结的任务摘要（新的在前）：供「报问题」附上下文用。
+    /// 成功的不带报错文本；失败/超时/取消/主人打断带原因原文。
+    public func recentFinishedSummaries(limit: Int = 5) -> [StewardFinishedSummary] {
+        finishedOrder.suffix(max(limit, 0)).reversed().compactMap { id in
+            guard let result = results[id], result.state.isTerminal else { return nil }
+            let errorText: String? = switch result.state {
+            case .finished: nil
+            case .failed(let reason): reason
+            case .timedOut, .cancelled, .interruptedByOwner: result.cleanedText
+            default: result.cleanedText
+            }
+            return StewardFinishedSummary(
+                toolName: result.toolName,
+                instruction: finishedInstructions[id] ?? "",
+                state: result.state,
+                errorText: errorText)
         }
     }
 
@@ -434,6 +477,7 @@ public actor Steward {
         results[id] = result
         histories[id, default: []].append(state)
         requests[id] = nil
+        finishedOrder.append(id)
         let pending = waiters.removeValue(forKey: id) ?? []
         for continuation in pending {
             continuation.resume(returning: result)

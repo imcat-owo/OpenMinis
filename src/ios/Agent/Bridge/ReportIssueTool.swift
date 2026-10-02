@@ -163,18 +163,39 @@ enum ReportIssueTool {
         timeFormatter.timeZone = TimeZone.current
         let nowText = timeFormatter.string(from: Date())
 
-        // 小管家当时在忙什么（排除正在执行的 report_issue 自己）。
+        // 小管家当时在忙什么（排除正在执行的 report_issue 自己），
+        // 外加最近终结的任务（含报错原文，AI-P1-4/AI-P2-7）。
         let otherTasks = await steward.activeTaskSummaries()
             .filter { $0.toolName != toolName }
-        let taskText: String
-        if otherTasks.isEmpty {
-            taskText = "当时没有其他任务在跑"
-        } else {
-            taskText = otherTasks.map { task in
+        let finishedTasks = await steward.recentFinishedSummaries(limit: 5)
+            .filter { $0.toolName != toolName }
+        let activeText = otherTasks.isEmpty
+            ? "当时没有其他任务在跑"
+            : otherTasks.map { task in
                 let name = task.toolName ?? "未定工具"
                 let instruction = sanitize(String(task.instruction.prefix(80)))
                 return "\(name)：\(instruction)"
             }.joined(separator: "；")
+        var taskText = activeText
+        if !finishedTasks.isEmpty {
+            let finishedText = finishedTasks.map { task in
+                let name = task.toolName ?? "未定工具"
+                let instruction = sanitize(String(task.instruction.prefix(80)))
+                let stateText: String = switch task.state {
+                case .finished: "成功"
+                case .failed: "失败"
+                case .timedOut: "超时"
+                case .cancelled: "已取消"
+                case .interruptedByOwner: "主人打断"
+                default: "终结"
+                }
+                var line = "\(name)（\(stateText)）：\(instruction)"
+                if let err = task.errorText, !err.isEmpty {
+                    line += "——报错：\(sanitize(String(err.prefix(300))))"
+                }
+                return line
+            }.joined(separator: "；")
+            taskText += "\n- 小管家最近终结的任务：\(finishedText)"
         }
 
         let logLines = SharedEventLog.shared.recentEntries(limit: 20)
