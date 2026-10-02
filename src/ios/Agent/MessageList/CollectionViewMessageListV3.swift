@@ -1292,7 +1292,7 @@ extension CollectionViewMessageListV3 {
                         onStop: bridge.isActiveMessage ? bridge.onStop : nil,
                         browserPool: bridge.browserPool,
                         toolSnapshots: bridge.toolSnapshots,
-                        detailBlock: $bridge.detailBlock
+                        detailBlock: Binding(get: { bridge.detailBlock }, set: { bridge.detailBlock = $0 })
                     )
                     .frame(maxWidth: width > 0 ? width : nil, alignment: .leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
