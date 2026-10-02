@@ -18,16 +18,16 @@ final class StewardSensitiveApprovalGate: SensitiveApprovalGate, Sendable {
     /// 审批超时秒数：超时未点默认拒绝。审查员复核点。
     static let approvalTimeout: TimeInterval = 120
 
-    func requestApproval(toolName: String, instruction: String) async -> SensitiveApprovalDecision {
+    func requestApproval(toolName: String, instruction: String, caller: String = "外部 AI") async -> SensitiveApprovalDecision {
         let isActive = await MainActor.run {
             UIApplication.shared.applicationState == .active
         }
         guard isActive else { return .ownerAway }
-        return await waitForOwnerDecision(toolName: toolName, instruction: instruction)
+        return await waitForOwnerDecision(toolName: toolName, instruction: instruction, caller: caller)
     }
 
     private func waitForOwnerDecision(
-        toolName: String, instruction: String
+        toolName: String, instruction: String, caller: String
     ) async -> SensitiveApprovalDecision {
         await withTaskCancellationHandler(operation: {
             await withCheckedContinuation { continuation in
@@ -35,6 +35,7 @@ final class StewardSensitiveApprovalGate: SensitiveApprovalGate, Sendable {
                     OwnerApprovalPresenter.shared.present(
                         toolName: toolName,
                         instruction: instruction,
+                        caller: caller,
                         continuation: continuation)
                 }
             }
@@ -60,6 +61,7 @@ private final class OwnerApprovalPresenter {
     func present(
         toolName: String,
         instruction: String,
+        caller: String,
         continuation: CheckedContinuation<SensitiveApprovalDecision, Never>
     ) {
         guard let presenter = Self.topViewController() else {
@@ -74,7 +76,7 @@ private final class OwnerApprovalPresenter {
         let alert = UIAlertController(
             title: "小管家请求执行敏感操作",
             message: """
-                外部 AI 请小管家执行敏感工具「\(toolName)」。
+                \(caller)请小管家执行敏感工具「\(toolName)」。
 
                 指令：\(shortInstruction)
 

@@ -40,10 +40,10 @@ enum MCPManagementTools {
                 required: []),
             AgentToolDefinition(
                 name: "remove_mcp",
-                description: "移除小管家已接入的 MCP 服务器。两段式：第一次调先列出这家 MCP 的工具清单请主人确认；主人点头后带 confirm=true 再调一次真删。删掉后这家的工具会从「搜」和「命令」里下掉。",
+                description: "移除小管家已接入的 MCP 服务器。两段式：第一次调先列出这家 MCP 的工具清单请主人确认；主人点头后带 confirm=true 再调一次——这时手机上会弹框，必须主人亲手点「允许」才真删（confirm 参数只是回执，不当权限）。删掉后这家的工具会从「搜」和「命令」里下掉。",
                 parameters: [
                     "name": AgentToolParam(type: .string, description: "要删的 MCP 名字（必填）"),
-                    "confirm": AgentToolParam(type: .boolean, description: "确认删除。第一次调不传（只列清单）；主人点头后再调一次并传 confirm=true 真删"),
+                    "confirm": AgentToolParam(type: .boolean, description: "确认删除。第一次调不传（只列清单）；主人点头后再调一次并传 confirm=true——这时手机会弹框，必须主人亲手点允许才真删"),
                 ],
                 required: ["name"]),
             AgentToolDefinition(
@@ -231,8 +231,17 @@ enum MCPManagementTools {
             工具（\(tools.count) 个）：
             \(list)
 
-            请主人确认：接吗？主人点头后，我再调一次 add_mcp（参数完全一样，再加 confirm=true）真接入。
+            请主人确认：接吗？主人点头后，我再调一次 add_mcp（参数完全一样，再加 confirm=true）——那时手机上会弹框，还必须主人亲手点「允许」才真接入。
             """, true)
+        }
+
+        // P1-3：confirm=true 只是回执，不当权限。落盘前必须主人亲手确认。
+        let ok = await ownerConfirm(
+            toolName: "add_mcp",
+            instruction: "接入 MCP「\(name)」(\(url))，\(tools.count) 个工具")
+        if !ok {
+            _ = try? await runCLI("minis-mcp-cli remove \(shellQuote(name))")
+            return ("主人没点头（拒绝/超时/人不在手机旁），这家 MCP 没有落盘，已撤掉。", false)
         }
 
         await afterChange()
@@ -285,8 +294,16 @@ enum MCPManagementTools {
             它的工具（\(tools.count) 个）：
             \(describeTools(tools))
 
-            请主人确认：删吗？删掉后这家的工具会从「搜」和「命令」里下掉。主人点头后，我再调一次 remove_mcp（name=\(name)，再加 confirm=true）真删。
+            请主人确认：删吗？删掉后这家的工具会从「搜」和「命令」里下掉。主人点头后，我再调一次 remove_mcp（name=\(name)，再加 confirm=true）——那时手机上会弹框，还必须主人亲手点「允许」才真删。
             """, true)
+        }
+
+        // P1-3：confirm=true 只是回执，不当权限。删除前必须主人亲手确认。
+        let ok = await ownerConfirm(
+            toolName: "remove_mcp",
+            instruction: "移除 MCP「\(name)」")
+        if !ok {
+            return ("主人没点头（拒绝/超时/人不在手机旁），这家 MCP 还在，没删。", false)
         }
 
         do {
@@ -326,6 +343,16 @@ enum MCPManagementTools {
     }
 
     // MARK: - 小杂项
+
+    /// 手机侧确认：落盘/删除这类不可逆操作，`confirm` 参数只是模型说
+    /// "主人点了头"的回执，不当权限。真正的权限必须主人亲手在手机上
+    /// 点「允许」——模型自己传 confirm=true 也过不了这道门。
+    /// App 不在前台（弹不出框）按"主人不在"拒绝。
+    private static func ownerConfirm(toolName: String, instruction: String) async -> Bool {
+        let decision = await StewardSensitiveApprovalGate().requestApproval(
+            toolName: toolName, instruction: instruction, caller: "对话 AI")
+        return decision == .approved
+    }
 
     private static func errorMessage(_ error: Error) -> String {
         if let e = error as? LocalizedError, let d = e.errorDescription { return d }
