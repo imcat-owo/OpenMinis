@@ -52,6 +52,13 @@ final class FriendlyErrorMessageTests: XCTestCase {
                        contains: "doesn't recognize a parameter")
     }
 
+    func testUnknownParam_nonThinking_noThinkingAdvice() {
+        // A bare unknown-parameter error must not suggest turning thinking off.
+        let out = AIChatViewModel.friendlyErrorMessage("Provider error: Unknown parameter: 'temperature'")
+        XCTAssertTrue(out.contains("doesn't recognize a parameter"), out)
+        XCTAssertFalse(out.contains("Turn thinking off"), out)
+    }
+
     func testPolicy_guidance() {
         assertGuidance("Provider error: Your request was rejected by the content policy",
                        contains: "safety filter blocked")

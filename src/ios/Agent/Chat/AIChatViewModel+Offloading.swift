@@ -225,7 +225,7 @@ extension AIChatViewModel {
             for pi in parts.indices {
                 if evicted >= evictCount { break }
                 switch parts[pi] {
-                case .toolResult(let id, let name, let content, let isError, let imgData, let mime, let pageURL, _):
+                case .toolResult(let id, let name, let content, let isError, let imgData, let mime, let pageURL, let imgLinuxPath):
                     guard let data = imgData else { continue }
 
                     let call = toolCallById[id]
@@ -254,7 +254,8 @@ extension AIChatViewModel {
                     let newContent = content.isEmpty ? placeholder : "\(content)\n\n\(placeholder)"
                     newParts[pi] = .toolResult(
                         id: id, name: name, content: newContent,
-                        isError: isError, imageData: nil, imageMimeType: nil, pageURL: pageURL
+                        isError: isError, imageData: nil, imageMimeType: nil, pageURL: pageURL,
+                        imageLinuxPath: imgLinuxPath
                     )
                     mutated = true
                     evicted += 1

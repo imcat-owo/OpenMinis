@@ -641,7 +641,7 @@ final class AnthropicAgentProvider: AgentProvider {
             let placeholders = missing.map { tu in
                 AgentContentPart.toolResult(
                     id: tu.id, name: tu.name,
-                    content: "Tool execution was interrupted before a result was returned (the session or stream ended mid-tool). Treat this tool call as unfinished and retry or proceed without its result.",
+                    content: "Tool execution was interrupted before a result was returned. Treat this tool call as unfinished and retry or proceed without its result.",
                     isError: true
                 )
             }

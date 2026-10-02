@@ -5298,7 +5298,7 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
             let placeholderParts = orphanedToolUses.map { (id, name) in
                 AgentContentPart.toolResult(
                     id: id, name: name,
-                    content: "Tool execution was interrupted by an unexpected error.",
+                    content: "Tool execution was interrupted before a result was returned. Treat this tool call as unfinished and retry or proceed without its result.",
                     isError: true
                 )
             }
@@ -6308,6 +6308,19 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
             // logs each tool_use's full id + blockIdx so we can see whether
             // parallel calls share ids or have collisions on toolUseId
             // when the cancel-bubble bug reproduces.
+            //
+            // AUDIT 2026-10-02: no Release-side dedupe added — deliberately.
+            // Duplicate ids cannot reach this batch: toolEntries come solely
+            // from streamResult.toolEntries, whose ids already pass through
+            // dedupeToolCompleteId in processStreamEvents (SSEStream.swift),
+            // renaming 2nd+ occurrences to <id>-2/-3…; UI blocks get the same
+            // treatment via dedupeToolStartId at block creation, and the DB
+            // restore path only replays already-deduped ids. So
+            // pendingSnapshots[outcome.toolId] below cannot collide, and a
+            // second rename layer here would be dead code that risks
+            // desyncing the persisted tool_use parts from the streamed blocks.
+            // This DEBUG check stays as the tripwire: if dedupe ever breaks,
+            // it fires before any silent overwrite.
             let _batchBlockCount = (msgIdx >= 0 && msgIdx < self.messages.count) ? self.messages[msgIdx].blocks.count : -1
             logger.info("[ConcurrentTools] BATCH START — entries=\(toolEntries.count) msgIdx=\(msgIdx) blocks=\(_batchBlockCount)")
             for (idx, tu) in toolEntries.enumerated() {
