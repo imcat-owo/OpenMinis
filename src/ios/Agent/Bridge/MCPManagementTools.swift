@@ -85,7 +85,7 @@ enum MCPManagementTools {
     }
 
     /// 在沙箱里跑一条 minis-mcp-cli 命令（工具清单/探针/管理都走这条）。
-    private static func runCLI(_ command: String, timeout: Int = 60) async throws -> String {
+    private static func runCLI(_ command: String, timeout: TimeInterval = 60) async throws -> String {
         let result = try await ISHExecutionCoordinator.shared.execute(
             sessionId: "mcp-settings",
             command: command,
@@ -118,7 +118,7 @@ enum MCPManagementTools {
     }
 
     /// 探针：add → ping → tools，返回工具清单；探针失败或不需要时把 server 撤掉。
-    private static func probe(serverName: String, toolsTimeout: Int = 60) async throws -> [[String: Any]] {
+    private static func probe(serverName: String, toolsTimeout: TimeInterval = 60) async throws -> [[String: Any]] {
         _ = try await runCLI("minis-mcp-cli ping \(shellQuote(serverName))", timeout: 60)
         let toolsOut = try await runCLI("minis-mcp-cli tools \(shellQuote(serverName))", timeout: toolsTimeout)
         let envelope = try parseEnvelope(toolsOut)
@@ -235,8 +235,8 @@ enum MCPManagementTools {
     // MARK: remove_mcp
 
     private static func removeMCP(args: [String: Any]) async -> (String, Bool) {
-        guard let name = ((args["name"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
-              !name.isEmpty
+        let name = ((args["name"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty
         else { return ("Error: name 必填。", false) }
         let confirm = (args["confirm"] as? Bool) ?? false
 
@@ -272,8 +272,8 @@ enum MCPManagementTools {
     // MARK: toggle_mcp
 
     private static func toggleMCP(args: [String: Any]) async -> (String, Bool) {
-        guard let name = ((args["name"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
-              !name.isEmpty
+        let name = ((args["name"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty
         else { return ("Error: name 必填。", false) }
         guard let enabled = args["enabled"] as? Bool else {
             return ("Error: enabled 必填（true=启用，false=停用）。", false)
