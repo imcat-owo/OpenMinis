@@ -115,7 +115,10 @@ extension AIChatViewModel {
         }
 
         do {
-            try writeData.write(to: fileURL)
+            // [P3-13] Atomic write: a jetsam kill mid-write must not leave a
+            // truncated daily log behind (same reason MemoryWriteRevoker
+            // uses atomically: true).
+            try writeData.write(to: fileURL, options: .atomic)
         } catch {
             return FileToolResult(output: "Error writing memory: \(error.localizedDescription)", success: false)
         }

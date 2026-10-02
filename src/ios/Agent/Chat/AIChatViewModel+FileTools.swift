@@ -240,7 +240,19 @@ extension AIChatViewModel {
             return FileToolResult(output: "Error: Invalid path: \(path)", success: false)
         }
 
-        let offset = max(1, (dict["offset"] as? Int) ?? 1)
+        // [P3-7] A present-but-invalid offset (e.g. a string) used to fall
+        // back to 1 silently, so the caller never learned it passed
+        // garbage. Say so instead; only a MISSING offset defaults to the
+        // first line.
+        let offset: Int
+        if let rawOffset = dict["offset"] {
+            guard let intOffset = rawOffset as? Int else {
+                return FileToolResult(output: "Error: Invalid 'offset' parameter: expected an integer, got '\(rawOffset)'.", success: false)
+            }
+            offset = max(1, intOffset)
+        } else {
+            offset = 1
+        }
         let maxLines = dict["lines"] as? Int  // nil means no line limit
         // T-FILEREAD-CAP: hard upper bound on returned content length.
         // Pre-cap, the agent could ask for `max_length=1_000_000` and we'd

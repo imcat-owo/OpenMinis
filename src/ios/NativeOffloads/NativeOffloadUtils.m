@@ -223,12 +223,6 @@ static NSString *noff_humanized_error_message(NSString *message) {
     } else if ([domain containsString:@"kclerror"]) {
         category = @"定位服务报错：系统没能给出位置。确认定位权限已开启、稍等片刻"
                     "重试；急用时可直接传经纬度参数绕过定位。";
-    } else if ([domain containsString:@"ekerror"]) {
-        category = @"日历/提醒事项服务（EventKit）报错：多半是权限或系统数据问题。"
-                    "检查对应权限是否开启后重试。";
-    } else if ([domain containsString:@"hkerror"]) {
-        category = @"健康数据服务（HealthKit）报错：多半是权限或数据类型问题。"
-                    "检查健康权限是否开启、指标名是否正确后重试。";
     } else if ([domain containsString:@"weatherkit"]) {
         category = @"天气服务（WeatherKit）在系统侧校验或调用失败：多半是苹果服务端"
                     "或设备登录状态的问题，不是参数写错。等一两分钟重试；若一直"

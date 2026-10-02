@@ -338,6 +338,18 @@ extension BackupImporter {
             await MainActor.run { AppearanceStudio.shared.applyBackupDefaults(values) }
             report.imported += 1
         }
+        // [P3-16] Reconcile the theme library with its list: the file tree
+        // above merges, but the list was just replaced by the backup's, so
+        // pack files with no list entry are orphans (invisible in the UI,
+        // undeletable) — remove them. Runs even when the package carried
+        // no settings: then the local list stands, and only pre-existing
+        // local orphans go.
+        let orphansRemoved = await MainActor.run {
+            AppearanceStudio.shared.removeOrphanedLibraryPacks()
+        }
+        if orphansRemoved > 0 {
+            logger.info("[Restore] appearance: removed \(orphansRemoved) orphaned theme pack(s) with no library entry")
+        }
         return report
     }
 
