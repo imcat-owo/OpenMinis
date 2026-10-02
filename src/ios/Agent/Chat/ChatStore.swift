@@ -53,6 +53,8 @@ struct ChatSession: Identifiable, Codable, Hashable {
     var remoteDeviceName: String? // human-readable name of the remote device
     var pinnedAt: Date?       // non-nil if session is pinned; timestamp of when it was pinned
     var folderId: String?     // non-nil if filed into a folder; NULL = ungrouped
+    /// ［persona］归属人设 id。nil = 老数据，视为默认人设。
+    var personaId: String? = nil
 
     /// Whether this session is from a remote device (read-only).
     var isRemote: Bool { remoteDeviceId != nil }
@@ -464,7 +466,8 @@ actor ChatStore {
     // no intervening write return the SAME array (no new Strings). Guarded by
     // `sessionListCacheDirty`, set true by every list-affecting mutation below.
     // ChatStore is an actor, so these fields need no extra locking.
-    private var sessionListCache: [ChatSession]?
+    // ［persona］按人设 key：切换人设不串缓存。
+    private var sessionListCache: [String: [ChatSession]] = [:]
     private var sessionListCacheDirty = true
 
     /// [T-ios-listsessions-cache] Mark the cached session list stale. Called by
@@ -589,7 +592,8 @@ actor ChatStore {
                 title       TEXT,
                 model_id    TEXT NOT NULL,
                 created_at  REAL NOT NULL,
-                updated_at  REAL NOT NULL
+                updated_at  REAL NOT NULL,
+                persona_id  TEXT
             )
         """)
 
@@ -623,7 +627,13 @@ actor ChatStore {
         addColumnIfMissing(table: "sessions", column: "last_synced_at", definition: "REAL")
         addColumnIfMissing(table: "sessions", column: "remote_origin_device_id", definition: "TEXT")
         addColumnIfMissing(table: "sync_devices", column: "upload_types", definition: "TEXT NOT NULL DEFAULT ''")
-        addColumnIfMissing(table: "sessions", column: "pinned_at", definition: "REAL")
+        // ［persona］会话归属人设。NULL = 老数据，视为默认人设。
+        // Intentionally NOT a declared FK: a persona_id pointing at a
+        // persona that no longer exists is a transient state (delete
+        // cascades clean it up); such orphans render under the default
+        // persona rather than failing a constraint.
+        addColumnIfMissing(table: "sessions", column: "persona_id", definition: "TEXT")
+        exec("CREATE INDEX IF NOT EXISTS idx_sessions_persona ON sessions(persona_id)")
         // Folder membership. NULL = ungrouped. Intentionally NOT a declared FK:
         // a folder_id pointing at a folder that does not exist locally is a
         // legitimate transient state (the session's SessionV2 record can arrive
@@ -1023,9 +1033,12 @@ actor ChatStore {
     // MARK: - Session CRUD
 
     @discardableResult
-    func createSession(modelId: String, title: String? = nil, source: String? = nil) -> ChatSession {
+    func createSession(modelId: String, title: String? = nil, source: String? = nil,
+                       personaId: String? = nil) -> ChatSession {
         invalidateSessionListCache()
         let now = Date()
+        // ［persona］不传则归属当前人设。
+        let pid = personaId ?? PersonaStore.currentID()
         let session = ChatSession(
             id: UUID().uuidString,
             title: title,
@@ -1033,7 +1046,8 @@ actor ChatStore {
             modelId: modelId,
             createdAt: now,
             updatedAt: now,
-            source: source
+            source: source,
+            personaId: pid
         )
 
         // [T-memory-enabled-new-session-bug] Explicitly write memory_enabled
@@ -1056,7 +1070,7 @@ actor ChatStore {
         let rawObj = UserDefaults.standard.object(forKey: "memory.global.enabled")
         memDiagLogger.info("[MemDiag] createSession sid=\(session.id.prefix(8)) rawDefaults=\(String(describing: rawObj)) resolved=\(globalMemoryEnabled) → bind memory_enabled=\(globalMemoryEnabled ? 1 : 0)")
 
-        let sql = "INSERT INTO sessions (id, title, model_id, created_at, updated_at, source, memory_enabled) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        let sql = "INSERT INTO sessions (id, title, model_id, created_at, updated_at, source, memory_enabled, persona_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
         var stmt: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
             sqlite3_bind_text(stmt, 1, (session.id as NSString).utf8String, -1, nil)
@@ -1066,6 +1080,7 @@ actor ChatStore {
             sqlite3_bind_double(stmt, 5, now.timeIntervalSince1970)
             bindOptionalText(stmt, index: 6, value: source)
             sqlite3_bind_int(stmt, 7, globalMemoryEnabled ? 1 : 0)
+            bindOptionalText(stmt, index: 8, value: pid)
             let rc = sqlite3_step(stmt)
             memDiagLogger.info("[MemDiag] createSession INSERT step rc=\(rc) (101=DONE) sid=\(session.id.prefix(8))")
         } else {
@@ -1191,7 +1206,11 @@ actor ChatStore {
         return String(decoding: UnsafeBufferPointer(start: ptr, count: len), as: UTF8.self)
     }
 
-    func listSessions() -> [ChatSession] {
+    /// ［persona］按人设列会话。personaId 为 nil 时用当前人设；
+    /// 老数据（persona_id 为 NULL）视为默认人设。
+    func listSessions(personaId: String? = nil) -> [ChatSession] {
+        // ［persona］人设过滤 key，本函数内多处用。
+        let pid = personaId ?? PersonaStore.currentID()
         // ─── crash triage (sqlite3MutexMisuseAssert in column_text) ───
         // Capture the calling context whenever this enters so we can match
         // mid-flight invocations (App Intents EntityQuery, iCloud sync,
@@ -1215,7 +1234,8 @@ actor ChatStore {
         // same preview Strings, zero new allocations. This is the fix for the
         // hundreds-of-MB StringStorage growth from redundant listSessions()
         // calls (proven via malloc_history).
-        if !sessionListCacheDirty, let cached = sessionListCache {
+        // ［persona］缓存按人设 key。
+        if !sessionListCacheDirty, let cached = sessionListCache[pid] {
             return cached
         }
         // Session-list preview policy:
@@ -1269,6 +1289,7 @@ actor ChatStore {
         // clocking ~1100ms — 20× slower than the indexed subqueries here.
         let asstMask = Self.partFlagHasText | Self.partFlagHasToolUse   // 3
         let userMask = Self.partFlagHasText                            // 1
+        // ［persona］人设过滤：persona_id 对上，或老数据（NULL）且要的是默认人设。
         let sql = """
             SELECT s.id, s.title, s.model_id, s.created_at, s.updated_at, s.category,
                    (SELECT m.parts_json FROM messages m
@@ -1298,8 +1319,11 @@ actor ChatStore {
                    -- Appended LAST on purpose: the decode below reads columns
                    -- by index, so a new column goes at the end to leave every
                    -- existing index untouched.
-                   s.folder_id
-            FROM sessions s ORDER BY s.updated_at DESC
+                   s.folder_id,
+                   s.persona_id
+            FROM sessions s
+            WHERE (s.persona_id IS ?1 OR (s.persona_id IS NULL AND ?2 = '\(PersonaStore.defaultPersonaID)'))
+            ORDER BY s.updated_at DESC
             """
             // Note: `remote_tombstoned_at` column still exists on the
             // table for legacy rows but is no longer consulted. Peer-side
@@ -1314,6 +1338,8 @@ actor ChatStore {
         var skippedRows = 0
 
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, (pid as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(stmt, 2, (pid as NSString).utf8String, -1, nil)
             while sqlite3_step(stmt) == SQLITE_ROW {
                 // A row whose primary key is NULL/empty can't be opened, deleted
                 // or synced by id — it is unusable rather than merely odd. Skip
@@ -1371,13 +1397,14 @@ actor ChatStore {
                 let pinnedAt: Date? = sqlite3_column_type(stmt, 11) != SQLITE_NULL
                     ? Date(timeIntervalSince1970: sqlite3_column_double(stmt, 11)) : nil
                 let folderId = Self.colTextOpt(stmt, 14)
+                let personaId = Self.colTextOpt(stmt, 15)
 
                 sessions.append(ChatSession(
                     id: id, title: title, category: category, modelId: modelId,
                     createdAt: createdAt, updatedAt: updatedAt, lastMessage: lastMessage,
                     source: source, lastSyncedAt: lastSyncedAt,
                     remoteDeviceId: remoteDeviceId, pinnedAt: pinnedAt,
-                    folderId: folderId
+                    folderId: folderId, personaId: personaId
                 ))
             }
         }
@@ -1389,7 +1416,8 @@ actor ChatStore {
 
         // [T-ios-listsessions-cache] Store the freshly-built list; subsequent
         // calls return this same array until a mutation invalidates it.
-        sessionListCache = sessions
+        // ［persona］按人设 key 存。
+        sessionListCache[pid] = sessions
         sessionListCacheDirty = false
         return sessions
     }
@@ -2494,6 +2522,43 @@ actor ChatStore {
             sqlite3_step(stmt)
         }
         sqlite3_finalize(stmt)
+    }
+
+    /// ［persona］查会话归属的人设。NULL/缺失 → 默认人设。
+    func personaId(for sessionId: String) -> String {
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        let sql = "SELECT persona_id FROM sessions WHERE id = ? LIMIT 1"
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            return PersonaStore.defaultPersonaID
+        }
+        sqlite3_bind_text(stmt, 1, (sessionId as NSString).utf8String, -1, nil)
+        guard sqlite3_step(stmt) == SQLITE_ROW else {
+            return PersonaStore.defaultPersonaID
+        }
+        return Self.colTextOpt(stmt, 0) ?? PersonaStore.defaultPersonaID
+    }
+
+    /// ［persona］删人设时级联删它的全部会话（对标 Kelivo
+    /// deleteConversationsForAssistant）。走 deleteSession 保证
+    /// 云删除队列、tombstone 等副作用一致。
+    func deleteSessions(forPersonaId personaId: String) {
+        var stmt: OpaquePointer?
+        // 老数据 NULL 视为默认人设，一并归属。
+        let sql = "SELECT id FROM sessions WHERE persona_id IS ?1 OR (persona_id IS NULL AND ?2 = '\(PersonaStore.defaultPersonaID)')"
+        var ids: [String] = []
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, (personaId as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(stmt, 2, (personaId as NSString).utf8String, -1, nil)
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let id = Self.colText(stmt, 0)
+                if !id.isEmpty { ids.append(id) }
+            }
+        }
+        sqlite3_finalize(stmt)
+        for id in ids {
+            deleteSession(id)
+        }
     }
 
     func deleteSession(_ id: String) {
@@ -6443,7 +6508,7 @@ extension ChatStore {
             }
             // Local doesn't have this session — insert
             iCloudLogger.info("[iCloud] mergeRemoteSession INSERT: id=\(session.id) title=\(session.title ?? "nil") from=\(fromDeviceId)")
-            let sql = "INSERT INTO sessions (id, title, category, model_id, created_at, updated_at, remote_origin_device_id, memory_enabled, model_binding, pinned_at, folder_id, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            let sql = "INSERT INTO sessions (id, title, category, model_id, created_at, updated_at, remote_origin_device_id, memory_enabled, model_binding, pinned_at, folder_id, source, persona_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             var stmt: OpaquePointer?
             if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
                 sqlite3_bind_text(stmt, 1, (session.id as NSString).utf8String, -1, nil)
@@ -6465,6 +6530,8 @@ extension ChatStore {
                 // (fetchRecentV2 ordering gives no cross-type guarantees).
                 bindOptionalText(stmt, index: 11, value: remoteHasFolderField ? remoteFolderId : nil)
                 bindOptionalText(stmt, index: 12, value: remoteHasSourceField ? remoteSource : nil)
+                // ［persona］云端汇入的会话没有人设概念，记 NULL，本地按默认人设归属。
+                sqlite3_bind_null(stmt, 13)
                 sqlite3_step(stmt)
             }
             sqlite3_finalize(stmt)
@@ -7439,6 +7506,8 @@ extension ChatStore {
 
         // NOTE: remote_origin_device_id is intentionally omitted from the column
         // list so it defaults to NULL — see the type doc above.
+        // ［persona］云端拉取的会话没有人设概念，persona_id 故意不写（NULL），
+        // 本地按默认人设归属（见 listSessions 的 NULL→default 规则）。
         let sql = """
             INSERT INTO sessions (id, title, category, model_id, created_at, updated_at,
                                   memory_enabled, model_binding, pinned_at, folder_id)

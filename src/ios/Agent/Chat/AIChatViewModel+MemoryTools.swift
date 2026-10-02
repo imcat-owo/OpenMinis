@@ -7,8 +7,10 @@ extension AIChatViewModel {
     // MARK: - Memory Tools
 
     /// Load full global memory content for system prompt injection.
-    nonisolated static func loadGlobalMemoryFragment() -> String? {
-        let globalFile = minisMemoryPersistentDir.appendingPathComponent("GLOBAL.md")
+    /// ［persona］按人设隔离：读该人设记忆目录的 GLOBAL.md。
+    nonisolated static func loadGlobalMemoryFragment(personaID: String? = nil) -> String? {
+        let dir = PersonaStore.memoryDir(for: personaID ?? PersonaStore.currentID())
+        let globalFile = dir.appendingPathComponent("GLOBAL.md")
         guard FileManager.default.fileExists(atPath: globalFile.path),
               let content = try? String(contentsOf: globalFile, encoding: .utf8),
               !content.isEmpty else { return nil }
@@ -17,7 +19,9 @@ extension AIChatViewModel {
     }
 
     /// Load the 3 most recent daily memory logs that have content, for system prompt injection (first 200 lines each).
-    nonisolated static func loadRecentDailyMemoryFragment() -> String? {
+    /// ［persona］按人设隔离：读该人设记忆目录的日报。SOUL.md 是人设文件，不当记忆搜。
+    nonisolated static func loadRecentDailyMemoryFragment(personaID: String? = nil) -> String? {
+        let dir = PersonaStore.memoryDir(for: personaID ?? PersonaStore.currentID())
         let fmt = DateFormatter()
         fmt.dateFormat = "yyyy-MM-dd"
         let fm = FileManager.default
@@ -37,7 +41,7 @@ extension AIChatViewModel {
         while fragments.count < 3 && dayOffset < maxLookback {
             let date = cal.date(byAdding: .day, value: -dayOffset, to: todayStart) ?? todayStart
             let dateStr = fmt.string(from: date)
-            let fileURL = minisMemoryPersistentDir.appendingPathComponent("\(dateStr).md")
+            let fileURL = dir.appendingPathComponent("\(dateStr).md")
 
             if fm.fileExists(atPath: fileURL.path),
                let content = try? String(contentsOf: fileURL, encoding: .utf8),
@@ -89,7 +93,9 @@ extension AIChatViewModel {
         }
 
         let fm = FileManager.default
-        let persistDir = Self.minisMemoryPersistentDir
+        // ［persona］写进本会话人设的记忆目录。
+        let pid = sessionPersonaId ?? PersonaStore.currentID()
+        let persistDir = PersonaStore.memoryDir(for: pid)
         try? fm.createDirectory(at: persistDir, withIntermediateDirectories: true)
 
         let dateFmt = DateFormatter()
@@ -124,15 +130,21 @@ extension AIChatViewModel {
         }
 
         // Register in meta.db for iSH visibility
-        let linuxPath = "\(Self.minisMemoryLinuxDir)/\(fileName)"
+        // ［persona］沙箱挂载点是 memory 整根，带上 personas/<id> 相对路径。
+        let linuxPath = "\(Self.minisMemoryLinuxDir)/personas/\(pid)/\(fileName)"
         ensureFakefsMetadata(for: linuxPath, isDirectory: false)
 
         // Enqueue for iCloud v2 sync. Reuse fileName's stem (no second
         // Date() call) so the dateKey matches what was actually written
         // even across a midnight boundary.
+        //
+        // ［persona］只同步默认人设的日报：recordId 是日期单例，多个人设
+        // 共用会互相覆盖。其他人设的日报不同步（留尾巴）。
         let dateStrForSync = (fileName as NSString).deletingPathExtension
-        Task { @MainActor in
-            await ChatStore.shared.markDirty(recordType: "MemoryDailyV2", recordId: dateStrForSync)
+        if pid == PersonaStore.defaultPersonaID {
+            Task { @MainActor in
+                await ChatStore.shared.markDirty(recordType: "MemoryDailyV2", recordId: dateStrForSync)
+            }
         }
         NotificationCenter.default.post(name: .memoryFilesDidChange, object: nil)
 
@@ -169,7 +181,9 @@ extension AIChatViewModel {
 
         var filesToSearch: [(label: String, url: URL)] = []
         let fm = FileManager.default
-        let memDir = Self.minisMemoryPersistentDir
+        // ［persona］只搜本会话人设的记忆目录；SOUL.md 是人设文件，不当记忆搜。
+        let pid = sessionPersonaId ?? PersonaStore.currentID()
+        let memDir = PersonaStore.memoryDir(for: pid)
 
         var globalEmpty = false
         if scope == "all" {
@@ -189,7 +203,9 @@ extension AIChatViewModel {
         if fm.fileExists(atPath: memDir.path),
            let files = try? fm.contentsOfDirectory(at: memDir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) {
             let sorted = files
-                .filter { $0.pathExtension == "md" && $0.lastPathComponent != "GLOBAL.md" }
+                .filter { $0.pathExtension == "md"
+                    && $0.lastPathComponent != "GLOBAL.md"
+                    && $0.lastPathComponent != "SOUL.md" }
                 .sorted { $0.lastPathComponent > $1.lastPathComponent }
             for file in sorted {
                 filesToSearch.append((file.lastPathComponent, file))

@@ -889,6 +889,8 @@ struct ContentView: View {
     @ObservedObject private var appearanceStudio = AppearanceStudio.shared
     @State private var sessions: [ChatSession] = []
     @State private var folders: [ChatFolder] = []
+    // ［persona］人设列表 sheet。
+    @State private var showPersonaSheet = false
     /// Collapsed folder sections. Pure UI view-state: persisted locally, never
     /// synced (like SessionBadgeStore's .unread — cross-device expand state is
     /// noise, not signal).
@@ -1370,6 +1372,12 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .cloudSyncDidFetchChanges)) { _ in
             // [T-ios-state-publish-offmain-crash] cloud-sync fetch fires off-main;
             // force the @State write onto the main thread.
+            Task { @MainActor in
+                refreshSessionList()
+            }
+        }
+        // ［persona］人设切换 → 会话列表按新的人设重查。
+        .onReceive(NotificationCenter.default.publisher(for: .personaDidChange)) { _ in
             Task { @MainActor in
                 refreshSessionList()
             }
@@ -2757,6 +2765,15 @@ struct ContentView: View {
         // iPhone stack and the iPad split get it (lives on the Group).
         .safeAreaInset(edge: .top, spacing: 0) {
             inlineSearchBar
+        }
+        // ［persona］人设切换行：点一下弹出人设列表。
+        .safeAreaInset(edge: .top, spacing: 0) {
+            PersonaSwitcherRow(store: PersonaStore.shared) {
+                showPersonaSheet = true
+            }
+        }
+        .sheet(isPresented: $showPersonaSheet) {
+            PersonaListSheet(store: PersonaStore.shared)
         }
         // Hardware ⌘F → focus search, available while the session list is on
         // screen (iPad/Mac keyboards). A zero-opacity button carries the

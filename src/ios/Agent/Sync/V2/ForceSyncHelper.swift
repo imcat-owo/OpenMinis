@@ -53,7 +53,8 @@ enum ForceSyncHelper {
     @discardableResult
     static func markMemoryDirty() async -> Int {
         let fm = FileManager.default
-        let memDir = AIChatViewModel.minisMemoryPersistentDir
+        // ［persona］MemoryGlobalV2 / MemoryDailyV2 只同步默认人设的记忆文件。
+        let memDir = PersonaStore.memoryDir(for: PersonaStore.defaultPersonaID)
         var count = 0
         // GLOBAL.md
         let globalURL = memDir.appendingPathComponent("GLOBAL.md")
@@ -137,7 +138,8 @@ enum ForceSyncHelper {
     @MainActor
     @discardableResult
     static func markSoulDirty() async -> Int {
-        let url = SoulStore.fileURL
+        // ［persona］SoulV2 只同步默认人设的 SOUL.md（单例 recordId，不跟随当前人设）。
+        let url = SoulStore.fileURL(for: PersonaStore.defaultPersonaID)
         guard FileManager.default.fileExists(atPath: url.path) else { return 0 }
         await ChatStore.shared.markDirty(recordType: "SoulV2", recordId: "soul")
         return 1

@@ -664,8 +664,14 @@ final class MCPStore: ObservableObject {
     /// disabled servers, sorted by createdAt DESC (most-recently-added first),
     /// name as tiebreak. Note is truncated to the same cap as Skill descriptions
     /// (200 chars). [T-mcp-review-fixes-ios] Unified with Android on createdAt-desc.
-    func systemPromptSnippet(for sessionId: String) -> String? {
-        let enabled = servers.filter { isEnabledForSession($0.id, sessionId: sessionId) }
+    func systemPromptSnippet(for sessionId: String, personaID: String? = nil) -> String? {
+        var enabled = servers.filter { isEnabledForSession($0.id, sessionId: sessionId) }
+        // ［persona］人设 MCP 白名单：nil = 全可用；非 nil = 只留名单里的。
+        let wl = PersonaStore.whitelist(for: personaID ?? PersonaStore.currentID())
+        if let allowed = wl.mcpServerIds {
+            let set = Set(allowed)
+            enabled = enabled.filter { set.contains($0.id) }
+        }
         guard !enabled.isEmpty else { return nil }
 
         // Sort by createdAt desc, name asc as tiebreak, then take Top-N. Missing

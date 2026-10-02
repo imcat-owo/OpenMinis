@@ -725,7 +725,8 @@ struct SyncedDevice: Syncable {
 // One singleton record per iCloud account holding the full SOUL.md text
 // (frontmatter + body). LWW by updatedAt — SOUL.md is small and edited
 // rarely; per-field merging would not buy anything. The file lives at
-// <minisMemoryPersistentDir>/SOUL.md and is read/written by SoulStore.
+// <minisMemoryPersistentDir>/personas/<default>/SOUL.md and is
+// read/written by SoulStore. ［persona］只同步默认人设的 SOUL.md。
 struct SyncedSoul: Syncable {
     /// Constant id — only one SOUL.md per app/account.
     var id: String = "soul"

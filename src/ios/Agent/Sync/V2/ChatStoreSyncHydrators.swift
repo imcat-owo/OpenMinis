@@ -942,8 +942,10 @@ enum ChatStoreSyncHydrators {
     /// Returns nil when the file is missing (e.g. first launch before
     /// ensureExists has run) so we don't push an empty record and clobber
     /// peer copies.
+    ///
+    /// ［persona］只同步默认人设的 SOUL.md（见 SoulStore.save 的注释）。
     private static func buildSoul() async -> PortableRecord? {
-        let url = await MainActor.run { SoulStore.fileURL }
+        let url = await MainActor.run { SoulStore.fileURL(for: PersonaStore.defaultPersonaID) }
         let fm = FileManager.default
         guard fm.fileExists(atPath: url.path),
               let data = try? Data(contentsOf: url),
@@ -979,7 +981,8 @@ enum ChatStoreSyncHydrators {
     // MARK: - Memory Global (GLOBAL.md singleton)
 
     private static func buildMemoryGlobal() async -> PortableRecord? {
-        let url = AIChatViewModel.minisMemoryPersistentDir
+        // ［persona］记忆同步（MemoryGlobalV2/MemoryDailyV2）只跟默认人设。
+        let url = PersonaStore.memoryDir(for: PersonaStore.defaultPersonaID)
                     .appendingPathComponent("GLOBAL.md")
         let fm = FileManager.default
         guard fm.fileExists(atPath: url.path),
@@ -1005,7 +1008,7 @@ enum ChatStoreSyncHydrators {
         }
         let remoteUpdatedAt = dateField(record, "updatedAt") ?? record.updatedAt
 
-        let url = AIChatViewModel.minisMemoryPersistentDir
+        let url = PersonaStore.memoryDir(for: PersonaStore.defaultPersonaID)
                     .appendingPathComponent("GLOBAL.md")
         let fm = FileManager.default
 
@@ -1105,7 +1108,7 @@ enum ChatStoreSyncHydrators {
             return nil  // Too old — skip
         }
 
-        let url = AIChatViewModel.minisMemoryPersistentDir
+        let url = PersonaStore.memoryDir(for: PersonaStore.defaultPersonaID)
                     .appendingPathComponent("\(dateKey).md")
         guard let text = try? String(contentsOf: url, encoding: .utf8),
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -1165,7 +1168,7 @@ enum ChatStoreSyncHydrators {
             return
         }
 
-        let url = AIChatViewModel.minisMemoryPersistentDir
+        let url = PersonaStore.memoryDir(for: PersonaStore.defaultPersonaID)
                     .appendingPathComponent("\(dateKey).md")
         let fm = FileManager.default
 

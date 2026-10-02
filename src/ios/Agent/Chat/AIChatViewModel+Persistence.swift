@@ -137,6 +137,9 @@ extension AIChatViewModel {
     func loadSession() async {
         guard let sessionId else { return }
 
+        // ［persona］落定本会话归属人设（NULL 老数据 → 默认人设）。
+        sessionPersonaId = await ChatStore.shared.personaId(for: sessionId)
+
         let sinceAppear = (CFAbsoluteTimeGetCurrent() - Self.onAppearTimestamp) * 1000
         logger.info("[SessionLoad] loadSession START T+\(String(format: "%.0f", sinceAppear))ms session=\(sessionId) msgs=\(self.messages.count)")
 
@@ -1060,8 +1063,10 @@ extension AIChatViewModel {
     /// most once per draft no matter how many callers are waiting.
     private func createSessionForDraft() async -> String {
         let model = selectedModel
-        let session = await ChatStore.shared.createSession(modelId: model.id, source: sessionSource)
+        // ［persona］新会话打上当前人设。
+        let session = await ChatStore.shared.createSession(modelId: model.id, source: sessionSource, personaId: PersonaStore.currentID())
         sessionId = session.id
+        sessionPersonaId = session.personaId
         Self.activeSessionId = session.id
         // [T-memory-enabled-new-session-bug] Sync the @Published memoryEnabled
         // to the value createSession just persisted from the global default.

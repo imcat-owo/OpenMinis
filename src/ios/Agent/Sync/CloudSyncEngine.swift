@@ -870,7 +870,8 @@ final class CloudSyncEngine: ObservableObject {
         // SOUL.md is a per-account singleton — only enqueue when the
         // file actually exists, otherwise the dirty row would just
         // keep cycling through buildSoul returning nil.
-        let soulURL = await MainActor.run { SoulStore.fileURL }
+        // ［persona］SoulV2 只同步默认人设的 SOUL.md。
+        let soulURL = await MainActor.run { SoulStore.fileURL(for: PersonaStore.defaultPersonaID) }
         if FileManager.default.fileExists(atPath: soulURL.path) {
             await ChatStore.shared.markDirty(recordType: "SoulV2", recordId: "soul")
             logger.info("[CloudSync] markAllLocalContentDirty Soul marked dirty (file present)")

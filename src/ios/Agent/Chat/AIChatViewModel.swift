@@ -1942,7 +1942,9 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
         // Personality section from SOUL.md's body. The original wording
         // is preserved inside SystemPromptBuilder.identityTemplate so we
         // don't regress model behavior that depended on it.
-        SystemPromptBuilder.identitySection()
+        //
+        // ［persona］按本会话的人设渲染身份段（读该人设的 SOUL.md）。
+        SystemPromptBuilder.identitySection(for: sessionPersonaId ?? PersonaStore.currentID())
             + "You should proactively use shell commands to accomplish the user's tasks — installing packages (apk add), "
             + "writing and running scripts, managing files, networking, and any other operations a Linux terminal can perform.\n\n"
             + "Available tools:\n"
@@ -2149,6 +2151,10 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
     var sessionId: String? {
         didSet { browserTabPool.sessionId = sessionId }
     }
+
+    /// ［persona］本会话归属的人设 id。loadSession / 建会话时落定；
+    /// prompt 组装（身份段、记忆、skill）都按它取，不跟随切换。
+    var sessionPersonaId: String?
 
     /// In-flight draft-session creation, shared by concurrent
     /// `ensureSessionReturningId()` callers. Without it, two callers that
@@ -5132,13 +5138,13 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
 
         // Inject enabled skill metadata into system prompt
         if let sid = sessionId,
-           let skillFragment = SkillStore.shared.skillPromptFragment(for: sid) {
+           let skillFragment = SkillStore.shared.skillPromptFragment(for: sid, personaID: sessionPersonaId) {
             userSystemPrompt += "\n\n" + skillFragment
         }
 
         // [T-mcp-integration-ios] Inject Top-20 enabled MCP server metadata.
         if let sid = sessionId,
-           let mcpFragment = MCPStore.shared.systemPromptSnippet(for: sid) {
+           let mcpFragment = MCPStore.shared.systemPromptSnippet(for: sid, personaID: sessionPersonaId) {
             userSystemPrompt += "\n\n" + mcpFragment
         }
 
@@ -5153,10 +5159,10 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
         // global default.
         AppLogger(category: "MemDiag").info("[MemDiag] inject-decision sid=\(self.sessionId?.prefix(8) ?? "nil") vm.memoryEnabled=\(self.memoryEnabled)")
         if memoryEnabled {
-            if let memoryFragment = Self.loadGlobalMemoryFragment() {
+            if let memoryFragment = Self.loadGlobalMemoryFragment(personaID: sessionPersonaId) {
                 userSystemPrompt += "\n\n" + memoryFragment
             }
-            if let dailyFragment = Self.loadRecentDailyMemoryFragment() {
+            if let dailyFragment = Self.loadRecentDailyMemoryFragment(personaID: sessionPersonaId) {
                 userSystemPrompt += "\n\n" + dailyFragment
             }
         }
@@ -5630,12 +5636,12 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
                     userSystemPrompt += "\n\n" + behaviorFragment
                 }
                 if let sid = sessionId,
-                   let skillFragment = SkillStore.shared.skillPromptFragment(for: sid) {
+                   let skillFragment = SkillStore.shared.skillPromptFragment(for: sid, personaID: sessionPersonaId) {
                     userSystemPrompt += "\n\n" + skillFragment
                 }
                 // [T-mcp-integration-ios] Inject Top-20 enabled MCP metadata.
                 if let sid = sessionId,
-                   let mcpFragment = MCPStore.shared.systemPromptSnippet(for: sid) {
+                   let mcpFragment = MCPStore.shared.systemPromptSnippet(for: sid, personaID: sessionPersonaId) {
                     userSystemPrompt += "\n\n" + mcpFragment
                 }
                 // [T-memory-toggle-gates-injection-and-tools-ios] Mirror
@@ -5643,10 +5649,10 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
                 // new provider must respect the per-session memoryEnabled
                 // toggle the same way the initial system prompt did.
                 if memoryEnabled {
-                    if let memoryFragment = Self.loadGlobalMemoryFragment() {
+                    if let memoryFragment = Self.loadGlobalMemoryFragment(personaID: sessionPersonaId) {
                         userSystemPrompt += "\n\n" + memoryFragment
                     }
-                    if let dailyFragment = Self.loadRecentDailyMemoryFragment() {
+                    if let dailyFragment = Self.loadRecentDailyMemoryFragment(personaID: sessionPersonaId) {
                         userSystemPrompt += "\n\n" + dailyFragment
                     }
                 }

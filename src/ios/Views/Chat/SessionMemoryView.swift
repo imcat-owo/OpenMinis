@@ -35,7 +35,7 @@ struct SessionMemoryView: View {
                         ForEach(toolMemories) { item in
                             NavigationLink {
                                 if item.isWrite {
-                                    MemoryWriteDetailView(item: item)
+                                    MemoryWriteDetailView(item: item, personaID: vm.sessionPersonaId ?? PersonaStore.currentID())
                                 } else {
                                     MemoryGetDetailView(item: item)
                                 }
@@ -93,7 +93,8 @@ struct SessionMemoryView: View {
     private var autoInjected: [AutoItem] {
         var items: [AutoItem] = []
         let fm = FileManager.default
-        let memDir = AIChatViewModel.minisMemoryPersistentDir
+        // ［persona］按本会话人设读记忆目录。
+        let memDir = PersonaStore.memoryDir(for: vm.sessionPersonaId ?? PersonaStore.currentID())
 
         // SOUL.md — listed first because it's the identity/personality
         // layer that SystemPromptBuilder.identitySection() injects at
@@ -353,6 +354,8 @@ private struct MemoryContentView: View {
 
 private struct MemoryWriteDetailView: View {
     let item: SessionMemoryView.ToolMemoryItem
+    /// ［persona］本会话人设 id，编辑回写定位该人设的记忆目录。
+    let personaID: String
     @Environment(\.dismiss) private var dismiss
     /// Live copy of the entry's written content. `item` is a snapshot
     /// taken when the list was built; saveEdit replaces the log body by
@@ -474,7 +477,8 @@ private struct MemoryWriteDetailView: View {
     /// Returns the filename on success, nil on failure.
     private func replaceEntryInLog(oldContent: String, newContent: String) -> String? {
         let fm = FileManager.default
-        let memDir = AIChatViewModel.minisMemoryPersistentDir
+        // ［persona］按本会话人设回写记忆目录。
+        let memDir = PersonaStore.memoryDir(for: personaID)
         let dateFmt = DateFormatter()
         dateFmt.dateFormat = "yyyy-MM-dd"
         let candidates = [

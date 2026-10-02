@@ -1424,9 +1424,15 @@ thinking 填/描/强调不必手写。贴包后跟 `colorsLight.accent` / 聊天
     /// 1. Bundled skills (always included)
     /// 2. Recently modified/created skills within last 7 days (up to 10)
     /// 3. Frequently used skills by normalized use count (fill remaining slots)
-    func skillPromptFragment(for sessionId: String) -> String? {
+    func skillPromptFragment(for sessionId: String, personaID: String? = nil) -> String? {
         let logger = AppLogger(category: "SkillDisclosure")
-        let enabled = skills.filter { isEnabledForSession($0.id, sessionId: sessionId) }
+        var enabled = skills.filter { isEnabledForSession($0.id, sessionId: sessionId) }
+        // ［persona］人设 skill 白名单：nil = 全可用；非 nil = 只留名单里的。
+        let wl = PersonaStore.whitelist(for: personaID ?? PersonaStore.currentID())
+        if let allowed = wl.skillIds {
+            let set = Set(allowed)
+            enabled = enabled.filter { set.contains($0.id) }
+        }
         guard !enabled.isEmpty else { return nil }
 
         let totalCount = enabled.count

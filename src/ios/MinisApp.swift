@@ -754,6 +754,7 @@ struct MinisApp: App {
         lifecycleLog.info("[FPSyncTrace] app-updated old=\(previous ?? "none") new=\(current) mac=\(onMac)")
     }
 
+    @MainActor
     private static func registerFileProviderDomain() {
         logAppUpdateMarkerForFPTrace()
         let root = AIChatViewModel.minisAppGroupRoot
@@ -768,6 +769,9 @@ struct MinisApp: App {
         // to render before the user customizes anything. Never overwrites
         // an existing file. Cache the parsed metadata so synchronous call
         // sites (chat bubble header) see the user's name/emoji immediately.
+        // ［persona］首启：登记内置人设（default/steward）、迁移老 SOUL.md、
+        // 建人设目录。必须在 SoulStore.ensureExists 之前跑。
+        PersonaStore.shared.ensureDefaults()
         SoulStore.ensureExists()
         // [T-ios-soul-name-sidebar-stale] Refresh synchronously. This runs from
         // the app's .onAppear (main thread) and refreshCache() is @MainActor, so

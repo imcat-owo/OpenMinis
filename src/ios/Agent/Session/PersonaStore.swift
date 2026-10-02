@@ -84,13 +84,17 @@ final class PersonaStore: ObservableObject {
     /// 当前人设的工具白名单快照（skill / mcp）。nil = 全部可用。
     /// 直接读 personas.json，不经过 @MainActor，prompt 组装线程可调。
     nonisolated static func whitelistSnapshot() -> (skillIds: [String]?, mcpServerIds: [String]?) {
+        whitelist(for: currentID())
+    }
+
+    /// 某人设的工具白名单快照。nil = 全部可用。
+    nonisolated static func whitelist(for personaID: String) -> (skillIds: [String]?, mcpServerIds: [String]?) {
         let url = AIChatViewModel.minisConfigRoot.appendingPathComponent(fileName)
         guard let data = try? Data(contentsOf: url),
               let list = try? JSONDecoder().decode([Persona].self, from: data) else {
             return (nil, nil)
         }
-        let id = currentID()
-        guard let p = list.first(where: { $0.id == id }) else { return (nil, nil) }
+        guard let p = list.first(where: { $0.id == personaID }) else { return (nil, nil) }
         return (p.skillIds, p.mcpServerIds)
     }
 
@@ -110,6 +114,13 @@ final class PersonaStore: ObservableObject {
         if fm.fileExists(atPath: jsonURL.path) {
             load()
             ensureDirs()
+            // 小管家 SOUL.md 兜底：万一丢了（删文件等），重写一份。
+            let stewardSoulURL = Self.memoryDir(for: Self.stewardPersonaID)
+                .appendingPathComponent("SOUL.md")
+            if !fm.fileExists(atPath: stewardSoulURL.path) {
+                try? Self.stewardSoulContent.data(using: .utf8)?
+                    .write(to: stewardSoulURL, options: .atomic)
+            }
             return
         }
 

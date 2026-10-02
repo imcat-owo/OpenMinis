@@ -251,7 +251,8 @@ final class SyncDirtyScanner {
     // MARK: - Memory Files
 
     private func scanMemoryFiles() async {
-        let memDir = AIChatViewModel.minisMemoryPersistentDir
+        // ［persona］记忆同步只跟默认人设。
+        let memDir = PersonaStore.memoryDir(for: PersonaStore.defaultPersonaID)
         guard fm.fileExists(atPath: memDir.path),
               let files = try? fm.contentsOfDirectory(at: memDir,
                                                        includingPropertiesForKeys: [.contentModificationDateKey],

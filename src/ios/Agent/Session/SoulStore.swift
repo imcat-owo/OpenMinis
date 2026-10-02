@@ -732,8 +732,15 @@ enum SoulBodyLimitCheck: Equatable {
 /// directory as GLOBAL.md and daily logs.
 enum SoulStore {
 
+    /// 当前人设的 SOUL.md。［persona］多个人设后，SOUL.md 按人设隔离：
+    /// memory/personas/<personaID>/SOUL.md。
     static var fileURL: URL {
-        AIChatViewModel.minisMemoryPersistentDir.appendingPathComponent("SOUL.md")
+        fileURL(for: PersonaStore.currentID())
+    }
+
+    /// 某人设的 SOUL.md。
+    static func fileURL(for personaID: String) -> URL {
+        PersonaStore.memoryDir(for: personaID).appendingPathComponent("SOUL.md")
     }
 
     // MARK: - Body length rules (unified token count)
@@ -867,11 +874,16 @@ enum SoulStore {
         try? defaultContent.data(using: .utf8)?.write(to: url, options: .atomic)
     }
 
-    /// Read + parse the current SOUL.md. Returns nil when the file does
-    /// not exist or is unreadable. An empty file parses to default-meta +
+    /// Read + parse the current persona's SOUL.md. Returns nil when the file
+    /// does not exist or is unreadable. An empty file parses to default-meta +
     /// empty body, which callers may want to treat as missing.
     static func load() -> SoulFile? {
-        let url = fileURL
+        load(for: PersonaStore.currentID())
+    }
+
+    /// Read + parse a specific persona's SOUL.md.
+    static func load(for personaID: String) -> SoulFile? {
+        let url = fileURL(for: personaID)
         guard FileManager.default.fileExists(atPath: url.path),
               let data = try? Data(contentsOf: url),
               let str = String(data: data, encoding: .utf8) else { return nil }
@@ -899,19 +911,34 @@ enum SoulStore {
     /// Persist a SoulFile back to disk and refresh the cache.
     @MainActor
     static func save(_ file: SoulFile) throws {
-        let url = fileURL
+        try save(file, for: PersonaStore.currentID())
+    }
+
+    /// Persist a SoulFile for a specific persona.
+    /// ［persona］iCloud 同步（SoulV2）只跟默认人设：其他人设的 SOUL.md
+    /// 不同步，避免 recordId 冲突；小管家是内置写死的，本来也不需要同步。
+    @MainActor
+    static func save(_ file: SoulFile, for personaID: String) throws {
+        let url = fileURL(for: personaID)
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
                                                  withIntermediateDirectories: true)
         let text = SoulMDParser.serialize(file)
         try text.data(using: .utf8)?.write(to: url, options: .atomic)
-        cachedMetadata = file.metadata
-        NotificationCenter.default.post(name: .soulMdChanged, object: nil)
+        if personaID == PersonaStore.currentID() {
+            cachedMetadata = file.metadata
+            NotificationCenter.default.post(name: .soulMdChanged, object: nil)
+        }
         // Notify the V2 sync layer so SOUL.md changes propagate to the
         // user's other devices. SoulStore is a singleton record on
         // iCloud (recordId "soul"); the hydrator reads SOUL.md from
         // disk when building the outbound portable, so the only thing
         // we need to do here is enqueue it as dirty.
-        Task { await ChatStore.shared.markDirty(recordType: "SoulV2", recordId: "soul") }
+        //
+        // ［persona］只同步默认人设：recordId "soul" 是单例，多个人设
+        // 共用一个 recordId 会互相覆盖。其他人设不同步（留尾巴）。
+        if personaID == PersonaStore.defaultPersonaID {
+            Task { await ChatStore.shared.markDirty(recordType: "SoulV2", recordId: "soul") }
+        }
     }
 
     /// Apply an inbound SOUL.md from iCloud without re-marking it dirty.
@@ -921,7 +948,8 @@ enum SoulStore {
     /// our local file mtime).
     @MainActor
     static func applyRemoteContent(_ markdown: String, remoteUpdatedAt: Date) {
-        let url = fileURL
+        // ［persona］SoulV2 只同步默认人设，回写也只落默认人设。
+        let url = fileURL(for: PersonaStore.defaultPersonaID)
         let fm = FileManager.default
         // Compare local file mtime against the remote updatedAt; skip
         // the write if local is strictly newer (peer's record reflects
@@ -1012,7 +1040,16 @@ enum SystemPromptBuilder {
     /// sentence alone is the safe fallback when SOUL.md is missing or
     /// empty, matching pre-SOUL behavior.
     static func identitySection() -> String {
-        let file = SoulStore.load()
+        identitySection(for: PersonaStore.currentID())
+    }
+
+    /// ［persona］按人设渲染身份段：读该人设的 SOUL.md。
+    static func identitySection(for personaID: String) -> String {
+        let file = SoulStore.load(for: personaID)
+        return identitySection(from: file)
+    }
+
+    private static func identitySection(from file: SoulFile?) -> String {
         let name: String = {
             let n = (file?.metadata.name ?? SoulMetadata.default.name)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
