@@ -51,7 +51,10 @@ enum AIVoiceMessageComposer {
     /// Synthesize the assistant reply text and persist the audio in the session's
     /// attachments dir. Returns a minis-clone:// URL ready for embedding into a
     /// `![voice](...)` markdown link. All errors (empty text, every candidate
-    /// failed) are logged and return nil — the caller just skips the voice bubble.
+    /// failed) are logged and return nil. [AI-P2-3] The caller owns the
+    /// user-visible side of nil: it toasts the failure AND appends a
+    /// <system-reminder> trace to the in-memory assistant message so the model
+    /// knows no voice bubble went out — the nil itself stays silent here.
     static func compose(for text: String, sessionId: String) async -> Result? {
         let sanitized = VoiceTextSanitizer.sanitize(text, mode: .fullText)
         guard !sanitized.isEmpty else { return nil }

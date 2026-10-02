@@ -6238,6 +6238,18 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
                         MinisToast.show(AppLocalized("Voice bubble unavailable — check your TTS service or voice group."),
                                        systemImage: "exclamationmark.triangle.fill")
                         logger.info("[AIVoice] synthesis unavailable — skipped bubble")
+                        // [AI-P2-3] Leave a trace in the AI's context so the model
+                        // knows the voice bubble was never sent: append a
+                        // <system-reminder> part to the in-memory assistant
+                        // message. In-flight only, never persisted — same
+                        // contract as the empty-toolresult reminder. Without
+                        // this, a "where's the voice message?" follow-up gets a
+                        // confabulated answer ("I sent it") instead of the truth.
+                        if assistantAgentIdx < agentHistory.count {
+                            agentHistory[assistantAgentIdx].parts.append(.text(
+                                "<system-reminder>No voice-bubble version of this reply was produced (synthesis unavailable or nothing speakable), so the user received the text only — no voice message was sent. If the user asks about a missing voice message, do not claim one was sent.</system-reminder>"
+                            ))
+                        }
                     }
                 }
 
