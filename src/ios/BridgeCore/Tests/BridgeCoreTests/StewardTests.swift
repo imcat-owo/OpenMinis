@@ -204,6 +204,21 @@ final class StewardTests: XCTestCase {
         XCTAssertTrue(after.isEmpty, "全部终结后不应再有活动任务")
     }
 
+    func testHugeTimeoutDoesNotCrashProcess() async throws {
+        // 回归：timeoutSeconds 传超大值（外部 JSON 的 1e999 解析为 Double.inf）时，
+        // 旧代码 UInt64(max(timeout, 0) * 1e9) 直接 trap 崩进程（可远程触发）。
+        // 修后应钳制到上界，工具正常返回。
+        let steward = try await makeSteward()
+        let result = await steward.execute(
+            StewardRequest(
+                instruction: "复述一下",
+                toolName: FakeTools.echoName,
+                arguments: try StrictJSON.parseObject(#"{"text":"超时钳制"}"#),
+                timeoutSeconds: Double.infinity))
+        XCTAssertEqual(result.state, .finished)
+        XCTAssertEqual(result.cleanedText, "超时钳制")
+    }
+
     func testTimeoutFuse() async throws {
         let steward = try await makeSteward()
         let started = Date()

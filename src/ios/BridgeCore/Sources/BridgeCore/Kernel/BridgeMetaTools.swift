@@ -125,11 +125,16 @@ public enum BridgeMetaTools {
         guard let instruction = try? arguments.requireString("instruction") else {
             return errorResult("「命令」缺少必填参数 instruction（字符串）")
         }
+        let timeoutSeconds = arguments.double("timeoutSeconds") ?? 30
+        guard timeoutSeconds <= Steward.maxTimeoutSeconds else {
+            return errorResult(
+                "「命令」timeoutSeconds 不能超过 \(Int(Steward.maxTimeoutSeconds)) 秒（你传了 \(timeoutSeconds)），已拒绝。")
+        }
         let request = StewardRequest(
             instruction: instruction,
             toolName: arguments.string("tool"),
             arguments: arguments.object("arguments") ?? StrictJSONObject(raw: [:]),
-            timeoutSeconds: arguments.double("timeoutSeconds") ?? 30)
+            timeoutSeconds: timeoutSeconds)
         let result = await steward.execute(request)
         let text = result.cleanedText ?? "（没有返回内容）"
         return CallTool.Result(

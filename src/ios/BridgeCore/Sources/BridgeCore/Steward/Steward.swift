@@ -99,6 +99,21 @@ public struct StewardTaskSummary: Sendable, Equatable {
 ///   占着队列直到自然结束，其结果被丢弃（这一条写死在语义里，不假装能强杀）。
 /// - 错误：工具抛错/返回错误都收尾为 .failed，原因原文保留进结果，不吞。
 public actor Steward {
+    /// 「命令」超时熔断的上界（秒）。
+    ///
+    /// 外部 AI 传超大值（如 1e999 → Double.inf）时，Double→UInt64 越界转换
+    /// 会直接 trap 崩进程——这里先钳住再转整数。「命令」入口
+    /// （BridgeMetaTools）对超界值直接报错；这里是纵深防御，
+    /// 直调 Steward.execute 的调用方同样被保护。
+    public static let maxTimeoutSeconds: Double = 3600
+
+    /// 把外部传进来的超时钳到 [0, maxTimeoutSeconds]；非有限值（inf/NaN）
+    /// 按上界处理，绝不让它进 UInt64 转换。
+    private static func clampedTimeout(_ raw: Double) -> Double {
+        guard raw.isFinite else { return maxTimeoutSeconds }
+        return min(max(raw, 0), maxTimeoutSeconds)
+    }
+
     /// 主人打断时回给外部调用方的文案。与一般取消（「任务已取消」）、
     /// 超时、失败明确区分：点明是主人在 App 里手动打断，并要求外部 AI
     /// 先向主人询问原因、不许自行重试。
@@ -369,7 +384,8 @@ public actor Steward {
     ) async -> ExecutionOutcome {
         let registry = self.registry
         let arguments = request.arguments
-        let timeout = request.timeoutSeconds
+        // 先钳制再转 UInt64：超大值（inf/NaN/1e19+）直接转整数会 trap 崩进程。
+        let timeout = Self.clampedTimeout(request.timeoutSeconds)
         return await withTaskGroup(of: ExecutionOutcome.self) { group in
             group.addTask {
                 do {
@@ -383,7 +399,7 @@ public actor Steward {
             }
             group.addTask {
                 do {
-                    try await Task.sleep(nanoseconds: UInt64(max(timeout, 0) * 1_000_000_000))
+                    try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
                     return .timedOut
                 } catch {
                     return .cancelled
