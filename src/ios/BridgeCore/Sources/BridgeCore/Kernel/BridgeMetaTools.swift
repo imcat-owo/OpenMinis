@@ -116,6 +116,10 @@ public enum BridgeMetaTools {
             if !hit.parameterBrief.isEmpty {
                 line += "\n  参数：\(hit.parameterBrief)"
             }
+            // 纸条 v1：命中的工具有纸条就附上。只给命中且有纸条的，不全量下发。
+            if let paperBlock = ToolPapers.paperBlock(for: hit.name) {
+                line += "\n\(paperBlock)"
+            }
             return line
         }
         return textResult("找到 \(hits.count) 个工具：\n" + lines.joined(separator: "\n"))
@@ -156,7 +160,17 @@ public enum BridgeMetaTools {
             arguments: arguments.object("arguments") ?? StrictJSONObject(raw: [:]),
             timeoutSeconds: timeoutSeconds)
         let result = await steward.execute(request)
-        let text = result.cleanedText ?? "（没有返回内容）"
+        var text = result.cleanedText ?? "（没有返回内容）"
+        // 纸条 v1：实际执行的工具因参数错误被拒 → 附该工具的纸条。
+        // "参数不对："是全工具统一的参数错误文案；超时/拒绝/未在册等其他失败不附。
+        // 没纸条的工具 paperBlock 为 nil，行为零变化。
+        if case .failed(let reason) = result.state,
+            reason.hasPrefix("参数不对"),
+            let toolName = result.toolName,
+            let paperBlock = ToolPapers.paperBlock(for: toolName)
+        {
+            text += "\n\n\(paperBlock)"
+        }
         return CallTool.Result(
             content: [.text(text: text, annotations: nil, _meta: nil)],
             isError: result.isError)
