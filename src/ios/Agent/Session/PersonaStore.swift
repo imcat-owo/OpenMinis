@@ -201,6 +201,9 @@ final class PersonaStore: ObservableObject {
             try? fm.createDirectory(at: Self.memoryDir(for: p.id),
                                     withIntermediateDirectories: true)
         }
+        // [steward-sep] 小管家的工作笔记目录：干活判断的家，与聊天记忆物理隔离。
+        // 聊天侧（GLOBAL.md / 日报 / memory_get 非递归枚举）读不到 work/ 子目录。
+        StewardWorkContext.ensureWorkDir()
     }
 
     // MARK: - 读写
