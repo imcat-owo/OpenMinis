@@ -31,7 +31,7 @@ public enum BridgeMetaTools {
                 "properties": .object([
                     "query": .object([
                         "type": .string("string"),
-                        "description": .string("搜索关键词，如：回声、时间、蓝牙"),
+                        "description": .string("要找什么能力，用中文关键词说，比如：蓝牙、剪贴板、定位、通知、相册、报问题"),
                     ])
                 ]),
                 "required": .array([.string("query")]),
@@ -45,15 +45,15 @@ public enum BridgeMetaTools {
                 "properties": .object([
                     "instruction": .object([
                         "type": .string("string"),
-                        "description": .string("要执行的指令"),
+                        "description": .string("一句话告诉小管家要干什么，比如：帮我查一下手机现在的位置。小管家会自己找工具办。"),
                     ]),
                     "tool": .object([
                         "type": .string("string"),
-                        "description": .string("可选：点名要用的工具（先用「搜」查到名字）"),
+                        "description": .string("可选：点名要用哪个工具（名字先用「搜」查到）；不填小管家就按指令自己挑"),
                     ]),
                     "arguments": .object([
                         "type": .string("object"),
-                        "description": .string("可选：给工具的参数对象"),
+                        "description": .string("可选：点名工具时一起传的参数（JSON 对象）；参数名和必填项看「搜」返回的参数简述"),
                     ]),
                     "timeoutSeconds": .object([
                         "type": .string("number"),
