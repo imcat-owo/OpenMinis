@@ -2425,6 +2425,18 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
         if skipCompactCheck {
             skipCompactCheck = false
         } else {
+            // [AI-P2-12] Judge capacity against the POST-trim history, not the
+            // pre-trim full log: run the same maintenance pair the agent-loop
+            // top runs (evict old images → offload large outputs) BEFORE the
+            // policy check. Without this the entry check counted image bytes
+            // and bulky tool outputs that the loop was about to remove anyway,
+            // and could prompt "near capacity / exhausted" for a history that
+            // fits fine after trimming. Both calls are idempotent with the
+            // loop-top re-run (trim early-returns at keep-count, offload is
+            // threshold-gated and skips already-offloaded parts).
+            trimOldImagesFromHistory()
+            let preCheckModel = resolveCurrentEntry()?.model ?? selectedModel
+            offloadContextIfNeeded(model: preCheckModel, lastContextTokens: turnUsage.latestContextTokens)
             switch checkContextBeforeSend() {
             case .ok:
                 break
