@@ -156,15 +156,22 @@ enum AIVoiceMessageComposer {
         //（分组按成员顺序 fallback），死透了抛错，不悄悄用别的声音顶。
         if let explicit = try resolveExplicitServices(voice: voice, group: group) {
             for service in explicit {
-                if let (data, _) = await synthesizeWithService(service, text) {
+                if let (data, _) = try await synthesizeWithService(service, text) {
                     return (data, VoiceOutputPlayer.wavDurationOf(data), service.name)
                 }
             }
             throw VoiceComposeError.synthesisFailed(detail: "点名的 TTS 候选都失败了")
         }
         // 默认链路：和以前完全一致（默认 TTS 分组 → 选中服务 → 模型分组）。
-        if let (data, _) = try? await synthesizeWithServiceOrGroup(text) {
-            return (data, VoiceOutputPlayer.wavDurationOf(data), nil)
+        // 取消透传（不能 try? 吞掉），其他失败才落到下面的 synthesisFailed。
+        do {
+            if let (data, _) = try await synthesizeWithServiceOrGroup(text) {
+                return (data, VoiceOutputPlayer.wavDurationOf(data), nil)
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            // 普通失败：继续抛 synthesisFailed
         }
         throw VoiceComposeError.synthesisFailed(detail: "没有可用的 TTS 目标——先选个 TTS 服务或语音分组")
     }
@@ -278,7 +285,8 @@ enum AIVoiceMessageComposer {
             }
             logger.warning("[AIVoice] chunk synth attempt \(attempt + 1)/\(maxAttempts + 1) failed: \(lastError?.localizedDescription ?? "?")")
             let backoff = VoiceOutputPlayer.synthRetryBackoff * Double(attempt + 1)
-            try? await Task.sleep(nanoseconds: UInt64(backoff * 1e9))
+            // 不加 try?：backoff 睡眠期间被取消要直接抛出，不能吞掉继续重试。
+            try await Task.sleep(nanoseconds: UInt64(backoff * 1e9))
         }
         // Phase 2: split smaller and synthesize each piece.
         let small = VoiceOutputPlayer.splitText(text, maxChars: VoiceOutputPlayer.synthSplitChunkChars)
@@ -298,7 +306,8 @@ enum AIVoiceMessageComposer {
                 } catch {
                     lastError = error
                 }
-                try? await Task.sleep(nanoseconds: UInt64(VoiceOutputPlayer.synthRetryBackoff * 1e9))
+                // 不加 try?：睡眠期间被取消要直接抛出，不能吞掉继续试下一个 piece。
+                try await Task.sleep(nanoseconds: UInt64(VoiceOutputPlayer.synthRetryBackoff * 1e9))
             }
             guard ok else { throw lastError ?? VoiceProviderError.parseError("small-piece synth failed") }
         }
@@ -310,7 +319,7 @@ enum AIVoiceMessageComposer {
     /// 完全一致（选中服务 → 模型分组）。
     private static func synthesizeWithServiceOrGroup(_ text: String) async throws -> (Data, String?) {
         for service in ttsServiceCandidates() {
-            if let result = await synthesizeWithService(service, text) {
+            if let result = try await synthesizeWithService(service, text) {
                 return result
             }
         }
@@ -318,11 +327,18 @@ enum AIVoiceMessageComposer {
             guard let provider = VoiceProviderResolver.outputProvider(for: entry) else { continue }
             // [TTS-11] Group entries carry no vendor kind here — split at
             // the conservative shared limit (safe for every vendor).
-            if let data = try? await synthesizeChunked(text, limit: 1000, { chunk in
-                try await provider.synthesize(VoiceOutputRequest(input: chunk, model: entry.model.id))
-            }), !data.isEmpty {
-                logger.info("[AIVoice] synthesized via model-group entry \(entry.model.displayName)")
-                return (data, VoiceProviderResolver.isSystemEntry(entry.providerInstanceId) ? "wav" : "mp3")
+            // 取消透传（不能 try? 吞掉），普通失败才 continue 试下一个。
+            do {
+                if let data = try await synthesizeChunked(text, limit: 1000, { chunk in
+                    try await provider.synthesize(VoiceOutputRequest(input: chunk, model: entry.model.id))
+                }), !data.isEmpty {
+                    logger.info("[AIVoice] synthesized via model-group entry \(entry.model.displayName)")
+                    return (data, VoiceProviderResolver.isSystemEntry(entry.providerInstanceId) ? "wav" : "mp3")
+                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                continue
             }
         }
         throw VoiceProviderError.parseError("all voice candidates failed")
@@ -342,10 +358,12 @@ enum AIVoiceMessageComposer {
         return out
     }
 
-    /// 单个 TTS 服务合成一次。任何失败都记 LOUD 日志并返回 nil（调用方继续下
+    /// 单个 TTS 服务合成一次。普通失败记 LOUD 日志并返回 nil（调用方继续下
     /// 一个候选）。[T-tts-key-status 09-13] 语义保留：选中的服务自己的失败必须
     /// 大声记原因（之前"有声但显示没 key"就是这里静默跳过导致的）。
-    private static func synthesizeWithService(_ service: TTSServiceOptions, _ text: String) async -> (Data, String)? {
+    /// 取消是例外：CancellationError 直接抛出，不转 nil（否则调用方会继续试
+    /// 下一个候选，最终报"合成失败"而非"已取消"，停止按钮形同虚设）。
+    private static func synthesizeWithService(_ service: TTSServiceOptions, _ text: String) async throws -> (Data, String)? {
         let svcStore = TTSServiceStore.shared
         if !svcStore.hasAPIKey(for: service) {
             logger.warning("[AIVoice] TTS service '\(service.name)' has NO stored key — skipping (check the Keychain save in the service editor)")
@@ -366,6 +384,10 @@ enum AIVoiceMessageComposer {
                 return (data, service.kind == .azure ? "mp3" : "wav")
             }
             logger.warning("[AIVoice] service '\(service.name)' returned empty audio — trying next candidate")
+        } catch is CancellationError {
+            // 取消必须透传，不能吞成 nil（调用方靠 nil 决定"试下一个候选"，
+            // 吞掉会导致"点了停止停不下来"，最后报"合成失败"而非"已取消"）。
+            throw CancellationError()
         } catch {
             logger.warning("[AIVoice] service '\(service.name)' synth failed: \(error.localizedDescription) — trying next candidate")
         }
