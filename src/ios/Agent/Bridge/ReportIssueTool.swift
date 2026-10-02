@@ -5,7 +5,7 @@ import UIKit
 import BridgeCore
 
 /// 报问题工具（合并第 21 条）：主人在桥里张嘴说哪里有问题，小管家把
-/// 问题连同当时情况和相关日志打包，POST 到 GitHub 仓库
+/// 问题连同发送时的小快照和相关日志打包，POST 到 GitHub 仓库
 /// imcat-owo/OpenMinis 的 Issues，不用填表。
 ///
 /// 执行端整个在 App 侧（本文件），不进 BridgeCore 内核：内核只管调度，
@@ -27,13 +27,13 @@ enum ReportIssueTool {
         try await registry.register(
             descriptor: ToolDescriptor(
                 name: toolName,
-                summary: "报问题：把 App 的问题连同当时情况打包发到 GitHub 问题列表",
+                summary: "报问题：把 App 的问题连同发送时的情况打包发到 GitHub 问题列表",
                 detail: """
                     主人说 App 哪里有问题、哪里不好用时用这个工具：把问题打包发到 \
                     GitHub 仓库 \(repoFullName) 的 Issues，主人不用填表。
                     参数 title：一句话问题标题（必填，简短说清是什么问题）。
                     参数 detail：主人的原话描述（可选，尽量原样转述，别改写、别脑补）。
-                    工具会自动附上当时情况（App 版本、系统版本、当前时间、小管家\
+                    工具会自动附上发送时的小快照（App 版本、系统版本、发送时间、小管家\
                     当时在忙的任务）和最近的共享事件日志片段，不用再另外传。
                     这是往外发东西的敏感动作，执行前必须经主人确认。
                     """,
@@ -262,7 +262,7 @@ enum ReportIssueTool {
             isError: true)
     }
 
-    /// 组装 Issue 正文。只有三部分：主人原话、当时情况（版本/时间/
+    /// 组装 Issue 正文。只有三部分：主人原话、发送时的情况（版本/时间/
     /// 小管家在忙什么）、最近共享事件日志片段。日志落盘时已脱敏，
     /// 这里再限长；正文里一切主人侧的自由文本（title/detail/
     /// 其他任务的 instruction）先过 sanitize 消毒；任何情况下
@@ -322,9 +322,9 @@ enum ReportIssueTool {
         var sections: [String] = []
         sections.append("## 主人反馈的问题")
         sections.append(detail.map { String($0.prefix(4000)) } ?? title)
-        sections.append("## 当时情况")
+        sections.append("## 发送时的情况")
         sections.append("""
-            - 时间：\(nowText)
+            - 发送时间：\(nowText)
             - App 版本：\(appVersion)（build \(appBuild)）
             - 系统：\(UIDevice.current.systemName) \(UIDevice.current.systemVersion)（\(UIDevice.current.model)）
             - 小管家当时在忙：\(taskText)
