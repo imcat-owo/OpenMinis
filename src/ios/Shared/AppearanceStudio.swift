@@ -490,21 +490,43 @@ final class AppearanceStudio: ObservableObject {
     /// Runs once; the UserDefaults key is removed afterwards.
     /// Static because init calls it before all stored properties are
     /// initialized; it only touches UserDefaults and the icons directory.
+    ///
+    /// [batch7 用户-P2-10] 原子化：全部文件写完才删旧键、打已迁移标记。
+    /// 中途任何一张写失败（目录建不出来、编码失败、落盘抛错）都不删键、
+    /// 不打标记，下次启动重跑——不再是"defer 无条件清掉 + try? 静默吞错"。
     private static func migrateCustomIconsFromUserDefaults() {
         guard !UserDefaults.standard.bool(forKey: Self.customIconsMigratedKey) else { return }
-        defer {
-            UserDefaults.standard.removeObject(forKey: Keys.icons)
+        guard let data = UserDefaults.standard.data(forKey: Keys.icons) else {
+            // 从来没有旧 blob：无事可做，直接标记完成。
             UserDefaults.standard.set(true, forKey: Self.customIconsMigratedKey)
+            return
         }
-        guard let data = UserDefaults.standard.data(forKey: Keys.icons),
-              let value = try? JSONDecoder().decode([String: String].self, from: data),
+        // 旧 blob 存在但解不开：不删、不标记，留着证据等以后处理，
+        // 不像以前那样 defer 一把清掉。
+        guard let value = try? JSONDecoder().decode([String: String].self, from: data),
               !value.isEmpty else { return }
-        try? FileManager.default.createDirectory(at: customIconsDirectoryURL,
-                                                 withIntermediateDirectories: true)
-        for (id, uri) in value {
-            guard let png = SoulIconImage.pngData(from: uri) else { continue }
-            try? png.write(to: customIconFileURL(for: id), options: .atomic)
+        do {
+            try FileManager.default.createDirectory(at: customIconsDirectoryURL,
+                                                    withIntermediateDirectories: true)
+        } catch {
+            return // 目录都建不出来：下次启动重试。
         }
+        var failed = false
+        for (id, uri) in value {
+            guard let png = SoulIconImage.pngData(from: uri) else {
+                failed = true
+                continue
+            }
+            do {
+                try png.write(to: customIconFileURL(for: id), options: .atomic)
+            } catch {
+                failed = true
+            }
+        }
+        // 有一张没写完就不算完：旧键和标记都留着，下次启动重跑。
+        guard !failed else { return }
+        UserDefaults.standard.removeObject(forKey: Keys.icons)
+        UserDefaults.standard.set(true, forKey: Self.customIconsMigratedKey)
     }
 
     private static func loadCustomIconsFromDisk() -> [String: String] {
