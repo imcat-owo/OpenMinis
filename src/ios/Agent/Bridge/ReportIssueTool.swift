@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Security
 import UIKit
 import BridgeCore
@@ -66,6 +67,107 @@ enum ReportIssueTool {
         }
     }
 
+    // MARK: - 去重（幂等，AI-P2-14）
+    //
+    // GitHub Issues API 没有幂等键：30 秒超时/网络抖动时，Issue 可能已经
+    // 在 GitHub 建好了，客户端却以为失败。失败文案让主人"重发"，重发同一
+    // 内容必须只得到一条 Issue，不能建第二条。
+    // 做法（两层，都是客户端侧，诚实起见写清楚）：
+    // ① 内存短时缓存：同一内容（标题+原话）15 分钟内只发一次；
+    // ② 发之前先 GET 最近 20 条 Issues：同名且 15 分钟内建的直接复用，
+    //    不再 POST——覆盖"第一次超时但 GitHub 其实建好了"的重发场景。
+    private static let dedupWindow: TimeInterval = 15 * 60
+    private static let dedupLock = NSLock()
+
+    private struct SentRecord {
+        let number: Int?
+        let url: String?
+        let at: Date
+    }
+
+    private static var recentSent: [String: SentRecord] = [:]
+
+    /// 去重键：消毒后的标题+原话的 SHA256。
+    private static func dedupKey(title: String, detail: String?) -> String {
+        let raw = title + "\n" + (detail ?? "")
+        let digest = SHA256.hash(data: Data(raw.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func cachedSubmission(for key: String) -> SentRecord? {
+        dedupLock.lock()
+        defer { dedupLock.unlock() }
+        guard let record = recentSent[key],
+              Date().timeIntervalSince(record.at) < dedupWindow
+        else { return nil }
+        return record
+    }
+
+    private static func cacheSubmission(key: String, number: Int?, url: String?) {
+        dedupLock.lock()
+        defer { dedupLock.unlock() }
+        recentSent[key] = SentRecord(number: number, url: url, at: Date())
+        // 只留最近 50 条，防内存悄悄长大。
+        if recentSent.count > 50 {
+            let cutoff = Date().addingTimeInterval(-dedupWindow)
+            recentSent = recentSent.filter { $0.value.at >= cutoff }
+        }
+    }
+
+    private struct FoundIssue {
+        let number: Int
+        let url: String
+    }
+
+    /// 发之前先查重：最近 20 条 Issues 里有没有同名、且在去重窗口内建的。
+    /// 查不到/查失败返回 nil，调用方照常 POST（查失败不拦正常发送）。
+    private static func findRecentDuplicate(title: String, token: String) async -> FoundIssue? {
+        guard let url = URL(string: issuesEndpoint + "?state=all&per_page=20") else { return nil }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 15
+        // 令牌只进请求头，和 POST 那条同口径。
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else { return nil }
+        let cutoff = Date().addingTimeInterval(-dedupWindow)
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        for item in list {
+            guard let itemTitle = item["title"] as? String, itemTitle == title,
+                  let number = item["number"] as? Int,
+                  let htmlURL = item["html_url"] as? String,
+                  let created = item["created_at"] as? String,
+                  let createdDate = formatter.date(from: created),
+                  createdDate >= cutoff
+            else { continue }
+            return FoundIssue(number: number, url: htmlURL)
+        }
+        return nil
+    }
+
+    /// 同一内容重复提交时的回话：不建新 Issue，直接给已有那条的编号/链接。
+    private static func alreadySentText(number: Int?, url: String?, reused: Bool) -> ToolOutput {
+        let head = reused
+            ? "这条问题之前已经发到 GitHub 了，没有重复再发。"
+            : "这条问题刚才已经发过一次，没有重复再发。"
+        if let number, let url {
+            SharedEventLog.shared.emit(
+                event: "bridge.issue_reported",
+                summary: "去重命中，不再重发：Issue #\(number) \(url)")
+            return ToolOutput(text: """
+                \(head)
+                Issue 编号：#\(number)
+                链接：\(url)
+                请把编号和链接转述给主人。
+                """)
+        }
+        return ToolOutput(text: "\(head)请到仓库 \(repoFullName) 的 Issues 列表里看最新一条。")
+    }
+
     // MARK: - 执行：组装正文 → POST GitHub Issues
 
     private static func submit(title: String, detail: String?, steward: Steward) async -> ToolOutput {
@@ -83,6 +185,16 @@ enum ReportIssueTool {
         // 标题既进 Issue 正文又进 POST 的 title 字段：先消毒再往下传。
         let safeTitle = sanitize(title)
         let safeDetail = detail.map(sanitize)
+
+        // 去重在前：同一内容短时间内重发，不建第二条 Issue。
+        let key = dedupKey(title: safeTitle, detail: safeDetail)
+        if let hit = cachedSubmission(for: key) {
+            return alreadySentText(number: hit.number, url: hit.url, reused: false)
+        }
+        if let dup = await findRecentDuplicate(title: safeTitle, token: token) {
+            cacheSubmission(key: key, number: dup.number, url: dup.url)
+            return alreadySentText(number: dup.number, url: dup.url, reused: true)
+        }
 
         let body = await composeBody(title: safeTitle, detail: safeDetail, steward: steward)
 
@@ -109,7 +221,7 @@ enum ReportIssueTool {
             // 网络层错误描述不含请求头，不会带出令牌。
             logger.warning("GitHub 发 Issue 网络失败：\(error.localizedDescription)")
             return ToolOutput(
-                text: "发送失败：网络连不上 GitHub（\(error.localizedDescription)）。请确认网络正常后再让我重发。",
+                text: "发送失败：网络连不上 GitHub（\(error.localizedDescription)）。请确认网络正常后再让我重发。超时不代表没发出去：重发同一内容时我会先查重，不会建重复的 Issue。",
                 isError: true)
         }
         guard let http = response as? HTTPURLResponse else {
@@ -122,6 +234,7 @@ enum ReportIssueTool {
            let number = parsed?["number"] as? Int,
            let htmlURL = parsed?["html_url"] as? String {
             // 成功留痕：只记编号和链接，绝不记令牌。
+            cacheSubmission(key: key, number: number, url: htmlURL)
             SharedEventLog.shared.emit(
                 event: "bridge.issue_reported",
                 summary: "问题已发到 GitHub：Issue #\(number) \(htmlURL)")
@@ -135,6 +248,7 @@ enum ReportIssueTool {
 
         if http.statusCode == 201 {
             // 发成功了但回执没解析出编号/链接：如实说，别误导重发造成重复。
+            cacheSubmission(key: key, number: nil, url: nil)
             SharedEventLog.shared.emit(
                 event: "bridge.issue_reported",
                 summary: "问题已发到 GitHub（回执未解析出编号）")
