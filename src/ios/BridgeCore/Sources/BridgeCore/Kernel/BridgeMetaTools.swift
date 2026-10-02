@@ -57,7 +57,8 @@ public enum BridgeMetaTools {
                     ]),
                     "timeoutSeconds": .object([
                         "type": .string("number"),
-                        "description": .string("可选：超时秒数，默认 30"),
+                        "description": .string(
+                            "可选：超时秒数，默认 30。不要超过 60（中继转发上限），超过 60 第一次必吃 504。"),
                     ]),
                     "sensitiveApproved": .object([
                         "type": .string("boolean"),
