@@ -42,6 +42,10 @@ struct BridgeExternalConnectionView: View {
     /// 用户-P3-1：打断是 destructive 操作，先弹确认再执行。
     @State private var showInterruptConfirm = false
 
+    /// 用户-P3-2：保存按钮的成功/失败反馈（底部短暂浮现的提示条）。
+    @State private var saveFeedback: String?
+    @State private var saveFeedbackToken = 0
+
     var body: some View {
         Form {
             Section {
@@ -87,18 +91,27 @@ struct BridgeExternalConnectionView: View {
                     }
                 }
                 LabeledContent(AppLocalized("中继地址")) {
-                    TextField("xxx.workers.dev", text: $host)
-                        .multilineTextAlignment(.trailing)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .submitLabel(.done)
-                        .onSubmit { applyConfigChange() }
+                    HStack(spacing: 8) {
+                        TextField("xxx.workers.dev", text: $host)
+                            .multilineTextAlignment(.trailing)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .submitLabel(.done)
+                            .onSubmit { applyConfigChange() }
+                        // 用户-P3-2：显眼的保存入口——光靠回车，用户粘贴完
+                        // 直接退出页面会丢输入。
+                        Button(AppLocalized("保存")) {
+                            applyConfigChange()
+                            flashSaveFeedback(AppLocalized("已保存"))
+                        }
+                        .buttonStyle(.bordered)
+                    }
                 }
                 tokenField
             } header: {
                 Text(AppLocalized("中继连接"))
             } footer: {
-                Text(AppLocalized("先填中继地址和口令，再打开中继连接；改完按回车生效。口令只存本机钥匙串，不会上传；中继只转手、不存任何内容。"))
+                Text(AppLocalized("先填中继地址和口令，再打开中继连接；改完按「保存」或按回车生效。口令只存本机钥匙串，不会上传；中继只转手、不存任何内容。"))
             }
 
             Section {
@@ -106,13 +119,18 @@ struct BridgeExternalConnectionView: View {
                     Text(hasGitHubToken ? AppLocalized("已填") : AppLocalized("未填"))
                         .foregroundStyle(.secondary)
                 }
-                SecureField(AppLocalized("粘贴令牌"), text: $githubTokenInput)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    // 这是 GitHub PAT（不是短信验证码），用 .password 语义才对。
-                    .textContentType(.password)
-                    .submitLabel(.done)
-                    .onSubmit { saveGitHubToken() }
+                HStack(spacing: 8) {
+                    SecureField(AppLocalized("粘贴令牌"), text: $githubTokenInput)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        // 这是 GitHub PAT（不是短信验证码），用 .password 语义才对。
+                        .textContentType(.password)
+                        .submitLabel(.done)
+                        .onSubmit { saveGitHubToken() }
+                    // 用户-P3-2：令牌框也要显眼的保存入口。
+                    Button(AppLocalized("保存")) { saveGitHubToken() }
+                        .buttonStyle(.bordered)
+                }
                 if hasGitHubToken {
                     Button(role: .destructive) {
                         clearGitHubToken()
@@ -123,7 +141,7 @@ struct BridgeExternalConnectionView: View {
             } header: {
                 Text(AppLocalized("报问题到 GitHub"))
             } footer: {
-                Text(AppLocalized("在桥里跟小管家说哪里有问题，它会把问题连同当时的情况打包发到 GitHub 仓库 imcat-owo/OpenMinis 的问题列表里，不用填表。发送需要一把令牌：在 GitHub 里生成一个 fine-grained 个人访问令牌（PAT），只选 imcat-owo/OpenMinis 这一个仓库、权限只给 Issues 的读写。令牌只存本机钥匙串，界面不回显，也不会发到别处。填好按回车保存。"))
+                Text(AppLocalized("在桥里跟小管家说哪里有问题，它会把问题连同当时的情况打包发到 GitHub 仓库 imcat-owo/OpenMinis 的问题列表里，不用填表。发送需要一把令牌：在 GitHub 里生成一个 fine-grained 个人访问令牌（PAT），只选 imcat-owo/OpenMinis 这一个仓库、权限只给 Issues 的读写。令牌只存本机钥匙串，界面不回显，也不会发到别处。填好按「保存」或按回车保存。"))
             }
         }
         .navigationTitle(AppLocalized("桥·对外连接"))
@@ -161,6 +179,20 @@ struct BridgeExternalConnectionView: View {
         } message: {
             Text(AppLocalized("正在跑和排队的任务都会停掉，外部 AI 会收到「主人打断」。"))
         }
+        // 用户-P3-2：保存反馈条——保存成功/失败时在底部短暂浮现，
+        // 让用户明确知道"存上了"，不用靠猜。
+        .overlay(alignment: .bottom) {
+            if let fb = saveFeedback {
+                Text(fb)
+                    .font(.footnote)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(.bottom, 32)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: saveFeedback)
     }
 
     // MARK: 口令输入（默认 SecureField 遮住；眼睛按钮切明文，与 AddProviderView 同款）
@@ -184,6 +216,13 @@ struct BridgeExternalConnectionView: View {
                 .textContentType(.oneTimeCode)
                 .submitLabel(.done)
                 .onSubmit { applyConfigChange() }
+
+                // 用户-P3-2：口令框也要显眼的保存入口。
+                Button(AppLocalized("保存")) {
+                    applyConfigChange()
+                    flashSaveFeedback(AppLocalized("已保存"))
+                }
+                .buttonStyle(.bordered)
 
                 Button {
                     showTokenPlaintext.toggle()
@@ -269,6 +308,20 @@ struct BridgeExternalConnectionView: View {
         }
     }
 
+    /// 用户-P3-2：保存反馈条——2 秒后自动收起；用 token 防多次
+    /// 连点时旧的定时器把新的提示提前掐掉。
+    private func flashSaveFeedback(_ text: String) {
+        saveFeedbackToken += 1
+        let token = saveFeedbackToken
+        saveFeedback = text
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            if token == saveFeedbackToken {
+                saveFeedback = nil
+            }
+        }
+    }
+
     /// App 重启后回到本页时：开关期望值是开、服务却没在跑，就补起一次。
     private func restoreMCPExternal() {
         if BridgeRelayPreferences.externalMCPEnabled, !BridgeExternalMCPService.shared.isRunning {
@@ -299,10 +352,15 @@ struct BridgeExternalConnectionView: View {
     /// 保存新令牌：落钥匙串后立刻清空输入框，界面只留「已填」状态。
     private func saveGitHubToken() {
         let trimmed = githubTokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else {
+            // 用户-P3-2：空输入点保存不再静默无事，给个反馈。
+            flashSaveFeedback(AppLocalized("令牌不能为空"))
+            return
+        }
         BridgeGitHubTokenStore.save(trimmed)
         githubTokenInput = ""
         hasGitHubToken = BridgeGitHubTokenStore.hasToken
+        flashSaveFeedback(AppLocalized("已保存"))
     }
 
     private func clearGitHubToken() {
