@@ -335,10 +335,36 @@ extension BackupImporter {
         let settingsURL = root.appendingPathComponent("data/appearance_settings.json")
         if let data = try? Data(contentsOf: settingsURL),
            let values = try? JSONDecoder().decode([String: BackupDefaultsValue].self, from: data) {
-            await MainActor.run { AppearanceStudio.shared.applyBackupDefaults(values) }
+            await MainActor.run {
+                AppearanceStudio.shared.applyBackupDefaults(values)
+                // [batch7 用户-P2-11] 清除标记与文件 merge 语义对齐：以清除
+                // 标记为准——包里没带某页壁纸文件、但标记说该页已清除时，
+                // 本机残留的该页壁纸文件删掉，不让标记变死标记。
+                AppearanceStudio.shared.reconcileClearedWallpapersAfterRestore(
+                    packagedScopes: Self.packagedWallpaperScopes(in: fileIndex))
+            }
             report.imported += 1
         }
         return report
+    }
+
+    /// 包里实际带了壁纸文件的 scope（文件名 appearance/wallpaper-<scope>.jpg）。
+    private static func packagedWallpaperScopes(in fileIndex: [BackupFileIndexEntry])
+        -> Set<AppearanceScope> {
+        var out = Set<AppearanceScope>()
+        for entry in fileIndex {
+            guard entry.category == BackupCategory.appearance.rawValue,
+                  entry.skipped == nil,
+                  entry.path.hasPrefix("appearance/wallpaper-"),
+                  entry.path.hasSuffix(".jpg") else { continue }
+            let raw = entry.path
+                .dropFirst("appearance/wallpaper-".count)
+                .dropLast(".jpg".count)
+            if let scope = AppearanceScope(rawValue: String(raw)) {
+                out.insert(scope)
+            }
+        }
+        return out
     }
 
     // MARK: - Skills

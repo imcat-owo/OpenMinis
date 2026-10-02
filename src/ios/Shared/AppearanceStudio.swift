@@ -355,6 +355,27 @@ final class AppearanceStudio: ObservableObject {
         wallpaperRevision += 1
     }
 
+    /// [batch7 用户-P2-11] 恢复对齐：清除标记为准。恢复是 merge 语义（包里
+    /// 没提的文件原位保留），但清除标记恢复回来后、标记对应的本机壁纸文件
+    /// 若还在，"清除"就被悄悄撤销、标记变死标记。所以：包里没带某 scope
+    /// 壁纸文件、清除标记里却有它时，把本机残留的该文件删掉；包里带了的
+    /// scope 不动（显式内容优先）。
+    func reconcileClearedWallpapersAfterRestore(packagedScopes: Set<AppearanceScope>) {
+        var removed = false
+        for scope in wallpaperClearedFallback where scope != .global {
+            guard !packagedScopes.contains(scope) else { continue }
+            let url = wallpaperURL(scope)
+            if FileManager.default.fileExists(atPath: url.path) {
+                try? FileManager.default.removeItem(at: url)
+                removed = true
+            }
+        }
+        if removed {
+            wallpaperCache.removeAll()
+            wallpaperRevision += 1
+        }
+    }
+
     private func persistWallpaperCleared() {
         let raw = wallpaperClearedFallback.map(\.rawValue)
         UserDefaults.standard.set(raw, forKey: Self.wallpaperClearedKey)
