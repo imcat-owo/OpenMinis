@@ -39,6 +39,9 @@ struct BridgeExternalConnectionView: View {
     @State private var githubTokenInput: String = ""
     @State private var hasGitHubToken: Bool = false
 
+    /// 用户-P3-1：打断是 destructive 操作，先弹确认再执行。
+    @State private var showInterruptConfirm = false
+
     var body: some View {
         Form {
             Section {
@@ -57,7 +60,7 @@ struct BridgeExternalConnectionView: View {
                     }
                     if hasActiveStewardTask {
                         Button(role: .destructive) {
-                            Task { await interruptSteward() }
+                            showInterruptConfirm = true
                         } label: {
                             Text(AppLocalized("打断小管家"))
                         }
@@ -146,6 +149,17 @@ struct BridgeExternalConnectionView: View {
             Button("OK") { mcpError = nil }
         } message: {
             Text(mcpError ?? "")
+        }
+        // 用户-P3-1：打断小管家二次确认——任务停掉后外部 AI 会收到
+        // 「主人打断」专属报错，是不可逆的 destructive 操作。用 .alert
+        //（不用 .confirmationDialog），iPad/Mac 上弹窗居中不乱飘。
+        .alert(AppLocalized("打断小管家"), isPresented: $showInterruptConfirm) {
+            Button(AppLocalized("打断"), role: .destructive) {
+                Task { await interruptSteward() }
+            }
+            Button(AppLocalized("取消"), role: .cancel) {}
+        } message: {
+            Text(AppLocalized("正在跑和排队的任务都会停掉，外部 AI 会收到「主人打断」。"))
         }
     }
 
