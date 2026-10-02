@@ -222,9 +222,11 @@ struct BridgeExternalConnectionView: View {
                 .multilineTextAlignment(.trailing)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-                // 与 API Key 字段同口径：.oneTimeCode 把这个凭据框排除在
-                // AutoFill 密码配对之外，避免系统把别的字段当用户名栏。
-                .textContentType(.oneTimeCode)
+                // 用户-P3-5：这是手动粘贴的中继口令（不是短信验证码），
+                // 用 .password 语义才对——.oneTimeCode 会让 iOS 在收到
+                // 短信验证码时把"填充验证码"塞进这个框覆盖口令。
+                // 与报问题令牌框（b38d599）同口径。
+                .textContentType(.password)
                 .submitLabel(.done)
                 .onSubmit { applyConfigChange() }
 
