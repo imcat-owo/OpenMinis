@@ -5298,7 +5298,7 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
             let placeholderParts = orphanedToolUses.map { (id, name) in
                 AgentContentPart.toolResult(
                     id: id, name: name,
-                    content: "Tool execution was interrupted by an unexpected error.",
+                    content: "Tool execution was interrupted before a result was returned. Treat this tool call as unfinished and retry or proceed without its result.",
                     isError: true
                 )
             }
