@@ -26,6 +26,7 @@ enum BluetoothDeviceTool {
                     read 读特征值（uuid、service、characteristic）；write 写特征值（再加 value 十六进制或 value_string 文本）；
                     notify 订阅特征的通知一段时间（duration 秒数默认 10，必须大于 0）。
                     注意：这里管的是低功耗蓝牙（BLE）设备，不是蓝牙耳机/音箱这类经典蓝牙设备。
+                    执行上限：默认 60 秒；scan/notify 按 duration 秒数＋45 秒。
                     """,
                 keywords: ["蓝牙", "bluetooth", "ble", "扫描设备", "蓝牙设备", "连接设备"],
                 parameterSchemaJSON: #"""

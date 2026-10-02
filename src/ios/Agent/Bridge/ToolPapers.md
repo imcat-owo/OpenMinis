@@ -81,6 +81,8 @@ AI 该怎么跟主人说：
 
 参数速查：action（必填，上面 8 个值）；uuid（connect 必填）；service、characteristic（read/write/notify 必填）；duration（整数，scan 默认 5，notify 默认 10）；value（十六进制文本）/value_string（普通文本）写操作二选一。
 
+执行上限：默认 60 秒；scan/notify 按 duration 秒数＋45 秒。
+
 ---
 
 ## 纸条 5：device_clipboard 剪贴板
@@ -94,6 +96,8 @@ AI 该怎么跟主人说：
 
 已知小坑（已报给 F-device）：参数表把 action 标成"必填"，但不传默认就是 get——传了最稳，别被"必填"两个字吓住。
 
+执行上限 30 秒：「命令」口的 timeoutSeconds 传更大也不会延长，以这个为准。
+
 ---
 
 ## 纸条 6：device_location 定位
@@ -106,6 +110,8 @@ AI 该怎么跟主人说：
 - `action=forward`：地址换成经纬度。address（地址文字）必填。
 
 注意：这里经度叫 **lng**；相册按位置找照片（device_photos 的 near）里经度叫 **lon**，别混了，照各工具的参数名填。
+
+执行上限 45 秒：「命令」口的 timeoutSeconds 传更大也不会延长，以这个为准。
 
 ---
 
@@ -123,6 +129,8 @@ AI 该怎么跟主人说：
 取消（`action=cancel`）：id 指定取消一条，或 all=true 全部取消。id 从哪来：先调 pending 看待触发列表（F-device 确认 schedule 返回是否带 id 后，这里同步更新）。
 
 排完后跟主人说一声什么时候会响、内容是什么，让主人心里有数。
+
+执行上限 30 秒：「命令」口的 timeoutSeconds 传更大也不会延长，以这个为准。
 
 ---
 
@@ -147,6 +155,8 @@ AI 该怎么跟主人说：
 
 id 从哪来：先调 list 或 albums 查到 id，再拿 id 办后面的事。
 
+执行上限 120 秒；注意「命令」口的中继转发上限是 60 秒，传超 60 秒的超时第一次必吃 504。
+
 ---
 
 ## 纸条 9：device_photos_delete 删照片
@@ -159,3 +169,5 @@ id 从哪来：先调 list 或 albums 查到 id，再拿 id 办后面的事。
 3. 这是敏感动作，走审批流（见纸条 3）：主人要在手机上点"允许"才真删；被拒绝就停手，如实跟主人说。
 
 跟主人说什么：动手前说"我准备删这几张（把标题/时间列出来），需要你在手机上点确认"；删完说"删好了"；被拒绝就说"没删，你没确认/不在手机旁"。
+
+执行上限 120 秒（中继转发上限说明同 device_photos）。

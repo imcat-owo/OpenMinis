@@ -21,6 +21,7 @@ enum LocationDeviceTool {
                     参数 action：geocode 把经纬度换成地址（需 lat、lng），
                     forward 把地址换成经纬度（需 address）。
                     查手机当前位置请用 device_location_current 工具（需主人确认）。
+                    执行上限 45 秒：「命令」口的 timeoutSeconds 传更大也不会延长，以这个为准。
                     """,
                 keywords: ["定位", "经纬度", "地址", "location", "gps", "geocode", "坐标"],
                 parameterSchemaJSON: #"""
@@ -69,6 +70,7 @@ enum LocationDeviceTool {
                     查当前 GPS 位置。可带 accuracy：best（默认）/ near / km。
                     精确位置是隐私，执行前必须经主人确认。
                     地址与经纬度互换用 device_location 工具。
+                    执行上限 45 秒：「命令」口的 timeoutSeconds 传更大也不会延长，以这个为准。
                     """,
                 keywords: ["当前位置", "我在哪", "gps 位置", "current location", "定位", "坐标"],
                 parameterSchemaJSON: #"""

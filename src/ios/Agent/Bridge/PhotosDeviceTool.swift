@@ -28,6 +28,7 @@ enum PhotosDeviceTool {
                     stats 相册统计。
                     写动作（导出/导入/建相册/加进相册/收藏）请用 device_photos_write 工具（需主人确认）；
                     删除照片用 device_photos_delete 工具（需主人确认）。
+                    执行上限 120 秒；注意「命令」口的中继转发上限是 60 秒，传超 60 秒的超时第一次必吃 504。
                     """,
                 keywords: ["相册", "照片", "图片", "视频", "photos", "album", "图库"],
                 parameterSchemaJSON: #"""
@@ -101,6 +102,7 @@ enum PhotosDeviceTool {
                     add-to-album 把已有照片（assets 逗号分隔 id）或文件（paths 逗号分隔路径）加进相册（album 或 album_name 必填其一）；
                     favorite 收藏/取消收藏一张（id 必填）。
                     只读查询用 device_photos 工具；删除用 device_photos_delete 工具。
+                    执行上限 120 秒；注意「命令」口的中继转发上限是 60 秒，传超 60 秒的超时第一次必吃 504。
                     """,
                 keywords: ["相册写入", "导入照片", "导出原图", "建相册", "收藏照片", "photos write", "导入", "导出"],
                 parameterSchemaJSON: #"""
@@ -176,6 +178,7 @@ enum PhotosDeviceTool {
                 detail: """
                     参数 ids：逗号分隔的照片/视频标识（先用 device_photos 的 list 查到 id）。
                     删除会进系统相册的删除流程，执行前必须经主人确认。
+                    执行上限 120 秒；注意「命令」口的中继转发上限是 60 秒，传超 60 秒的超时第一次必吃 504。
                     """,
                 keywords: ["删除照片", "删图", "delete photo", "相册删除", "照片删除"],
                 parameterSchemaJSON: #"""

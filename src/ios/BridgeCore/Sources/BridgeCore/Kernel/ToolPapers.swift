@@ -37,6 +37,8 @@ enum ToolPapers {
         - 动手前先告诉主人："我要做 X（比如删这几张照片／把这个问题发到 GitHub），需要你在手机上点一下确认。"让主人有预期去看手机。
         - 收到"未获批准，已拒绝"：停手，如实说"主人没在手机上确认，这事没办"，不要反复重试刷屏。
         - 收到"主人未在手机旁，已拒绝"：跟主人说"我刚才想做 X，但你不在手机旁，系统按拒绝处理了；你在手机旁时跟我说一声，我再办。"
+
+        执行上限 120 秒（中继转发上限说明同 device_photos）。
         """
 
     /// 纸条 4：device_bluetooth 蓝牙
@@ -52,6 +54,8 @@ enum ToolPapers {
         6. `action=disconnect`：断开（uuid 可省）。
 
         参数速查：action（必填，上面 8 个值）；uuid（connect 必填）；service、characteristic（read/write/notify 必填）；duration（整数，scan 默认 5，notify 默认 10）；value（十六进制文本）/value_string（普通文本）写操作二选一。
+
+        执行上限：默认 60 秒；scan/notify 按 duration 秒数＋45 秒。
         """
 
     /// 纸条 5：device_clipboard 剪贴板
@@ -62,6 +66,8 @@ enum ToolPapers {
         - `action=clear`：清空。`action=status`：看剪贴板里有什么类型的内容。
 
         已知小坑（已报给 F-device）：参数表把 action 标成"必填"，但不传默认就是 get——传了最稳，别被"必填"两个字吓住。
+
+        执行上限 30 秒：「命令」口的 timeoutSeconds 传更大也不会延长，以这个为准。
         """
 
     /// 纸条 6：device_location 定位
@@ -72,6 +78,8 @@ enum ToolPapers {
         - `action=forward`：地址换成经纬度。address（地址文字）必填。
 
         注意：这里经度叫 **lng**；相册按位置找照片（device_photos 的 near）里经度叫 **lon**，别混了，照各工具的参数名填。
+
+        执行上限 45 秒：「命令」口的 timeoutSeconds 传更大也不会延长，以这个为准。
         """
 
     /// 纸条 7：device_notification 本地通知
@@ -86,6 +94,8 @@ enum ToolPapers {
         取消（`action=cancel`）：id 指定取消一条，或 all=true 全部取消。id 从哪来：先调 pending 看待触发列表（F-device 确认 schedule 返回是否带 id 后，这里同步更新）。
 
         排完后跟主人说一声什么时候会响、内容是什么，让主人心里有数。
+
+        执行上限 30 秒：「命令」口的 timeoutSeconds 传更大也不会延长，以这个为准。
         """
 
     /// 纸条 8：device_photos 相册
@@ -106,6 +116,8 @@ enum ToolPapers {
         删照片不用这个，用 device_photos_delete（有单独纸条，要主人确认）。
 
         id 从哪来：先调 list 或 albums 查到 id，再拿 id 办后面的事。
+
+        执行上限 120 秒；注意「命令」口的中继转发上限是 60 秒，传超 60 秒的超时第一次必吃 504。
         """
 
     /// 纸条 9：device_photos_delete 删照片
