@@ -57,6 +57,14 @@ final class SharedEventLog {
         try? NSRegularExpression(pattern: #"data:[A-Za-z0-9/+\-]+;base64,[A-Za-z0-9+/=]{64,}"#)
     }()
 
+    private static let bareURLPattern: NSRegularExpression? = {
+        // 裸 http(s) 网址：日志片段会进公开的 GitHub Issue，带 token 的
+        // 查询串一旦落盘就等于公开，AI-P1-2 起一律遮掉。
+        try? NSRegularExpression(
+            pattern: "https?://[^\\s)\"<>\\]]+",
+            options: [.caseInsensitive])
+    }()
+
     private var logURL: URL {
         AIChatViewModel.minisSharedPersistentDir
             .appendingPathComponent("events.jsonl", isDirectory: false)
@@ -108,7 +116,7 @@ final class SharedEventLog {
     static func redact(_ s: String) -> String {
         // Fail closed: if the patterns somehow didn't compile, the summary
         // is useless rather than a secret leak.
-        guard let dataURIPattern, let secretPattern else { return "<redacted>" }
+        guard let dataURIPattern, let secretPattern, let bareURLPattern else { return "<redacted>" }
         var out = s
         var range = NSRange(out.startIndex..., in: out)
         out = dataURIPattern.stringByReplacingMatches(
@@ -116,6 +124,9 @@ final class SharedEventLog {
         range = NSRange(out.startIndex..., in: out)
         out = secretPattern.stringByReplacingMatches(
             in: out, range: range, withTemplate: "$1=***REDACTED***")
+        range = NSRange(out.startIndex..., in: out)
+        out = bareURLPattern.stringByReplacingMatches(
+            in: out, range: range, withTemplate: "<url>")
         return out
     }
 

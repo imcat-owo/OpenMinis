@@ -178,9 +178,11 @@ enum ReportIssueTool {
         }
 
         let logLines = SharedEventLog.shared.recentEntries(limit: 20)
+        // 日志行落盘时已脱敏，但旧行可能是补网址遮蔽之前写的；
+        // 进公开 Issue 前再过一遍 sanitize（含遮裸网址），双保险。
         let logText = logLines.isEmpty
             ? "（暂无记录）"
-            : String(logLines.joined(separator: "\n").prefix(3000))
+            : String(sanitize(logLines.joined(separator: "\n")).prefix(3000))
 
         var sections: [String] = []
         sections.append("## 主人反馈的问题")
