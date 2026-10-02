@@ -14,7 +14,7 @@ import BridgeCore
 /// 开启时构造，App 现有行为零变化。
 
 /// 工具注册状态（设置页展示用）：注册中 / 就绪 / 失败（带原因）。
-enum BridgeToolRegistrationState: Sendable, Equatable {
+public enum BridgeToolRegistrationState: Sendable, Equatable {
     case registering
     case ready
     case failed(String)
