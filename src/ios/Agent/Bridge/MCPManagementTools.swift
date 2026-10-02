@@ -24,13 +24,13 @@ enum MCPManagementTools {
         [
             AgentToolDefinition(
                 name: "add_mcp",
-                description: "给小管家接入一个新的 MCP 服务器（MCP 聚合点专用）。两段式：第一段先探一下 MCP 的 URL、鉴权、能拉到哪些工具，并把清单列出来请主人确认；主人点头后第二段带 confirm=true 再调一次才真落盘。陌生链接必须先确认再接。确认接入后，这家 MCP 的工具会进小管家的「搜」和「命令」，外部 AI 也能调。鉴权头按 \"Key: Value\" 格式填，如 \"Authorization: Bearer xxx\"。",
+                description: "给小管家接入一个新的 MCP 服务器（MCP 聚合点专用）。两段式：第一段先探一下 MCP 的 URL、鉴权、能拉到哪些工具，并把清单列出来请主人确认；主人点头后第二段带 confirm=true 再调一次——这时手机上会弹框，必须主人亲手点「允许」才真落盘（confirm 参数只是回执，不当权限）。陌生链接必须先确认再接。确认接入后，这家 MCP 的工具会进小管家的「搜」和「命令」，外部 AI 也能调。鉴权信息绝不许传明文 key：如需鉴权，先请主人去「设置 → 环境变量」新建变量（值由主人亲自填写，只进钥匙串），再把 \"Key: $$变量名\" 传给我（如 \"Authorization: $$MY_MCP_KEY\"）。",
                 parameters: [
                     "url": AgentToolParam(type: .string, description: "MCP 服务器地址（http/https，必填）"),
                     "name": AgentToolParam(type: .string, description: "给这家 MCP 起的名字（只允许字母数字 _.-；不填就用域名）"),
                     "note": AgentToolParam(type: .string, description: "备注（给主人看的，比如这是谁家的服务）"),
-                    "authHeader": AgentToolParam(type: .string, description: "鉴权头，\"Key: Value\" 格式（如 \"Authorization: Bearer xxx\"）；不需要鉴权就空着"),
-                    "confirm": AgentToolParam(type: .boolean, description: "确认接入。第一次调不传（只探、只列清单）；主人点头后再调一次并传 confirm=true 真落盘"),
+                    "authHeaderRef": AgentToolParam(type: .string, description: "鉴权头引用，\"Key: $$变量名\" 格式（如 \"Authorization: $$MY_MCP_KEY\"）；变量必须是「设置 → 环境变量」里已建好的。不需要鉴权就空着。传明文 key 会被直接拒绝。"),
+                    "confirm": AgentToolParam(type: .boolean, description: "确认接入。第一次调不传（只探、只列清单）；主人点头后再调一次并传 confirm=true——这时手机会弹框，必须主人亲手点允许才真落盘"),
                 ],
                 required: ["url"]),
             AgentToolDefinition(
@@ -158,8 +158,39 @@ enum MCPManagementTools {
         name = sanitizeServerName(name)
         guard !name.isEmpty else { return ("Error: 名字不合法。", false) }
         let note = ((args["note"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let authHeader = ((args["authHeader"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let confirm = (args["confirm"] as? Bool) ?? false
+
+        // P1-1：鉴权信息绝不许走明文。旧参数名 authHeader 若还被传值，
+        // 一律按明文 key 拒绝——key 只许以 $$变量名 引用的形式来。
+        if let legacy = args["authHeader"] as? String,
+           !legacy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return ("Error: 鉴权信息不许传明文 key。请主人去「设置 → 环境变量」新建一个变量（值由主人亲自填写，只进钥匙串），再把 \"Key: $$变量名\" 传给我。", false)
+        }
+        // 鉴权头引用：必须是 "Key: $$VARNAME" 形状，值原样进 servers.json，
+        // 运行时由 minis-mcp-cli 从 App 环境变量（钥匙串）解析，明文永不落盘。
+        var headerArg: String? = nil
+        let authHeaderRef = ((args["authHeaderRef"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !authHeaderRef.isEmpty {
+            guard let colon = authHeaderRef.firstIndex(of: ":") else {
+                return ("Error: authHeaderRef 格式不对，要 \"Key: $$变量名\" 这样，比如 \"Authorization: $$MY_MCP_KEY\"。", false)
+            }
+            let hKey = authHeaderRef[..<colon].trimmingCharacters(in: .whitespacesAndNewlines)
+            let hVal = authHeaderRef[authHeaderRef.index(after: colon)...].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !hKey.isEmpty, hVal.hasPrefix("$$"), hVal.count > 2 else {
+                return ("Error: authHeaderRef 必须是 \"Key: $$变量名\" 形状（如 \"Authorization: $$MY_MCP_KEY\"），不许传明文 key。", false)
+            }
+            let varName = String(hVal.dropFirst(2))
+            guard varName.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }) else {
+                return ("Error: 变量名「\(varName)」不合法，只要字母数字下划线。", false)
+            }
+            let varExists = await MainActor.run {
+                EnvVarStore.shared.entries.contains(where: { $0.key == varName })
+            }
+            guard varExists else {
+                return ("Error: 环境变量「\(varName)」还没建。请主人去「设置 → 环境变量」新建它（值由主人亲自填写），建好后我再调一次 add_mcp，参数完全一样。", false)
+            }
+            headerArg = "\(hKey): \(hVal)"
+        }
 
         let exists = await MainActor.run {
             MCPStore.shared.servers.contains(where: { $0.id == name })
@@ -170,11 +201,9 @@ enum MCPManagementTools {
 
         var addCmd = "minis-mcp-cli add --name \(shellQuote(name)) --url \(shellQuote(url))"
         if !note.isEmpty { addCmd += " --note \(shellQuote(note))" }
-        if !authHeader.isEmpty {
-            guard authHeader.contains(":") else {
-                return ("Error: authHeader 格式不对，要 \"Key: Value\" 这样，比如 \"Authorization: Bearer xxx\"。", false)
-            }
-            addCmd += " --header \(shellQuote(authHeader))"
+        if let headerArg {
+            // 存的是 $$VARNAME 引用原文，明文 key 永不出现在这条命令里。
+            addCmd += " --header \(shellQuote(headerArg))"
         }
 
         do {
