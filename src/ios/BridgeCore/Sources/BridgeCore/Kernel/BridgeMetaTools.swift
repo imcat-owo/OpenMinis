@@ -150,9 +150,11 @@ public enum BridgeMetaTools {
         } else {
             timeoutSeconds = 30
         }
-        guard timeoutSeconds <= Steward.maxTimeoutSeconds else {
+        // 桥口这一层的校验上限是 60 秒（中继转发上限），与工具说明对齐。
+        // Steward.maxTimeoutSeconds（3600）是内部上限，本体不动。
+        guard timeoutSeconds <= 60 else {
             return errorResult(
-                "「命令」timeoutSeconds 不能超过 \(Int(Steward.maxTimeoutSeconds)) 秒（你传了 \(timeoutSeconds)），已拒绝。")
+                "「命令」timeoutSeconds 不能超过 60 秒（中继转发上限，超了第一次必吃 504；你传了 \(timeoutSeconds)），已拒绝。")
         }
         let request = StewardRequest(
             instruction: instruction,
