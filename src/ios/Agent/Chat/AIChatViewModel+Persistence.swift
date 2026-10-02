@@ -1755,12 +1755,26 @@ extension AIChatViewModel {
                 logger.info("[CompactDiag] eAH v2 preAnchor prune: dropped \(droppedCount) toolResult(>1kc) + paired toolUse, \(preAnchorRaw.count - preAnchorPruned.count) messages emptied; pruned slice=\(preAnchorPruned.count)")
             }
 
-            // ROLE ALIGNMENT: the API requires the first message to be `user`.
-            // After clamp (100-cap may land on assistant) and after prune
-            // (the head user may have been emptied), peel any leading non-user
-            // messages so preAnchor starts on a user turn. If everything got
-            // peeled, preAnchor is empty — that's fine; summary will be
-            // injected into the first postAnchor user instead.
+            // ROLE ALIGNMENT (defense-only, currently unreachable): the API
+            // requires the first message to be `user`. This peel stays as
+            // belt-and-braces, but its body cannot execute today:
+            //   1. walkBackUserTurnsBounded only ever returns priorIdx on a
+            //      `.user` message carrying no toolResult parts — boundary
+            //      decisions happen solely at user messages, and the 100-cap
+            //      stops the walk (rejects the oversize candidate) instead of
+            //      clamping mid-slice, so the head can never be an assistant.
+            //   2. The prune above only drops toolUse/toolResult parts whose
+            //      id is in droppedToolIds (built solely from >1kc toolResults).
+            //      The head user message carries no toolResult by the boundary
+            //      rule, and toolUse parts are only ever constructed on
+            //      assistant-role messages (assistantParts -> .assistant;
+            //      Offloading's in-place rewrite preserves the message role),
+            //      so nothing in the head can be pruned and it can never be
+            //      emptied into the `kept.isEmpty` skip.
+            // Hence preAnchorPruned's head is always that user message (or
+            // preAnchor is empty when walk-back found no boundary), and the
+            // while body never fires. Kept for the pathological case (e.g. a
+            // corrupt DB row decoding to zero parts).
             while let first = preAnchorPruned.first, first.role != .user {
                 preAnchorPruned.removeFirst()
             }
