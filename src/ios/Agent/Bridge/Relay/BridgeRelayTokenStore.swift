@@ -4,8 +4,10 @@ import Security
 // MARK: - 中继口令的钥匙串存取（合并第 18(a) 条）
 //
 // 协议 v1 约定：kSecClassGenericPassword，service "bridge.relay"，
-// account "token"。口令由用户在设置页粘贴填入（本任务不生成口令），
-// 只存钥匙串、不进 UserDefaults、不进日志、不进界面默认明文展示。
+// account "token"。口令只存钥匙串、不进 UserDefaults、不进日志、
+// 不进界面默认明文展示。
+// 口令来源有两条：她在设置页粘贴填入，或点"生成强口令"由本机生成
+// （generateStrongToken，32 随机字节 base64url 无 padding，与协议一致）。
 // 写法沿用 MCPOAuthController 的仓内现成套路：不可同步（不走 iCloud）、
 // AfterFirstUnlock 可读（后台重连时也能取到）。
 
@@ -38,6 +40,23 @@ enum BridgeRelayTokenStore {
             kSecAttrAccount as String: account,
         ]
         SecItemDelete(query as CFDictionary)
+    }
+
+    /// 生成强口令：32 随机字节 base64url（无 padding，约 43 字符），与
+    /// 协议 v1 的口令格式约定一致，够长够随机。随机源失败时回退两段
+    /// UUID 拼接（仍具足够随机性），绝不返回空串。只返回口令本身，
+    /// 不记日志——调用方负责落钥匙串。
+    static func generateStrongToken() -> String {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        if SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess {
+            let b64 = Data(bytes).base64EncodedString()
+                .replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_")
+                .replacingOccurrences(of: "=", with: "")
+            if !b64.isEmpty { return b64 }
+        }
+        return UUID().uuidString.replacingOccurrences(of: "-", with: "")
+            + UUID().uuidString.replacingOccurrences(of: "-", with: "")
     }
 
     // MARK: Keychain primitives（与 MCPOAuthController 同形）

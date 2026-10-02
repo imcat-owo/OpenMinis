@@ -42,6 +42,10 @@ struct BridgeExternalConnectionView: View {
     /// PM-P1-1：刚复制过外部连接地址时的短暂提示。
     @State private var justCopiedExternalURL: Bool = false
 
+    /// 口令换新指引：刚生成的口令（供"复制新口令"按钮用）与指引弹窗开关。
+    @State private var pendingNewToken: String? = nil
+    @State private var showRotationGuide: Bool = false
+
     var body: some View {
         Form {
             Section {
@@ -108,6 +112,12 @@ struct BridgeExternalConnectionView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                // 口令换新：一键生成强口令并换上（见 rotateToken）。
+                Button {
+                    rotateToken()
+                } label: {
+                    Text(AppLocalized("生成强口令"))
+                }
             } header: {
                 Text(AppLocalized("中继连接"))
             } footer: {
@@ -162,6 +172,19 @@ struct BridgeExternalConnectionView: View {
             Button("OK") { mcpError = nil }
         } message: {
             Text(mcpError ?? "")
+        }
+        // 口令换新指引：两步都做完旧口令才彻底作废。
+        .alert(AppLocalized("口令已换新"), isPresented: $showRotationGuide) {
+            Button(AppLocalized("复制新口令")) {
+                if let token = pendingNewToken {
+                    UIPasteboard.general.string = token
+                }
+            }
+            Button(AppLocalized("知道了"), role: .cancel) {
+                pendingNewToken = nil
+            }
+        } message: {
+            Text(AppLocalized("两步才算换完：① App 这边已换上新口令（中继开着的话已自动重连）；② 去 Cloudflare 控制台 → bridge-relay → 设置 → 环境变量，把 RELAY_TOKEN 改成刚复制的新口令并保存。两步都做完，旧口令立刻作废。"))
         }
     }
 
@@ -289,6 +312,22 @@ struct BridgeExternalConnectionView: View {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             justCopiedExternalURL = false
         }
+    }
+
+    // MARK: 口令换新
+
+    /// 一键换新：生成强口令→落钥匙串→输入框同步→开着中继就断开旧通道
+    /// 用新口令重连（worker 侧每帧验口令，旧口令立刻作废）；然后弹指引
+    /// 让她去 CF 控制台把 RELAY_TOKEN 也换成新的，两步才算换完。
+    private func rotateToken() {
+        let newToken = BridgeRelayTokenStore.generateStrongToken()
+        BridgeRelayTokenStore.save(newToken)
+        tokenInput = newToken
+        if relay.isEnabled {
+            relay.reconnect()
+        }
+        pendingNewToken = newToken
+        showRotationGuide = true
     }
 
     /// App 重启后回到本页时：开关期望值是开、服务却没在跑，就补起一次。
