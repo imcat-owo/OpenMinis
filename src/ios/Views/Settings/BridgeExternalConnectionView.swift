@@ -167,7 +167,8 @@ struct BridgeExternalConnectionView: View {
             get: { mcpError != nil },
             set: { if !$0 { mcpError = nil } }
         )) {
-            Button("OK") { mcpError = nil }
+            // 用户-P3-6：按钮文案走本地化，不写死英文。
+            Button(AppLocalized("OK"), role: .cancel) { mcpError = nil }
         } message: {
             Text(mcpError ?? "")
         }
