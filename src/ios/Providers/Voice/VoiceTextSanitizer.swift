@@ -221,7 +221,15 @@ enum VoiceTextSanitizer {
 
     /// [T-kelivo-tts] Remove (……) and （……） spans — asides read as
     /// interruptions when spoken aloud.
+    /// [AI-P2-11] Unclosed-paren guard: the old single-pass depth counter
+    /// swallowed EVERYTHING after an unclosed `(` — depth never returned to
+    /// 0, so all following text was dropped. Now the text is stripped only
+    /// when its parens balance (every closer matches an opener in scan
+    /// order); otherwise the original is kept verbatim. Dropping words is
+    /// worse than hearing a stray "(" pause, and the well-formed path is
+    /// byte-for-byte the old logic.
     private static func stripParenthesized(_ text: String) -> String {
+        guard parenthesesBalanced(text) else { return text }
         var out = ""
         var depth = 0
         for ch in text {
@@ -237,6 +245,22 @@ enum VoiceTextSanitizer {
             if depth == 0 { out.append(ch) }
         }
         return out
+    }
+
+    /// True when every paren closer matches an earlier opener in scan order
+    /// (open/close types are interchangeable, mirroring the strip above).
+    /// `")("` is NOT balanced — depth must never go negative.
+    private static func parenthesesBalanced(_ text: String) -> Bool {
+        var depth = 0
+        for ch in text {
+            if ch == "(" || ch == "（" {
+                depth += 1
+            } else if ch == ")" || ch == "）" {
+                depth -= 1
+                if depth < 0 { return false }
+            }
+        }
+        return depth == 0
     }
 
     private static func isSpeakable(_ s: Unicode.Scalar) -> Bool {

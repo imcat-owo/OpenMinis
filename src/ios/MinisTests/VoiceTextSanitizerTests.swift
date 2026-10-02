@@ -50,4 +50,23 @@ final class VoiceTextSanitizerTests: XCTestCase {
         XCTAssertEqual(VoiceTextSanitizer.sanitize("run `read_image_file` today"),
                        "run read_image_file today")
     }
+
+    // MARK: - withoutParentheses: unclosed-paren guard (AI-P2-11)
+
+    func testWithoutParentheses_balancedSpan_removed() {
+        XCTAssertEqual(VoiceTextSanitizer.sanitize("hello (world) foo", mode: .withoutParentheses),
+                       "hello foo")
+        XCTAssertEqual(VoiceTextSanitizer.sanitize("你好（世界）再见", mode: .withoutParentheses),
+                       "你好 再见")
+        XCTAssertEqual(VoiceTextSanitizer.sanitize("a (b (c) d) e", mode: .withoutParentheses),
+                       "a e")
+    }
+
+    func testWithoutParentheses_unclosedParen_keepsOriginal() {
+        // Old code swallowed everything after the unclosed `(`.
+        XCTAssertEqual(VoiceTextSanitizer.sanitize("hello (world", mode: .withoutParentheses),
+                       "hello (world")
+        XCTAssertEqual(VoiceTextSanitizer.sanitize("a) b (c", mode: .withoutParentheses),
+                       "a) b (c")
+    }
 }
