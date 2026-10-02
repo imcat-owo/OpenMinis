@@ -39,6 +39,9 @@ struct BridgeExternalConnectionView: View {
     @State private var githubTokenInput: String = ""
     @State private var hasGitHubToken: Bool = false
 
+    /// PM-P1-1：刚复制过外部连接地址时的短暂提示。
+    @State private var justCopiedExternalURL: Bool = false
+
     var body: some View {
         Form {
             Section {
@@ -92,6 +95,19 @@ struct BridgeExternalConnectionView: View {
                         .onSubmit { applyConfigChange() }
                 }
                 tokenField
+                // PM-P1-1：外部 AI 连的是 worker 的 POST /mcp/<token>（见
+                // BridgeRelayProtocol.externalMcpURLString），拼好一键复制。
+                Button {
+                    copyExternalConnectionURL()
+                } label: {
+                    Text(AppLocalized("复制外部连接地址"))
+                }
+                .disabled(externalConnectionURLString == nil)
+                if justCopiedExternalURL {
+                    Text(AppLocalized("已复制，去外部 AI 的 MCP 设置里粘贴即可"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             } header: {
                 Text(AppLocalized("中继连接"))
             } footer: {
@@ -252,6 +268,26 @@ struct BridgeExternalConnectionView: View {
         BridgeRelayPreferences.host = host
         if relay.isEnabled {
             relay.reconnect()
+        }
+    }
+
+    // MARK: 复制外部连接地址（PM-P1-1）
+
+    /// 当前输入框里的地址+口令拼出的外部 AI 连接地址。
+    /// 口令优先取输入框（她可能刚改了还没回车），框空了才回落钥匙串。
+    private var externalConnectionURLString: String? {
+        let token = tokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let effectiveToken = token.isEmpty ? (BridgeRelayTokenStore.load() ?? "") : token
+        return RelayEndpoint.externalMcpURLString(host: host, token: effectiveToken)
+    }
+
+    private func copyExternalConnectionURL() {
+        guard let urlString = externalConnectionURLString else { return }
+        UIPasteboard.general.string = urlString
+        justCopiedExternalURL = true
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            justCopiedExternalURL = false
         }
     }
 
