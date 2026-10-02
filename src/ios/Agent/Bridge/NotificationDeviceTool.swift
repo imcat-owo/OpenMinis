@@ -4,52 +4,75 @@ import BridgeCore
 /// 通知工具（合并第 19 条）：接 NativeOffloads 的 `apple-notification` 现成实现。
 /// 子命令：pending / delivered / settings / schedule / cancel。
 ///
-/// 拆两个工具：`device_notification` 是查看与取消（pending / delivered /
-/// settings / cancel），标准级；`device_notification_schedule` 只做安排
-/// 本地通知——会在主人手机上弹出提醒、打扰主人，标敏感级，未经主人确认不执行。
+/// 拆三个工具：`device_notification` 只做查看（pending / delivered /
+/// settings），标准级；`device_notification_schedule` 只做安排本地通知——
+/// 会在主人手机上弹出提醒、打扰主人，标敏感级；`device_notification_cancel`
+/// 只做取消——删掉她设好的提醒是破坏性动作（尤其 all=true 全清），标敏感级。
+/// 两个敏感工具未经主人确认不执行。
 enum NotificationDeviceTool {
     static let toolName = "device_notification"
     static let scheduleToolName = "device_notification_schedule"
+    static let cancelToolName = "device_notification_cancel"
     static let commandName = "apple-notification"
 
     static func register(into registry: ToolRegistry) async throws {
         try await registry.register(
             descriptor: ToolDescriptor(
                 name: toolName,
-                summary: "本地通知：查看或取消手机本地通知",
+                summary: "本地通知：查看手机本地通知（待触发/已送达/授权状态）",
                 detail: """
-                    参数 action：pending 看待触发的通知，delivered 看已送达的，settings 看通知授权状态，
-                    cancel 取消（id 指定一条，或 all=true 全部取消）。
+                    参数 action：pending 看待触发的通知，delivered 看已送达的，settings 看通知授权状态。
+                    取消通知请用 device_notification_cancel 工具（需主人确认）。
                     安排新通知请用 device_notification_schedule 工具（需主人确认）。
                     """,
-                keywords: ["通知", "提醒", "notification", "取消提醒"],
+                keywords: ["通知", "提醒", "notification"],
                 parameterSchemaJSON: #"""
                     {"type":"object","properties":{
-                      "action":{"type":"string","enum":["pending","delivered","settings","cancel"],"description":"动作"},
-                      "id":{"type":"string","description":"cancel：要取消的通知标识"},
-                      "all":{"type":"boolean","description":"cancel：true 时取消全部待触发通知"}},
+                      "action":{"type":"string","enum":["pending","delivered","settings"],"description":"动作"}},
                      "required":["action"]}
                     """#
             )
         ) { arguments in
             let action = arguments.string("action") ?? ""
-            var tokens: [String] = [action]
             switch action {
             case "pending", "delivered", "settings":
                 break
-            case "cancel":
-                if arguments.string("id") == nil, arguments.bool("all") != true {
-                    return ToolOutput(
-                        text: "参数不对：cancel 需要给 id（通知标识）或 all=true（全部取消）。",
-                        isError: true)
-                }
-                OffloadToolRunner.appendString(&tokens, flag: "--id", from: arguments, key: "id")
-                OffloadToolRunner.appendSwitch(&tokens, flag: "--all", from: arguments, key: "all")
             default:
                 return ToolOutput(
-                    text: "参数不对：action 只能是 pending / delivered / settings / cancel（安排通知请用 device_notification_schedule）。",
+                    text: "参数不对：action 只能是 pending / delivered / settings（取消请用 device_notification_cancel，安排请用 device_notification_schedule）。",
                     isError: true)
             }
+            return await OffloadToolRunner.run(commandName: commandName, tokens: [action], timeout: 30)
+        }
+
+        // 取消通知：敏感级。删掉她设好的提醒是破坏性动作，尤其 all=true
+        // 会清空全部待触发通知，必须经主人确认。调度层未带主人确认标记时不会执行到这里。
+        try await registry.register(
+            descriptor: ToolDescriptor(
+                name: cancelToolName,
+                summary: "取消通知：取消一条或全部待触发本地通知（敏感动作，需主人确认）",
+                detail: """
+                    取消本地通知。id 指定取消一条（先用 device_notification 的 pending 查到 id），
+                    all=true 取消全部待触发通知。删掉设好的提醒不可恢复，执行前必须经主人确认。
+                    """,
+                keywords: ["取消通知", "取消提醒", "删除提醒", "cancel notification"],
+                parameterSchemaJSON: #"""
+                    {"type":"object","properties":{
+                      "id":{"type":"string","description":"要取消的通知标识（用 device_notification 查）"},
+                      "all":{"type":"boolean","description":"true 时取消全部待触发通知"}},
+                     "required":[]}
+                    """#,
+                permission: .sensitive
+            )
+        ) { arguments in
+            if arguments.string("id") == nil, arguments.bool("all") != true {
+                return ToolOutput(
+                    text: "参数不对：cancel 需要给 id（通知标识）或 all=true（全部取消）。",
+                    isError: true)
+            }
+            var tokens: [String] = ["cancel"]
+            OffloadToolRunner.appendString(&tokens, flag: "--id", from: arguments, key: "id")
+            OffloadToolRunner.appendSwitch(&tokens, flag: "--all", from: arguments, key: "all")
             return await OffloadToolRunner.run(commandName: commandName, tokens: tokens, timeout: 30)
         }
 
@@ -63,7 +86,7 @@ enum NotificationDeviceTool {
                     repeat=true 为重复提醒（配合 at 为每天该时刻，配合 after 为每 N 秒、最短 60），
                     action_spec 可带交互按钮，格式 "按钮名:id" 逗号分隔。
                     会在主人手机上弹出提醒，执行前必须经主人确认。
-                    查看/取消通知用 device_notification 工具。
+                    查看通知用 device_notification 工具，取消通知用 device_notification_cancel 工具。
                     """,
                 keywords: ["安排通知", "定时提醒", "schedule 通知", "闹钟提醒", "notification schedule"],
                 parameterSchemaJSON: #"""
