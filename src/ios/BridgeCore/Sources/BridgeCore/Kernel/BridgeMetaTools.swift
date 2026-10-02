@@ -39,7 +39,7 @@ public enum BridgeMetaTools {
         )
         let commandTool = Tool(
             name: commandName,
-            description: "下达一条指令，桥里的小管家负责找工具、执行、清洗，只回高密度结果。可点名 tool 指定工具，不点名则由管家按指令智能路由。",
+            description: "下达一条指令，桥里的小管家负责找工具、执行、清洗，只回高密度结果。可点名 tool 指定工具，不点名则由管家按指令智能路由。敏感动作（如删照片、发 GitHub Issue）执行前会弹框请主人在手机上确认，主人超时未确认或不在手机旁则默认拒绝。",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -61,7 +61,9 @@ public enum BridgeMetaTools {
                     ]),
                     "sensitiveApproved": .object([
                         "type": .string("boolean"),
-                        "description": .string("可选：敏感工具经主人确认后传 true"),
+                        // 已作废：兼容保留，实际审批只能由手机侧弹框签发，
+                        // 传任何值都不会被信任（防外部 AI 自批）。
+                        "description": .string("已作废：兼容保留。敏感审批由手机侧弹框完成，传 true 也不会被信任。"),
                     ]),
                 ]),
                 "required": .array([.string("instruction")]),
@@ -127,8 +129,7 @@ public enum BridgeMetaTools {
             instruction: instruction,
             toolName: arguments.string("tool"),
             arguments: arguments.object("arguments") ?? StrictJSONObject(raw: [:]),
-            timeoutSeconds: arguments.double("timeoutSeconds") ?? 30,
-            sensitiveApproved: arguments.bool("sensitiveApproved") ?? false)
+            timeoutSeconds: arguments.double("timeoutSeconds") ?? 30)
         let result = await steward.execute(request)
         let text = result.cleanedText ?? "（没有返回内容）"
         return CallTool.Result(

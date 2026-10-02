@@ -36,21 +36,17 @@ public struct StewardRequest: Sendable {
     public var arguments: StrictJSONObject
     /// 超时熔断秒数。
     public var timeoutSeconds: Double
-    /// 敏感工具放行标记：主人确认过才为 true。
-    public var sensitiveApproved: Bool
 
     public init(
         instruction: String,
         toolName: String? = nil,
         arguments: StrictJSONObject = StrictJSONObject(raw: [:]),
-        timeoutSeconds: Double = 30,
-        sensitiveApproved: Bool = false
+        timeoutSeconds: Double = 30
     ) {
         self.instruction = instruction
         self.toolName = toolName
         self.arguments = arguments
         self.timeoutSeconds = timeoutSeconds
-        self.sensitiveApproved = sensitiveApproved
     }
 }
 
@@ -122,9 +118,18 @@ public actor Steward {
     private var cancelRequested: Set<UUID> = []
     private var ownerInterruptRequested: Set<UUID> = []
 
-    public init(registry: ToolRegistry, cleaner: ResultCleaner = ResultCleaner()) {
+    /// 敏感审批门（宿主 App 注入）：敏感工具执行前走它请主人在手机上确认。
+    /// nil = 没装门，敏感工具一律拒绝（默认安全）。
+    private let approvalGate: (any SensitiveApprovalGate)?
+
+    public init(
+        registry: ToolRegistry,
+        cleaner: ResultCleaner = ResultCleaner(),
+        approvalGate: (any SensitiveApprovalGate)? = nil
+    ) {
         self.registry = registry
         self.cleaner = cleaner
+        self.approvalGate = approvalGate
     }
 
     // MARK: - 提交与查询
@@ -266,13 +271,30 @@ public actor Steward {
             completeRun(id: id)
             return
         }
-        if descriptor.permission == .sensitive, !request.sensitiveApproved {
-            let reason = "工具 \(toolName) 是敏感操作，需要主人确认后才能执行"
-            finish(
-                id: id, state: .failed(reason: reason), toolName: toolName,
-                rawText: nil, cleanedText: reason, isError: true)
-            completeRun(id: id)
-            return
+        // —— 敏感审批：只能由手机侧签发，外部传进来的标记一律不认 ——
+        if descriptor.permission == .sensitive {
+            let decision =
+                await approvalGate?.requestApproval(
+                    toolName: toolName, instruction: request.instruction) ?? .denied
+            switch decision {
+            case .approved:
+                break
+            case .denied:
+                let reason =
+                    "工具 \(toolName) 是敏感操作，需要主人在手机上确认后才能执行；未获批准，已拒绝"
+                finish(
+                    id: id, state: .failed(reason: reason), toolName: toolName,
+                    rawText: nil, cleanedText: reason, isError: true)
+                completeRun(id: id)
+                return
+            case .ownerAway:
+                let reason = "主人未在手机旁，已拒绝"
+                finish(
+                    id: id, state: .failed(reason: reason), toolName: toolName,
+                    rawText: nil, cleanedText: reason, isError: true)
+                completeRun(id: id)
+                return
+            }
         }
 
         // 主人若在派发阶段就打断了（运行任务已被 cancel，但派发校验是

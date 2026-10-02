@@ -219,23 +219,59 @@ final class StewardTests: XCTestCase {
         XCTAssertLessThan(elapsed, 5, "超时熔断应很快收尾")
     }
 
-    func testSensitiveToolNeedsApproval() async throws {
-        let registry = ToolRegistry()
-        try await registry.register(
-            descriptor: ToolDescriptor(
-                name: "danger_op", summary: "敏感操作假工具", permission: .sensitive)
-        ) { _ in ToolOutput(text: "已执行敏感操作") }
-        let steward = Steward(registry: registry)
-
-        let denied = await steward.execute(
-            StewardRequest(instruction: "执行", toolName: "danger_op"))
-        guard case .failed(let reason) = denied.state else {
-            return XCTFail("未确认的敏感工具应失败，实际：\(denied.state)")
+    func testSensitiveToolNeedsPhoneApproval() async throws {
+        // 审批门桩：三种裁决各一扇。
+        struct DenyGate: SensitiveApprovalGate {
+            func requestApproval(toolName: String, instruction: String) async -> SensitiveApprovalDecision {
+                .denied
+            }
         }
-        XCTAssertTrue(reason.contains("需要主人确认"))
+        struct ApproveGate: SensitiveApprovalGate {
+            func requestApproval(toolName: String, instruction: String) async -> SensitiveApprovalDecision {
+                .approved
+            }
+        }
+        struct AwayGate: SensitiveApprovalGate {
+            func requestApproval(toolName: String, instruction: String) async -> SensitiveApprovalDecision {
+                .ownerAway
+            }
+        }
+        func makeStewardWithGate(_ gate: (any SensitiveApprovalGate)?) async throws -> Steward {
+            let registry = ToolRegistry()
+            try await registry.register(
+                descriptor: ToolDescriptor(
+                    name: "danger_op", summary: "敏感操作假工具", permission: .sensitive)
+            ) { _ in ToolOutput(text: "已执行敏感操作") }
+            return Steward(registry: registry, approvalGate: gate)
+        }
 
-        let approved = await steward.execute(
-            StewardRequest(instruction: "执行", toolName: "danger_op", sensitiveApproved: true))
+        // 没装门：默认拒绝，不执行。
+        let noGate = await (try makeStewardWithGate(nil)).execute(
+            StewardRequest(instruction: "执行", toolName: "danger_op"))
+        guard case .failed(let noGateReason) = noGate.state else {
+            return XCTFail("没装审批门时敏感工具应失败，实际：\(noGate.state)")
+        }
+        XCTAssertTrue(noGateReason.contains("已拒绝"))
+
+        // 主人拒绝：失败，不执行。
+        let denied = await (try makeStewardWithGate(DenyGate())).execute(
+            StewardRequest(instruction: "执行", toolName: "danger_op"))
+        guard case .failed(let deniedReason) = denied.state else {
+            return XCTFail("主人拒绝时敏感工具应失败，实际：\(denied.state)")
+        }
+        XCTAssertTrue(deniedReason.contains("已拒绝"))
+
+        // 主人不在手机旁：失败，文案明确告知。
+        let away = await (try makeStewardWithGate(AwayGate())).execute(
+            StewardRequest(instruction: "执行", toolName: "danger_op"))
+        guard case .failed(let awayReason) = away.state else {
+            return XCTFail("主人不在时敏感工具应失败，实际：\(away.state)")
+        }
+        XCTAssertTrue(awayReason.contains("主人未在手机旁"))
+
+        // 主人批准：执行。
+        let approved = await (try makeStewardWithGate(ApproveGate())).execute(
+            StewardRequest(instruction: "执行", toolName: "danger_op"))
         XCTAssertEqual(approved.state, .finished)
         XCTAssertEqual(approved.cleanedText, "已执行敏感操作")
     }
