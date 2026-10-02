@@ -586,7 +586,7 @@ extension AIChatViewModel {
         // code path.
         let anchorIdx = boundaryIdx
         logger.info("[Compact] anchorIdx=\(anchorIdx) (caller-supplied message becomes the marker anchor; includesBoundary=\(includesBoundary) ignored in v2)")
-        let endExclusive = anchorIdx + 1   // [start, anchorIdx] inclusive
+        var endExclusive = anchorIdx + 1   // [start, anchorIdx] inclusive; clamped below to the resolved lcm anchor
         let fkmId: String = firstKeptMessageId ?? ""
 
         // Resolve compact range START.
@@ -645,6 +645,49 @@ extension AIChatViewModel {
             isCompacting = false
             isProcessing = wasProcessingOnEntry
             compactTask = nil
+        }
+
+        // ───── v2 anchor resolution (before range slicing) ─────
+        //
+        // [AI-P3-5] The marker's anchor (lastCompactedMessageId) and the
+        // summary's coverage must agree. Walk back from the caller-supplied
+        // anchor looking for the first agentHistory entry that already has a
+        // persisted dbMessageId AND is present in DB — in-loop, the boundary
+        // message itself is usually not persisted yet, so this can land
+        // BEFORE anchorIdx. endExclusive is clamped to the resolved anchor so
+        // the summary covers exactly [effectiveStartIdx ... lcmHistoryIdx]:
+        // the walked-back tail (lcmIdx, anchorIdx] stays on the live side and
+        // is sent verbatim by the read path instead of being summarized AND
+        // sent verbatim ("said twice"). The old order sliced [0...anchorIdx]
+        // for the summary first and only then discovered the anchor had moved
+        // back — that mismatch was the double-speak.
+        //
+        // This also avoids the past failure mode where lcmId pointed at a
+        // transient row id that was never persisted (or was deleted by a
+        // later prune).
+        var lcmIdResolved: String? = nil
+        var lcmHistoryIdx: Int? = nil
+        do {
+            var i = endExclusive - 1
+            while i >= 0 {
+                if let id = agentHistory[i].dbMessageId,
+                   allRaw.contains(where: { $0.id == id }) {
+                    lcmIdResolved = id
+                    lcmHistoryIdx = i
+                    break
+                }
+                i -= 1
+            }
+        }
+        guard let lastCompactedMessageId = lcmIdResolved, let lcmIdx = lcmHistoryIdx else {
+            logger.error("[Compact] Cannot write v2 marker: no agentHistory entry in [0..<\(endExclusive)) has a persisted dbMessageId. Aborting compact.")
+            statusMsg.content = "Compaction failed: could not anchor marker to a persisted message."
+            statusMsg.isCompactLoading = false
+            return
+        }
+        if lcmIdx != endExclusive - 1 {
+            logger.warning("[Compact] v2 marker lcm anchor walked back from idx=\(endExclusive - 1) to idx=\(lcmIdx) (closest persisted message). Shrinking summary range to match the anchor; the unsynced tail entries stay on the live side of the divider.")
+            endExclusive = lcmIdx + 1
         }
 
         // Slice to compact. Skip messages already folded by the previous
@@ -744,33 +787,12 @@ extension AIChatViewModel {
         // skipped on the read side; we still persist them here so a downgrade
         // / older device that hits this row reads sensible defaults.
         //
-        // Walk back from endExclusive looking for the first agentHistory entry
-        // that already has a persisted dbMessageId AND is present in DB. This
-        // avoids the past failure mode where lcmId pointed at a transient
-        // row id that was never persisted (or was deleted by a later prune).
-        var lcmIdResolved: String? = nil
-        var lcmHistoryIdx: Int? = nil
-        do {
-            var i = endExclusive - 1
-            while i >= 0 {
-                if let id = agentHistory[i].dbMessageId,
-                   allRaw.contains(where: { $0.id == id }) {
-                    lcmIdResolved = id
-                    lcmHistoryIdx = i
-                    break
-                }
-                i -= 1
-            }
-        }
-        guard let lastCompactedMessageId = lcmIdResolved else {
-            logger.error("[Compact] Cannot write v2 marker: no agentHistory entry in [0..\(endExclusive)) has a persisted dbMessageId. Aborting compact.")
-            statusMsg.content = "Compaction failed: could not anchor marker to a persisted message."
-            statusMsg.isCompactLoading = false
-            return
-        }
-        if lcmHistoryIdx != endExclusive - 1 {
-            logger.warning("[Compact] v2 marker lcm anchor walked back from idx=\(endExclusive - 1) to idx=\(lcmHistoryIdx ?? -1) (closest persisted message). Some unsynced tail entries will fall on the active side of the divider.")
-        }
+        // [AI-P3-5] lastCompactedMessageId / lcmHistoryIdx were already
+        // resolved BEFORE range slicing above, and endExclusive was clamped
+        // to the anchor — so the summary covers exactly what this marker
+        // anchors, and the walked-back tail stays live instead of being
+        // summarized and sent verbatim ("said twice"). No second walk-back
+        // needed here.
 
         // Legacy fields are written with neutral / past-the-end values for
         // cross-version compatibility. Older builds reading this v2 row will
