@@ -199,35 +199,13 @@ enum AIVoiceMessageComposer {
         return VoiceOutputPlayer.concatPieces(pieces)
     }
 
-    /// Selected TTS service (kelivo layer) first, then the model group.
-    /// [T-tts-key-status 09-13] 醒醒 7: the selected service's own failures now
-    /// LOG LOUDLY with the reason (was a silent skip): "it speaks but shows
-    /// no key" was exactly this — the service layer was skipped (missing key
-    /// or failed synth) and the model-group fallback spoke with a DIFFERENT
-    /// voice while the UI kept showing "no key" for the service. The fallback
-    /// itself stays (a second voice is better than silence); the log names
-    /// which layer actually produced the audio.
+    /// [tts-groups 2026-10-02] 候选链：默认 TTS 分组成员（按分组顺序）→ 之前选中
+    /// 的单个服务（兼容老配置）→ Voice Output 模型分组。没建分组时行为和以前
+    /// 完全一致（选中服务 → 模型分组）。
     private static func synthesizeWithServiceOrGroup(_ text: String) async throws -> (Data, String?) {
-        if let service = TTSServiceStore.shared.selectedService(), service.enabled {
-            if !TTSServiceStore.shared.hasAPIKey(for: service) {
-                logger.warning("[AIVoice] selected TTS service '\(service.name)' has NO stored key — falling to model group (check the Keychain save in the service editor)")
-            } else if let provider = TTSProviderBridge.provider(for: service) {
-                do {
-                    // [TTS-11] Split at THIS vendor's per-request limit
-                    // before sending, not after a failure.
-                    let data = try await synthesizeChunked(text, limit: service.kind.bubbleSynthesisCharLimit) { chunk in
-                        try await provider.synthesize(TTSProviderBridge.request(for: service, text: chunk))
-                    }
-                    if !data.isEmpty {
-                        logger.info("[AIVoice] synthesized via service '\(service.name)' (\(service.kind.rawValue))")
-                        return (data, service.kind == .azure ? "mp3" : "wav")
-                    }
-                    logger.warning("[AIVoice] service '\(service.name)' returned empty audio — falling to model group")
-                } catch {
-                    logger.warning("[AIVoice] service '\(service.name)' synth failed: \(error.localizedDescription) — falling to model group")
-                }
-            } else {
-                logger.warning("[AIVoice] service '\(service.name)' (\(service.kind.rawValue)) cannot synthesize — falling to model group")
+        for service in ttsServiceCandidates() {
+            if let result = await synthesizeWithService(service, text) {
+                return result
             }
         }
         for entry in VoiceProviderResolver.resolvedOutputCandidates() {
@@ -242,5 +220,49 @@ enum AIVoiceMessageComposer {
             }
         }
         throw VoiceProviderError.parseError("all voice candidates failed")
+    }
+
+    /// 有序去重的 TTS 服务候选：默认分组成员优先，然后是选中的单个服务。
+    private static func ttsServiceCandidates() -> [TTSServiceOptions] {
+        var out: [TTSServiceOptions] = []
+        var seen = Set<String>()
+        for s in TTSGroupStore.shared.defaultGroupCandidates() where seen.insert(s.id).inserted {
+            out.append(s)
+        }
+        let svcStore = TTSServiceStore.shared
+        if let s = svcStore.selectedService(), s.enabled, seen.insert(s.id).inserted {
+            out.append(s)
+        }
+        return out
+    }
+
+    /// 单个 TTS 服务合成一次。任何失败都记 LOUD 日志并返回 nil（调用方继续下
+    /// 一个候选）。[T-tts-key-status 09-13] 语义保留：选中的服务自己的失败必须
+    /// 大声记原因（之前"有声但显示没 key"就是这里静默跳过导致的）。
+    private static func synthesizeWithService(_ service: TTSServiceOptions, _ text: String) async -> (Data, String)? {
+        let svcStore = TTSServiceStore.shared
+        if !svcStore.hasAPIKey(for: service) {
+            logger.warning("[AIVoice] TTS service '\(service.name)' has NO stored key — skipping (check the Keychain save in the service editor)")
+            return nil
+        }
+        guard let provider = TTSProviderBridge.provider(for: service) else {
+            logger.warning("[AIVoice] TTS service '\(service.name)' (\(service.kind.rawValue)) cannot synthesize — skipping")
+            return nil
+        }
+        do {
+            // [TTS-11] Split at THIS vendor's per-request limit before sending,
+            // not after a failure.
+            let data = try await synthesizeChunked(text, limit: service.kind.bubbleSynthesisCharLimit) { chunk in
+                try await provider.synthesize(TTSProviderBridge.request(for: service, text: chunk))
+            }
+            if !data.isEmpty {
+                logger.info("[AIVoice] synthesized via service '\(service.name)' (\(service.kind.rawValue))")
+                return (data, service.kind == .azure ? "mp3" : "wav")
+            }
+            logger.warning("[AIVoice] service '\(service.name)' returned empty audio — trying next candidate")
+        } catch {
+            logger.warning("[AIVoice] service '\(service.name)' synth failed: \(error.localizedDescription) — trying next candidate")
+        }
+        return nil
     }
 }

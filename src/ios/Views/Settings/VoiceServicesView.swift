@@ -41,6 +41,7 @@ struct VoiceServicesView: View {
     var body: some View {
         List {
             servicesSection
+            groupsSection
             playbackSection
         }
         .listStyle(.insetGrouped)
@@ -135,6 +136,47 @@ struct VoiceServicesView: View {
             }
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: TTS Groups
+
+    /// [tts-groups 2026-10-02] 分组入口：对标 API 的模型分组列表。
+    private var groupsSection: some View {
+        Section {
+            NavigationLink {
+                TTSGroupsView()
+            } label: {
+                HStack(spacing: 12) {
+                    rowIcon(symbol: "square.stack.3d.up.fill",
+                            active: TTSGroupStore.shared.defaultGroupId != nil)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("TTS 分组")
+                            .foregroundStyle(MinisTheme.primaryText)
+                        Text(groupSubtitle)
+                            .font(.caption)
+                            .foregroundStyle(MinisTheme.secondaryText)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(MinisTheme.secondaryText)
+                }
+            }
+        } header: {
+            Text("分组")
+        } footer: {
+            Text("把多个 TTS 服务装进一个分组，发语音时按顺序自动切换。")
+        }
+    }
+
+    private var groupSubtitle: String {
+        let store = TTSGroupStore.shared
+        if let gid = store.defaultGroupId, let g = store.group(id: gid) {
+            let n = store.candidates(for: g).count
+            return "默认：\(g.name)（\(n) 个可用服务）"
+        }
+        return store.groups.isEmpty ? "还没建分组" : "\(store.groups.count) 个分组，未设默认"
     }
 
     private func serviceRow(_ service: TTSServiceOptions) -> some View {

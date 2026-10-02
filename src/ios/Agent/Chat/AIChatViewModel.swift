@@ -5075,6 +5075,19 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
         message.blocks = kept
     }
 
+    /// [tts-paper 2026-10-02] agentHistory 里最后一条 user 消息的纯文本
+    ///（纸条触发判定用）。没有 user 消息时返回空串——触发判定直接不命中。
+    private static func lastUserText(in history: [AgentMessage]) -> String {
+        for msg in history.reversed() where msg.role == .user {
+            let t = msg.parts.compactMap { part -> String? in
+                if case .text(let s) = part { return s }
+                return nil
+            }.joined(separator: "\n")
+            if !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return t }
+        }
+        return ""
+    }
+
     private func runAgentLoop(resumingAt existingMsgIdx: Int? = nil, committedBlocks: Int? = nil) async throws {
         // REPRO-DIAG(2026-05-16): bump global round counter and emit a clear
         // BEGIN/END marker so the user can grep `ROUND \d+` to slice the log
@@ -5156,6 +5169,13 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
         if let sid = sessionId,
            let mcpFragment = MCPStore.shared.systemPromptSnippet(for: sid, personaID: sessionPersonaId) {
             userSystemPrompt += "\n\n" + mcpFragment
+        }
+
+        // [tts-paper 2026-10-02] TTS 能力纸条：用户这轮在聊语音/TTS 才塞进
+        // prompt（见 TTSPaper.paperIfRelevant 的宽松触发判定），平时不占。
+        // 内容按当前 TTS 配置现拼；没配 TTS 时纸条为 nil，模型不会知道这功能。
+        if let ttsPaper = TTSPaper.paperIfRelevant(userMessage: Self.lastUserText(in: agentHistory)) {
+            userSystemPrompt += "\n\n" + ttsPaper
         }
 
         // [T-memory-toggle-gates-injection-and-tools-ios] Memory injection
@@ -5656,6 +5676,10 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
                 if let sid = sessionId,
                    let mcpFragment = MCPStore.shared.systemPromptSnippet(for: sid, personaID: sessionPersonaId) {
                     userSystemPrompt += "\n\n" + mcpFragment
+                }
+                // [tts-paper 2026-10-02] fallback 换模型时和第一注入点保持一致。
+                if let ttsPaper = TTSPaper.paperIfRelevant(userMessage: Self.lastUserText(in: agentHistory)) {
+                    userSystemPrompt += "\n\n" + ttsPaper
                 }
                 // [T-memory-toggle-gates-injection-and-tools-ios] Mirror
                 // the gate from the first injection site — fallback to a
