@@ -18,7 +18,14 @@ final class StewardSensitiveApprovalGate: SensitiveApprovalGate, Sendable {
     /// 审批超时秒数：超时未点默认拒绝。审查员复核点。
     static let approvalTimeout: TimeInterval = 120
 
-    func requestApproval(toolName: String, instruction: String, caller: String = "外部 AI") async -> SensitiveApprovalDecision {
+    // 协议见证：签名必须与 SensitiveApprovalGate 一字不差（多一个默认参数
+    // 也不算数），BridgeCore 的 Steward 经此调，caller 默认"外部 AI"。
+    func requestApproval(toolName: String, instruction: String) async -> SensitiveApprovalDecision {
+        await requestApproval(toolName: toolName, instruction: instruction, caller: "外部 AI")
+    }
+
+    /// 对话侧调这个：弹框文案写明是"对话 AI"在请示，不张冠李戴。
+    func requestApproval(toolName: String, instruction: String, caller: String) async -> SensitiveApprovalDecision {
         let isActive = await MainActor.run {
             UIApplication.shared.applicationState == .active
         }
