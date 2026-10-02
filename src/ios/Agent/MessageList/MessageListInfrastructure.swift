@@ -25,6 +25,10 @@ enum MessageListItem: Hashable {
     case assistantHeader(UUID)
     /// A single AssistantBlock within an assistant turn.
     case assistantBlock(UUID, UUID)  // (messageId, blockId)
+    /// [chat-ui] A folding card grouping >2 consecutive tool-call blocks.
+    /// groupKey is the member block IDs joined by "," (stable while the run
+    /// only grows — blocks are append-only).
+    case assistantToolGroup(UUID, String)  // (messageId, groupKey)
     /// Footer area: typing indicator, error, resume, usage.
     case assistantFooter(UUID)
 
@@ -33,7 +37,32 @@ enum MessageListItem: Hashable {
         switch self {
         case .wholeMessage(let id), .assistantHeader(let id),
              .assistantFooter(let id): return id
-        case .assistantBlock(let msgId, _): return msgId
+        case .assistantBlock(let msgId, _), .assistantToolGroup(let msgId, _): return msgId
+        }
+    }
+
+    /// [chat-ui] Expanded/collapsed state key for a tool-group card.
+    /// Keyed by message + FIRST block of the run, so the state survives the
+    /// group growing (new tool appended → new groupKey, same state key —
+    /// the first block never changes). Nil for non-group items.
+    var toolGroupStateKey: String? {
+        switch self {
+        case .assistantToolGroup(let msgId, let groupKey):
+            guard let first = groupKey.split(separator: ",").first else { return nil }
+            return "\(msgId.uuidString):\(first)"
+        default: return nil
+        }
+    }
+
+    /// [chat-ui] True when this item renders the given block — either directly
+    /// (.assistantBlock) or as a member of a tool group.
+    func containsBlock(messageId mid: UUID, blockId: UUID) -> Bool {
+        switch self {
+        case .assistantBlock(let m, let b): return m == mid && b == blockId
+        case .assistantToolGroup(let m, let groupKey):
+            guard m == mid else { return false }
+            return groupKey.split(separator: ",").contains(where: { $0 == blockId.uuidString[...] })
+        default: return false
         }
     }
 }

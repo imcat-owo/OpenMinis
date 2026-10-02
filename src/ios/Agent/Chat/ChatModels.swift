@@ -396,6 +396,16 @@ enum AssistantBlockKind: Equatable {
     case memoryTool(action: String)
     case askUserTool
     case info
+
+    /// Tool-call kinds — everything `ToolCapsuleView` renders. The message
+    /// list groups consecutive tool-kind blocks (>2) into one folding card
+    /// ([chat-ui] Kelivo-style tool folding); text/thinking/info stay solo.
+    var isToolKind: Bool {
+        switch self {
+        case .text, .thinking, .info: return false
+        default: return true
+        }
+    }
 }
 
 enum KernelStatus: Equatable {

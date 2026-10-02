@@ -841,6 +841,8 @@ extension CollectionViewMessageListV3 {
 
         // === Thinking Block Toggle ===
         private var thinkingToggleSub: AnyCancellable?
+        // === [chat-ui] Tool Group Card Toggle ===
+        private var toolGroupToggleSub: AnyCancellable?
 
         // === Attachment mount invalidation ===
         // [T-ios-user-attach-mount-invalidate] Drain mounts attachments onto an
@@ -1034,6 +1036,9 @@ extension CollectionViewMessageListV3 {
                 case .assistantHeader:
                     return cv.dequeueConfiguredReusableCell(using: headerReg, for: indexPath, item: item)
                 case .assistantBlock:
+                    return cv.dequeueConfiguredReusableCell(using: blockReg, for: indexPath, item: item)
+                case .assistantToolGroup:
+                    // [chat-ui] Tool-group folding card reuses the block cell class.
                     return cv.dequeueConfiguredReusableCell(using: blockReg, for: indexPath, item: item)
                 case .assistantFooter:
                     return cv.dequeueConfiguredReusableCell(using: footerReg, for: indexPath, item: item)
@@ -1261,6 +1266,43 @@ extension CollectionViewMessageListV3 {
                     .environmentObject(vm)
                 }.minSize(width: 0, height: 0).margins(.all, 0)
                 cell.applyContentConfiguration(config)
+
+            case .assistantToolGroup(let msgId, let groupKey):
+                // [chat-ui] Folding card for a run of tool calls. Membership is
+                // resolved from the groupKey (member block IDs); the expanded
+                // state lives in ToolGroupExpansion keyed by message+first block.
+                guard let msgIdx = messageIndex[msgId], msgIdx < messages.count else {
+                    AppLogger(category: "SnapshotDiag").warning("[SnapshotDiag] configureCell MISS toolGroup msgId=\(msgId.uuidString.prefix(8))")
+                    return
+                }
+                let message = messages[msgIdx]
+                let memberIds = groupKey.split(separator: ",").compactMap { UUID(uuidString: String($0)) }
+                let memberBlocks = memberIds.compactMap { bid in message.blocks.first(where: { $0.id == bid }) }
+                guard memberBlocks.count > 2, let stateKey = item.toolGroupStateKey else {
+                    AppLogger(category: "SnapshotDiag").warning("[SnapshotDiag] configureCell toolGroup member miss msgId=\(msgId.uuidString.prefix(8)) members=\(memberIds.count)")
+                    return
+                }
+                let bridge = getOrCreateBridge(for: message, in: messages)
+                cell.backgroundColor = .clear
+                let config = UIHostingConfiguration {
+                    ToolCallGroupCard(
+                        blocks: memberBlocks,
+                        stateKey: stateKey,
+                        commandStartTime: bridge.isActiveMessage ? bridge.commandStartTime : nil,
+                        onStop: bridge.isActiveMessage ? bridge.onStop : nil,
+                        browserPool: bridge.browserPool,
+                        toolSnapshots: bridge.toolSnapshots,
+                        detailBlock: $bridge.detailBlock
+                    )
+                    .frame(maxWidth: width > 0 ? width : nil, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .opacity(message.isCompactedHistory ? 0.5 : 1.0)
+                    .transaction { $0.disablesAnimations = true }
+                    .environmentObject(vm)
+                }.minSize(width: 0, height: 0).margins(.all, 0)
+                cell.applyContentConfiguration(config)
+                cell.accessibilityIdentifier = "assistantToolGroupBlock"
 
             case .assistantFooter(let msgId):
                 guard let msgIdx = messageIndex[msgId], msgIdx < messages.count else { return }
@@ -1737,7 +1779,14 @@ extension CollectionViewMessageListV3 {
             let items = ds.snapshot().itemIdentifiers
             var blockItems: [MessageListItem] = []
             for (i, item) in items.enumerated() {
-                guard case .assistantBlock(let mid, _) = item, mid == messageId else { continue }
+                // [chat-ui] Tool-group cards belong to the message's block span too.
+                let isBlockItem: Bool = {
+                    switch item {
+                    case .assistantBlock(let mid, _), .assistantToolGroup(let mid, _): return mid == messageId
+                    default: return false
+                    }
+                }()
+                guard isBlockItem else { continue }
                 let ip = IndexPath(item: i, section: 0)
                 (cv.cellForItem(at: ip) as? SelfSizingCell)?.clearCachedHeight()
                 layout.invalidateHeight(at: i)
@@ -2170,10 +2219,13 @@ extension CollectionViewMessageListV3 {
                 .sink { [weak self] (messageId, blockId) in
                     guard let self,
                           let ds = self.dataSource else { return }
-                    let item = MessageListItem.assistantBlock(messageId, blockId)
+                    // [chat-ui] A block may live inside a tool-group card item.
+                    let direct = MessageListItem.assistantBlock(messageId, blockId)
                     var snapshot = ds.snapshot()
                     let items = snapshot.itemIdentifiers
-                    guard let idx = items.firstIndex(of: item) else { return }
+                    let idx: Int? = items.firstIndex(of: direct)
+                        ?? items.firstIndex(where: { $0.containsBlock(messageId: messageId, blockId: blockId) })
+                    guard let idx else { return }
 
                     // Invalidate the height cache BEFORE reconfiguring so the
                     // layout doesn't reuse the stale empty-content height.
@@ -2193,7 +2245,7 @@ extension CollectionViewMessageListV3 {
                         (cv.cellForItem(at: ip) as? SelfSizingCell)?.clearCachedHeight()
                     }
 
-                    snapshot.reconfigureItems([item])
+                    snapshot.reconfigureItems([items[idx]])
                     ds.apply(snapshot, animatingDifferences: false)
 
                     // Why the cell-side clear is needed at all: `SelfSizingCell`
@@ -2710,6 +2762,47 @@ extension CollectionViewMessageListV3 {
                     }
             }
 
+            // [chat-ui] Tool-group card header tap → re-measure that cell.
+            // Same shape as the thinking toggle above: the card's expanded
+            // state lives in ToolGroupExpansion (keyed by message+first block),
+            // so the reconfigured cell re-renders at the new height.
+            if toolGroupToggleSub == nil {
+                toolGroupToggleSub = NotificationCenter.default.publisher(for: .toolGroupToggled)
+                    .receive(on: DispatchQueue.main)
+                    .sink { [weak self] notification in
+                        let tlog = AppLogger(category: "ToolGroupCollapse")
+                        guard let self else { return }
+                        guard let stateKey = notification.object as? String else {
+                            tlog.warning("[ToolGroupCollapse] notif object not String: \(String(describing: notification.object))")
+                            return
+                        }
+                        guard let cv = self.viewController?.collectionView,
+                              let layout = cv.collectionViewLayout as? MessageListLayout,
+                              let snapshot = self.dataSource?.snapshot() else {
+                            tlog.warning("[ToolGroupCollapse] infra missing")
+                            return
+                        }
+                        var matched = false
+                        for (i, item) in snapshot.itemIdentifiers.enumerated() {
+                            if item.toolGroupStateKey == stateKey {
+                                matched = true
+                                let ip = IndexPath(item: i, section: 0)
+                                (cv.cellForItem(at: ip) as? SelfSizingCell)?.clearCachedHeight()
+                                layout.invalidateHeight(at: i)
+                                var snap = snapshot
+                                snap.reconfigureItems([item])
+                                self.dataSource?.apply(snap, animatingDifferences: false)
+                                layout.invalidateLayout()
+                                tlog.info("[ToolGroupCollapse] HIT stateKey=\(stateKey) idx=\(i)")
+                                break
+                            }
+                        }
+                        if !matched {
+                            tlog.warning("[ToolGroupCollapse] MISS stateKey=\(stateKey) not in snapshot (items=\(snapshot.itemIdentifiers.count))")
+                        }
+                    }
+            }
+
             // Rebuild O(1) lookup indices
             messageIndex.removeAll(keepingCapacity: true)
             for (i, msg) in messages.enumerated() {
@@ -2752,8 +2845,28 @@ extension CollectionViewMessageListV3 {
                     }
                 case .assistant:
                     newItems.append(.assistantHeader(message.id))
-                    for block in message.blocks {
-                        newItems.append(.assistantBlock(message.id, block.id))
+                    // [chat-ui] Group consecutive tool-call blocks (>2) into one
+                    // folding card item; shorter runs stay as individual cells.
+                    var bi = message.blocks.startIndex
+                    while bi < message.blocks.endIndex {
+                        if message.blocks[bi].kind.isToolKind {
+                            var runEnd = bi
+                            while runEnd < message.blocks.endIndex,
+                                  message.blocks[runEnd].kind.isToolKind {
+                                runEnd = message.blocks.index(after: runEnd)
+                            }
+                            let run = Array(message.blocks[bi..<runEnd])
+                            if run.count > 2 {
+                                let groupKey = run.map { $0.id.uuidString }.joined(separator: ",")
+                                newItems.append(.assistantToolGroup(message.id, groupKey))
+                            } else {
+                                for b in run { newItems.append(.assistantBlock(message.id, b.id)) }
+                            }
+                            bi = runEnd
+                        } else {
+                            newItems.append(.assistantBlock(message.id, message.blocks[bi].id))
+                            bi = message.blocks.index(after: bi)
+                        }
                     }
                     // Only emit a footer cell when it will actually render
                     // content. A footer with zero visible content (no typing
@@ -3073,6 +3186,10 @@ extension CollectionViewMessageListV3 {
                             layout.setEstimatedHeight(36, at: i)
                         }
 
+                    case .assistantToolGroup:
+                        // [chat-ui] Folding card — same estimator as estimateItemHeight.
+                        layout.setEstimatedHeight(Self.estimateItemHeight(item, messages: messages, width: cvWidth), at: i)
+
                     case .wholeMessage(let msgId):
                         // [T-ios-user-msg-estimate-tail-jitter] Accurate TextKit
                         // precalc for USER message bubbles. The "stops then
@@ -3317,11 +3434,22 @@ extension CollectionViewMessageListV3 {
                 let suspended = vm.streamingUIUpdatesSuspended
                 let processing = vm.isProcessing
                 for item in inserted {
-                    if case .assistantBlock(let msgId, let blockId) = item,
-                       let msgIdx = messageIndex[msgId],
-                       msgIdx < messages.count,
-                       let block = messages[msgIdx].blocks.first(where: { $0.id == blockId }),
-                       block.toolUseId != nil {
+                    // [chat-ui] Group items log each member tool block.
+                    let toolBlockIds: [(UUID, UUID)] = {
+                        switch item {
+                        case .assistantBlock(let msgId, let blockId): return [(msgId, blockId)]
+                        case .assistantToolGroup(let msgId, let groupKey):
+                            return groupKey.split(separator: ",")
+                                .compactMap { UUID(uuidString: String($0)) }
+                                .map { (msgId, $0) }
+                        default: return []
+                        }
+                    }()
+                    for (msgId, blockId) in toolBlockIds {
+                        if let msgIdx = messageIndex[msgId],
+                           msgIdx < messages.count,
+                           let block = messages[msgIdx].blocks.first(where: { $0.id == blockId }),
+                           block.toolUseId != nil {
                         let toolName: String = switch block.kind {
                         case .shellTool: "shell_execute"
                         case .fileReadTool: "file_read"
@@ -3333,6 +3461,7 @@ extension CollectionViewMessageListV3 {
                         default: "unknown"
                         }
                         AppLogger(category: "ToolLC").info("[ToolLifecycle] RENDERED_CHATUI toolId=\(block.toolUseId?.prefix(20) ?? "nil") tool=\(toolName) sid=\(sid) appState=\(appState) suspended=\(suspended) isProcessing=\(processing) caller=\(caller)")
+                    }
                     }
                 }
             }
@@ -3386,8 +3515,11 @@ extension CollectionViewMessageListV3 {
                 // the FB13213926 series (b4268586 / 81e43b58 / e9d167c2).
                 var footerDirtyMessageIds = Set<UUID>()
                 for item in inserted {
-                    if case .assistantBlock(let msgId, _) = item {
+                    // [chat-ui] Tool-group cards dirty their message's footer too.
+                    switch item {
+                    case .assistantBlock(let msgId, _), .assistantToolGroup(let msgId, _):
                         footerDirtyMessageIds.insert(msgId)
+                    default: break
                     }
                 }
                 for msgId in footerDirtyMessageIds {
@@ -3692,7 +3824,7 @@ extension CollectionViewMessageListV3 {
             case .wholeMessage(let id): return id
             case .assistantHeader(let id): return id
             case .assistantFooter(let id): return id
-            case .assistantBlock(let mid, _): return mid
+            case .assistantBlock(let mid, _), .assistantToolGroup(let mid, _): return mid
             }
         }
 
@@ -3797,6 +3929,11 @@ extension CollectionViewMessageListV3 {
                 let block = msg(mid)?.blocks.first(where: { $0.id == bid })
                 let n = block?.content.count ?? 0
                 return "b:\(mid.uuidString):\(bid.uuidString):\(n)"
+            case .assistantToolGroup(let mid, let groupKey):
+                // [chat-ui] Height depends on membership + expanded state; the
+                // state key folds the expansion in so a toggle re-memoizes.
+                let state = item.toolGroupStateKey.flatMap { ToolGroupExpansion.isExpanded(stateKey: $0) } ?? false
+                return "g:\(mid.uuidString):\(groupKey):\(state ? "x" : "c")"
             }
         }
 
@@ -3911,6 +4048,13 @@ extension CollectionViewMessageListV3 {
                     return CGFloat(20 + lineCount * 16)
                 default: return 36  // Tool capsules (execute, browser, etc.): no wrapper pad
                 }
+            case .assistantToolGroup(_, let groupKey):
+                // [chat-ui] Header (~44) + visible capsules (36pt + 6 spacing).
+                // Collapsed shows the last 2; expanded shows all.
+                let memberCount = groupKey.split(separator: ",").count
+                let expanded = item.toolGroupStateKey.map { ToolGroupExpansion.isExpanded(stateKey: $0) } ?? false
+                let visible = expanded ? memberCount : min(2, memberCount)
+                return 44 + CGFloat(visible) * 42
             case .assistantFooter:
                 return 4
             }
@@ -4054,6 +4198,7 @@ extension CollectionViewMessageListV3 {
         static func item(_ item: MessageListItem, belongsTo messageId: UUID) -> Bool {
             switch item {
             case .assistantBlock(let mid, _): return mid == messageId
+            case .assistantToolGroup(let mid, _): return mid == messageId
             case .assistantFooter(let mid): return mid == messageId
             case .wholeMessage, .assistantHeader: return false
             }

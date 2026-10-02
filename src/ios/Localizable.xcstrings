@@ -23491,6 +23491,28 @@
         }
       }
     },
+    "Collapse tool calls" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Collapse tool calls"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "收起工具调用"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "收起工具調用"
+          }
+        }
+      }
+    },
     "Collapse voice panel" : {
       "comment" : "Voice panel collapse",
       "localizations" : {
@@ -37065,6 +37087,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "串流輸出時展開思考"
+          }
+        }
+      }
+    },
+    "Expand tool calls" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Expand tool calls"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "展开工具调用"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "展開工具調用"
           }
         }
       }

@@ -90,37 +90,14 @@ struct AssistantBlockView: View {
                 isStreaming: isActiveMessage && message.blocks.last?.id == block.id
             )
             .padding(.vertical, 2)
-        case .shellTool:
-            ToolCapsuleView(block: block, icon: "terminal", accentColor: ChatColors.accent,
-                            commandStartTime: commandStartTime, onStop: onStop, browserPool: browserPool,
-                            toolSnapshots: toolSnapshots, detailBlock: $detailBlock)
-        case .fileReadTool:
-            ToolCapsuleView(block: block, icon: "doc.text", accentColor: ChatColors.accent,
+        case .shellTool, .fileReadTool, .fileWriteTool, .fileEditTool,
+             .browserTool, .readImageTool, .memoryTool, .askUserTool:
+            // [chat-ui] One unified tool case — icon + browserPool plumbed from
+            // the shared helpers above. Identical behavior to the eight
+            // per-kind cases this replaces (only shell/browser got browserPool).
+            ToolCapsuleView(block: block, icon: Self.toolCapsuleIcon(for: block.kind), accentColor: ChatColors.accent,
                             commandStartTime: commandStartTime, onStop: onStop,
-                            toolSnapshots: toolSnapshots, detailBlock: $detailBlock)
-        case .fileWriteTool:
-            ToolCapsuleView(block: block, icon: "doc.text.fill", accentColor: ChatColors.accent,
-                            commandStartTime: commandStartTime, onStop: onStop,
-                            toolSnapshots: toolSnapshots, detailBlock: $detailBlock)
-        case .fileEditTool:
-            ToolCapsuleView(block: block, icon: "square.and.pencil", accentColor: ChatColors.accent,
-                            commandStartTime: commandStartTime, onStop: onStop,
-                            toolSnapshots: toolSnapshots, detailBlock: $detailBlock)
-        case .browserTool:
-            ToolCapsuleView(block: block, icon: "globe", accentColor: ChatColors.accent,
-                            commandStartTime: commandStartTime, onStop: onStop, browserPool: browserPool,
-                            toolSnapshots: toolSnapshots, detailBlock: $detailBlock)
-        case .readImageTool:
-            ToolCapsuleView(block: block, icon: "photo", accentColor: ChatColors.accent,
-                            commandStartTime: commandStartTime, onStop: onStop,
-                            toolSnapshots: toolSnapshots, detailBlock: $detailBlock)
-        case .memoryTool:
-            ToolCapsuleView(block: block, icon: "brain.head.profile", accentColor: ChatColors.accent,
-                            commandStartTime: commandStartTime, onStop: onStop,
-                            toolSnapshots: toolSnapshots, detailBlock: $detailBlock)
-        case .askUserTool:
-            ToolCapsuleView(block: block, icon: "questionmark.circle", accentColor: ChatColors.accent,
-                            commandStartTime: commandStartTime, onStop: onStop,
+                            browserPool: Self.toolCapsuleNeedsBrowserPool(for: block.kind) ? browserPool : nil,
                             toolSnapshots: toolSnapshots, detailBlock: $detailBlock)
         case .info:
             let allLines = block.content.components(separatedBy: "\n").filter { !$0.isEmpty }
@@ -185,6 +162,31 @@ struct AssistantBlockView: View {
 
     /// True when this block is the message's LAST text block (the action bar
     /// only hangs there — earlier text blocks read as part of the flow).
+    /// [chat-ui] SF Symbol per tool kind — single source of truth shared by the
+    /// per-block switch below and the tool-group folding card.
+    static func toolCapsuleIcon(for kind: AssistantBlockKind) -> String {
+        switch kind {
+        case .shellTool: return "terminal"
+        case .fileReadTool: return "doc.text"
+        case .fileWriteTool: return "doc.text.fill"
+        case .fileEditTool: return "square.and.pencil"
+        case .browserTool: return "globe"
+        case .readImageTool: return "photo"
+        case .memoryTool: return "brain.head.profile"
+        case .askUserTool: return "questionmark.circle"
+        case .text, .thinking, .info: return "wrench.and.screwdriver"
+        }
+    }
+
+    /// [chat-ui] Which tool kinds need the live browser tab pool plumbed into
+    /// their capsule (mirrors the per-kind call sites below).
+    static func toolCapsuleNeedsBrowserPool(for kind: AssistantBlockKind) -> Bool {
+        switch kind {
+        case .shellTool, .browserTool: return true
+        default: return false
+        }
+    }
+
     static func isLastTextBlock(of message: ChatMessage, block: AssistantBlock) -> Bool {
         let textBlocks = message.blocks.filter { if case .text = $0.kind { return true }; return false }
         guard let last = textBlocks.last else { return false }
@@ -717,10 +719,124 @@ struct ToolCapsuleView: View {
 
 }
 
+// MARK: - [chat-ui] Tool-Call Group Card (Kelivo-style folding)
+
+/// Expanded/collapsed state for tool-call group cards.
+///
+/// Keyed by "<messageId>:<firstBlockId>" so the state survives the group
+/// growing: appending a new tool block changes the item's groupKey (member
+/// IDs), but the run's first block never changes — blocks are append-only.
+/// Bounded (400 entries) so long sessions can't grow it without limit.
+enum ToolGroupExpansion {
+    private static var expandedKeys = Set<String>()
+    private static let maxEntries = 400
+
+    static func isExpanded(stateKey: String) -> Bool {
+        expandedKeys.contains(stateKey)
+    }
+
+    static func toggle(stateKey: String) {
+        if expandedKeys.contains(stateKey) {
+            expandedKeys.remove(stateKey)
+        } else {
+            if expandedKeys.count >= maxEntries { expandedKeys.removeFirst() }
+            expandedKeys.insert(stateKey)
+        }
+    }
+}
+
+/// [chat-ui] Folding card for >2 consecutive tool calls in one assistant turn.
+/// Collapsed shows the header + the LAST 2 tool capsules (the running tool is
+/// always the tail, so its stop button stays reachable); tap the header to
+/// expand. Each row is the stock ToolCapsuleView — stop button, elapsed time,
+/// tap-for-detail and the long-press menu (copy / re-run / memory undo) are
+/// all preserved untouched.
+struct ToolCallGroupCard: View {
+    let blocks: [AssistantBlock]
+    /// "<messageId>:<firstBlockId>" — see ToolGroupExpansion.
+    let stateKey: String
+    var commandStartTime: Date?
+    var onStop: (() -> Void)?
+    var browserPool: BrowserTabPool?
+    var toolSnapshots: [ToolSnapshotItem] = []
+    @Binding var detailBlock: AssistantBlock?
+    @ObservedObject private var appearanceStudio = AppearanceStudio.shared
+
+    private var isExpanded: Bool { ToolGroupExpansion.isExpanded(stateKey: stateKey) }
+
+    private var visibleBlocks: [AssistantBlock] {
+        isExpanded ? blocks : Array(blocks.suffix(2))
+    }
+
+    private var headerTitle: String {
+        // English source keys — zh-Hans/zh-Hant live in Localizable.xcstrings.
+        if isExpanded { return AppLocalized("Collapse tool calls") }
+        return AppLocalized("Expand tool calls")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                ToolGroupExpansion.toggle(stateKey: stateKey)
+                NotificationCenter.default.post(name: .toolGroupToggled, object: stateKey)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "wrench.and.screwdriver")
+                        .font(.system(size: 12, weight: .medium))
+                    Text(headerTitle)
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("\(blocks.count)")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(ChatColors.secondaryText.opacity(0.12))
+                        .clipShape(Capsule())
+                    Spacer()
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .foregroundStyle(ChatColors.secondaryText)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(headerTitle)
+
+            ForEach(visibleBlocks) { block in
+                ToolCapsuleView(
+                    block: block,
+                    icon: AssistantBlockView.toolCapsuleIcon(for: block.kind),
+                    accentColor: ChatColors.accent,
+                    commandStartTime: commandStartTime,
+                    onStop: onStop,
+                    browserPool: AssistantBlockView.toolCapsuleNeedsBrowserPool(for: block.kind) ? browserPool : nil,
+                    toolSnapshots: toolSnapshots,
+                    detailBlock: $detailBlock
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(6)
+        .background(ChatColors.secondaryBg)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(ChatColors.toolBorder, lineWidth: 0.5)
+        )
+        .id(appearanceStudio.themePackRevision)
+    }
+}
+
 
 
 extension Notification.Name {
     static let thinkingBlockToggled = Notification.Name("thinkingBlockToggled")
+    /// [chat-ui] Posted when a tool-call group card's header is tapped.
+    /// object is the card's state key ("<messageId>:<firstBlockId>").
+    /// The message list clears that cell's cached height and reconfigures it
+    /// so UIHostingConfiguration re-measures — same shape as thinkingBlockToggled.
+    static let toolGroupToggled = Notification.Name("toolGroupToggled")
     /// Posted when a long-press selection menu's "Add to Chat Input" action
     /// fires. userInfo["text"] is the selected text to append. The active
     /// chat's AIChatView listens and forwards to `vm.appendToInputText`.
