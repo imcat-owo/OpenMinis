@@ -945,6 +945,62 @@ struct SessionInferenceConfig: Codable, Hashable {
     }
 }
 
+/// User-configurable generation sampling parameters (Kelivo parity:
+/// Temperature / Top P / Max Tokens / presence & frequency penalties).
+///
+/// Every field is optional: nil = "not set" → the provider's own default
+/// applies (and the UI shows "默认"). Stored in two layers —
+/// per-model (`ModelOverrides.sampling`) and per-instance
+/// (`ProviderInstance.samplingDefaults`) — merged per-field, model wins.
+/// See `SamplingConfig.merged(model:instance:)`.
+struct SamplingConfig: Codable, Hashable, Sendable {
+    /// 0…2. nil = provider default.
+    var temperature: Double?
+    /// 0…1. nil = provider default.
+    var topP: Double?
+    /// Max output tokens. nil = fall back to `ModelOverrides.maxOutputTokens`
+    /// (the existing per-model override), then the API-reported value.
+    var maxTokens: Int?
+    /// -2…2. nil = provider default. (OpenAI-family only; other providers ignore.)
+    var presencePenalty: Double?
+    /// -2…2. nil = provider default. (OpenAI-family only; other providers ignore.)
+    var frequencyPenalty: Double?
+
+    init(
+        temperature: Double? = nil,
+        topP: Double? = nil,
+        maxTokens: Int? = nil,
+        presencePenalty: Double? = nil,
+        frequencyPenalty: Double? = nil
+    ) {
+        self.temperature = temperature
+        self.topP = topP
+        self.maxTokens = maxTokens
+        self.presencePenalty = presencePenalty
+        self.frequencyPenalty = frequencyPenalty
+    }
+
+    /// True when the user has not set any sampling field.
+    var isEmpty: Bool {
+        temperature == nil
+            && topP == nil
+            && maxTokens == nil
+            && presencePenalty == nil
+            && frequencyPenalty == nil
+    }
+
+    /// Per-field merge: the model layer wins, the instance layer fills gaps.
+    static func merged(model: SamplingConfig?, instance: SamplingConfig?) -> SamplingConfig {
+        SamplingConfig(
+            temperature: model?.temperature ?? instance?.temperature,
+            topP: model?.topP ?? instance?.topP,
+            maxTokens: model?.maxTokens ?? instance?.maxTokens,
+            presencePenalty: model?.presencePenalty ?? instance?.presencePenalty,
+            frequencyPenalty: model?.frequencyPenalty ?? instance?.frequencyPenalty
+        )
+    }
+}
+
 // MARK: - LLM Messages
 
 struct LLMMessage: Sendable {

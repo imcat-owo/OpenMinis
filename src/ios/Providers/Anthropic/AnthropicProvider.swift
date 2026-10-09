@@ -153,7 +153,7 @@ final class AnthropicProvider: LLMProvider {
         return host == "api.anthropic.com" || host.hasSuffix(".anthropic.com")
     }
 
-    init(apiKey: String, model: LLMModel = .claudeHaiku45, basePath: String? = nil, appendV1Suffix: Bool = true, customUserAgent: String? = nil) {
+    init(apiKey: String, model: LLMModel = .claudeHaiku45, basePath: String? = nil, appendV1Suffix: Bool = true, customUserAgent: String? = nil, customHeaders: [String: String] = [:]) {
         self.model = model
         self.isClaudeCode = false
         self.betaHeaders = nil
@@ -165,13 +165,13 @@ final class AnthropicProvider: LLMProvider {
             apiKey: apiKey,
             basePath: resolvedBase,
             betaHeaders: nil,
-            httpClient: EagerStreamingHTTPClient(customUserAgent: customUserAgent)
+            httpClient: EagerStreamingHTTPClient(customUserAgent: customUserAgent, customHeaders: customHeaders)
         )
     }
 
     /// Manual token constructor: sends both `x-api-key` and `Authorization: Bearer` headers
     /// for maximum compatibility with third-party proxies and Coding Plan endpoints.
-    init(manualToken: String, model: LLMModel = .claudeHaiku45, basePath: String? = nil, appendV1Suffix: Bool = true, customUserAgent: String? = nil) {
+    init(manualToken: String, model: LLMModel = .claudeHaiku45, basePath: String? = nil, appendV1Suffix: Bool = true, customUserAgent: String? = nil, customHeaders: [String: String] = [:]) {
         self.model = model
         self.isClaudeCode = false
         self.betaHeaders = nil
@@ -183,7 +183,7 @@ final class AnthropicProvider: LLMProvider {
             apiKey: manualToken,
             basePath: resolvedBase,
             betaHeaders: nil,
-            httpClient: DualAuthHTTPClient(customUserAgent: customUserAgent)
+            httpClient: DualAuthHTTPClient(customUserAgent: customUserAgent, customHeaders: customHeaders)
         )
     }
 

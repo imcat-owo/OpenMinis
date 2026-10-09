@@ -11,6 +11,8 @@ final class AntigravityAgentProvider: AgentProvider {
     var name: String { provider.name }
     var model: LLMModel { provider.model }
     var defaultMaxTokens: Int { 16_384 }
+    /// [T-phase1-sampling] Effective sampling config, set by makeAgentProvider.
+    var sampling: SamplingConfig?
 
     init(provider: AntigravityProvider) {
         self.provider = provider
@@ -33,7 +35,8 @@ final class AntigravityAgentProvider: AgentProvider {
                 systemPrompt: systemPrompt,
                 maxTokens: maxTokens,
                 tools: geminiTools,
-                thinkingLevel: thinkingLevel
+                thinkingLevel: thinkingLevel,
+                sampling: sampling
             )
         } catch {
             throw provider.mapError(error)

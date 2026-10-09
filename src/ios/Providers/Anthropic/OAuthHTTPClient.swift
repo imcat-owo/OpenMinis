@@ -1584,14 +1584,21 @@ final class EagerStreamingHTTPClient: HTTPClient {
     /// - Parameter customUserAgent: when non-nil, overrides the default URLSession
     ///   `User-Agent` on every request through `httpAdditionalHeaders` (proxies that
     ///   gate on client UA). The SDK never sets User-Agent itself, so this takes effect.
-    init(customUserAgent: String? = nil) {
+    /// - Parameter customHeaders: user-defined extra headers merged into
+    ///   `httpAdditionalHeaders` (applied to every request). `Authorization` /
+    ///   `Content-Type` / `User-Agent` are never overridden (filtered upstream).
+    init(customUserAgent: String? = nil, customHeaders: [String: String] = [:]) {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 600  // 10 min — SSE streams can be idle during large tool generation
         config.protocolClasses = [EagerStreamingURLProtocol.self]
+        var additional = config.httpAdditionalHeaders ?? [:]
         if let ua = customUserAgent {
-            config.httpAdditionalHeaders = (config.httpAdditionalHeaders ?? [:]).merging(
-                ["User-Agent": ua]) { _, new in new }
+            additional["User-Agent"] = ua
         }
+        for (key, value) in customHeaders {
+            additional[key] = value
+        }
+        config.httpAdditionalHeaders = additional
         let session = URLSession(configuration: config)
         self.underlying = URLSessionHTTPClientAdapter(urlSession: session)
     }
@@ -1611,14 +1618,19 @@ final class DualAuthHTTPClient: HTTPClient {
     private let underlying: URLSessionHTTPClientAdapter
 
     /// - Parameter customUserAgent: see `EagerStreamingHTTPClient.init`.
-    init(customUserAgent: String? = nil) {
+    /// - Parameter customHeaders: see `EagerStreamingHTTPClient.init`.
+    init(customUserAgent: String? = nil, customHeaders: [String: String] = [:]) {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 600
         config.protocolClasses = [DualAuthURLProtocol.self]
+        var additional = config.httpAdditionalHeaders ?? [:]
         if let ua = customUserAgent {
-            config.httpAdditionalHeaders = (config.httpAdditionalHeaders ?? [:]).merging(
-                ["User-Agent": ua]) { _, new in new }
+            additional["User-Agent"] = ua
         }
+        for (key, value) in customHeaders {
+            additional[key] = value
+        }
+        config.httpAdditionalHeaders = additional
         let session = URLSession(configuration: config)
         self.underlying = URLSessionHTTPClientAdapter(urlSession: session)
     }

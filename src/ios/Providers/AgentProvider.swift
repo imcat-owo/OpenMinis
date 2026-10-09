@@ -179,6 +179,11 @@ protocol AgentProvider {
     var model: LLMModel { get }
     /// Default max output tokens for this provider.
     var defaultMaxTokens: Int { get }
+    /// Effective sampling config for the current model/entry, resolved by the
+    /// factory from per-model overrides + per-instance defaults (nil = unset).
+    /// Set at construction by `makeAgentProvider(for:)`; request builders read
+    /// it when assembling the wire body.
+    var sampling: SamplingConfig? { get set }
 
     /// Provider-specific streaming implementation. Receives a thinking level
     /// that has already been clamped to the model's effective max by the

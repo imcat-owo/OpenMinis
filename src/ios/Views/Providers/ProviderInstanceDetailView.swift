@@ -28,6 +28,13 @@ struct ProviderInstanceDetailView: View {
     @State private var editingModelEntry: ModelEntry?
     @State private var pendingDeleteModelEntry: ModelEntry?
     @State private var showKeyRevealed = false
+    /// [T-phase1-sampling] Bottom-sheet edit request for one sampling parameter.
+    @State private var samplingSheet: SamplingSheetRequest?
+    /// [T-phase1-sampling] Composite key of the model currently being pinged.
+    @State private var pingingEntryId: String?
+    /// [T-phase1-sampling] Draft new custom header (key/value).
+    @State private var newHeaderKey = ""
+    @State private var newHeaderValue = ""
 
     private var instance: ProviderInstance? {
         store.instance(for: instanceId)
@@ -74,6 +81,9 @@ struct ProviderInstanceDetailView: View {
         }
         .sheet(item: $editingModelEntry) { entry in
             ModelEntryDetailSheet(entry: entry)
+        }
+        .sheet(item: $samplingSheet) { request in
+            SamplingParamSheet(spec: request.spec, current: request.current, onSave: request.onSave)
         }
         .sheet(isPresented: $showKimiLogin) {
             if let instance = instance {
@@ -191,6 +201,9 @@ struct ProviderInstanceDetailView: View {
                 customUserAgentSection(instance)
             }
 
+            // MARK: Custom Headers [T-phase1-sampling]
+            customHeadersSection(instance)
+
             // MARK: API Format (OpenAI only)
             if (instance.providerType == .openAI || instance.providerType == .openAIResponses)
                 && instance.credentialType == .apiKey {
@@ -202,7 +215,8 @@ struct ProviderInstanceDetailView: View {
                             // This requires recreating the instance since providerType is let.
                             // Carry ALL other fields forward — otherwise switching the
                             // format would silently reset imageEndpointMode / customUserAgent
-                            // / azureMode to their defaults. [T-ios-azure-openai]
+                            // / azureMode / samplingDefaults / customHeaders to their
+                            // defaults. [T-ios-azure-openai]
                             let newInstance = ProviderInstance(
                                 id: instance.id,
                                 label: instance.label,
@@ -215,7 +229,9 @@ struct ProviderInstanceDetailView: View {
                                 imageEndpointMode: instance.imageEndpointMode,
                                 imageEndpointResolved: instance.imageEndpointResolved,
                                 customUserAgent: instance.customUserAgent,
-                                azureMode: instance.azureMode
+                                azureMode: instance.azureMode,
+                                samplingDefaults: instance.samplingDefaults,
+                                customHeaders: instance.customHeaders
                             )
                             store.updateInstance(newInstance)
                         }
@@ -262,6 +278,11 @@ struct ProviderInstanceDetailView: View {
                     }
                 ))
             }
+
+            // MARK: Sampling Parameters [T-phase1-sampling]
+            // Per-instance defaults for all models under this provider.
+            // A model can override these per-field in its own details sheet.
+            samplingParamsSection(instance)
 
             // MARK: Thinking Rules (Phase 2 §3)
             // Placed directly above Models because a rule's scope is written against
@@ -617,6 +638,87 @@ struct ProviderInstanceDetailView: View {
         store.updateInstance(updated)
     }
 
+    // MARK: - Custom Headers [T-phase1-sampling]
+
+    @ViewBuilder
+    private func customHeadersSection(_ instance: ProviderInstance) -> some View {
+        Section {
+            ForEach(instance.customHeaders.keys.sorted(), id: \.self) { key in
+                HStack {
+                    Text(key)
+                        .font(.system(.body, design: .monospaced))
+                    Spacer()
+                    Text(instance.customHeaders[key] ?? "")
+                        .foregroundStyle(.secondary)
+                        .font(.system(.body, design: .monospaced))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .swipeActions {
+                    Button(role: .destructive) {
+                        guard var fresh = store.instance(for: instance.id) else { return }
+                        fresh.customHeaders.removeValue(forKey: key)
+                        store.updateInstance(fresh)
+                    } label: {
+                        Label(AppLocalized("Delete"), systemImage: "trash")
+                    }
+                }
+            }
+            HStack(spacing: 8) {
+                TextField("X-Header-Name", text: $newHeaderKey)
+                    .font(.system(.body, design: .monospaced))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                TextField(AppLocalized("value"), text: $newHeaderValue)
+                    .font(.system(.body, design: .monospaced))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button {
+                    let key = newHeaderKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !key.isEmpty, var fresh = store.instance(for: instance.id) else { return }
+                    fresh.customHeaders[key] = newHeaderValue
+                    store.updateInstance(fresh)
+                    newHeaderKey = ""
+                    newHeaderValue = ""
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                }
+                .disabled(newHeaderKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        } header: {
+            Text(AppLocalized("Custom Headers"))
+        } footer: {
+            Text(AppLocalized("Extra HTTP headers sent with every request to this provider (e.g. X-Gateway-Token for relays). Authorization, Content-Type and User-Agent can never be overridden."))
+        }
+    }
+
+    // MARK: - Sampling Parameters [T-phase1-sampling]
+
+    @ViewBuilder
+    private func samplingParamsSection(_ instance: ProviderInstance) -> some View {
+        Section {
+            ForEach(samplingParamSpecs) { spec in
+                SamplingParamRow(
+                    spec: spec,
+                    current: instance.samplingDefaults?[keyPath: spec.keyPath]
+                ) {
+                    let captured = instance.samplingDefaults?[keyPath: spec.keyPath]
+                    samplingSheet = SamplingSheetRequest(spec: spec, current: captured) { newValue in
+                        guard var fresh = store.instance(for: instance.id) else { return }
+                        var cfg = fresh.samplingDefaults ?? SamplingConfig()
+                        cfg[keyPath: spec.keyPath] = newValue
+                        fresh.samplingDefaults = cfg.isEmpty ? nil : cfg
+                        store.updateInstance(fresh)
+                    }
+                }
+            }
+        } header: {
+            Text(AppLocalized("生成参数"))
+        } footer: {
+            Text(AppLocalized("Default sampling parameters for every model under this provider. A model can override each of these in its own details. Off = provider default."))
+        }
+    }
+
     // MARK: - Image Generation Endpoint
 
     @ViewBuilder
@@ -765,6 +867,32 @@ struct ProviderInstanceDetailView: View {
                 }
             }
             Spacer()
+            // [T-phase1-sampling] Last measured latency + per-model ping.
+            if let ms = store.modelLatencyMs[entry.compositeKey] {
+                Text("\(Int(ms)) ms")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .monospacedDigit()
+            }
+            Button {
+                pingingEntryId = entry.compositeKey
+                Task {
+                    await store.pingModel(entry: entry)
+                    pingingEntryId = nil
+                }
+            } label: {
+                if pingingEntryId == entry.compositeKey {
+                    ProgressView()
+                        .controlSize(.mini)
+                } else {
+                    Image(systemName: "bolt")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+            .frame(minWidth: 22, minHeight: 22)
+            .accessibilityLabel(AppLocalized("Ping model"))
             Button {
                 var updated = entry
                 updated.isHidden = !entry.isHidden
@@ -1286,6 +1414,10 @@ struct ModelEntryDetailSheet: View {
     @State private var contextWindowText: String = ""
     @State private var supportsThinking: Bool = false
     @State private var maxTokensText: String = ""
+    /// [T-phase1-sampling] Per-model sampling overrides (nil = not set).
+    @State private var sampling: SamplingConfig?
+    /// [T-phase1-sampling] Bottom-sheet edit request for one sampling parameter.
+    @State private var samplingSheet: SamplingSheetRequest?
     /// [T-ios-model-quick-test] Presents the modality-matched Quick Test sheet.
     @State private var showQuickTest: Bool = false
     @State private var showForceThinkingAlert: Bool = false
@@ -1367,12 +1499,11 @@ struct ModelEntryDetailSheet: View {
                                 .multilineTextAlignment(.trailing)
                                 .frame(maxWidth: 120)
                         }
-                        maxTokensField()
                         Toggle(AppLocalized("Thinking"), isOn: $supportsThinking)
                     } header: {
                         Text(AppLocalized("Capabilities"))
                     } footer: {
-                        Text(AppLocalized("Context window and max output tokens in tokens. Leave empty for default."))
+                        Text(AppLocalized("Context window in tokens. Leave empty for default."))
                     }
                 } else {
                     Section {
@@ -1387,8 +1518,6 @@ struct ModelEntryDetailSheet: View {
                             .multilineTextAlignment(.trailing)
                             .frame(maxWidth: 120)
                         }
-
-                        maxTokensField()
 
                         HStack {
                             Text(AppLocalized("Thinking"))
@@ -1415,8 +1544,35 @@ struct ModelEntryDetailSheet: View {
                     } header: {
                         Text(AppLocalized("Capabilities"))
                     } footer: {
-                        Text(AppLocalized("Leave Context Window empty to use auto-detected value. Leave Max Output Tokens empty to follow the provider default."))
+                        Text(AppLocalized("Leave Context Window empty to use auto-detected value."))
                     }
+                }
+
+                // MARK: Sampling Parameters [T-phase1-sampling]
+                // Per-model overrides. Each row shows the set value or "默认"
+                // (falls back to the provider instance default, then the
+                // provider default). Max Output Tokens keeps its existing
+                // input here, writing to the same override as before.
+                Section {
+                    ForEach(samplingParamSpecs) { spec in
+                        SamplingParamRow(
+                            spec: spec,
+                            current: sampling?[keyPath: spec.keyPath]
+                        ) {
+                            let captured = sampling?[keyPath: spec.keyPath]
+                            samplingSheet = SamplingSheetRequest(spec: spec, current: captured) { newValue in
+                                var cfg = sampling ?? SamplingConfig()
+                                cfg[keyPath: spec.keyPath] = newValue
+                                sampling = cfg.isEmpty ? nil : cfg
+                            }
+                        }
+                    }
+
+                    maxTokensField()
+                } header: {
+                    Text(AppLocalized("生成参数"))
+                } footer: {
+                    Text(AppLocalized("Leave a parameter off to use the provider default. Temperature and Top P apply to Anthropic, Gemini and OpenAI-compatible models; penalties apply to OpenAI-compatible models."))
                 }
 
                 Section {
@@ -1497,6 +1653,9 @@ struct ModelEntryDetailSheet: View {
                     .id(entry.id)
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
+            }
+            .sheet(item: $samplingSheet) { request in
+                SamplingParamSheet(spec: request.spec, current: request.current, onSave: request.onSave)
             }
             .alert(
                 AppLocalized("Force Enable Thinking"),
@@ -1612,12 +1771,16 @@ struct ModelEntryDetailSheet: View {
         } else {
             maxTokensText = ""
         }
+        // [T-phase1-sampling] Sampling overrides (nil = not set).
+        sampling = entry.overrides.sampling
     }
 
     private func resetToDefault() {
         var cleared = entry
         cleared.overrides = ModelOverrides()
         store.updateEntry(cleared)
+        // [T-phase1-sampling]
+        sampling = nil
 
         let base = entry.baseModel
         displayName = base.displayName
@@ -1694,6 +1857,10 @@ struct ModelEntryDetailSheet: View {
 
         newOverrides.maxOutputTokens = parsedMaxTokens
 
+        // [T-phase1-sampling] Sampling overrides; normalize all-unset to nil so
+        // the entry doesn't carry an empty shell that would read as "modified".
+        newOverrides.sampling = (sampling?.isEmpty == false) ? sampling : nil
+
         let baselineModality = entry.baseModel.modalityOverride
             ?? entry.baseModel.capabilities.supportedModalities
         if modality != baselineModality {
@@ -1726,6 +1893,138 @@ struct ModelEntryDetailSheet: View {
             // as though the edit had landed.
             duplicateError = AppLocalized("Model ID \"\(finalId)\" already exists.")
         }
+    }
+}
+
+// MARK: - Sampling Parameters UI (Phase 1: temperature / top_p / penalties)
+
+// [T-phase1-sampling] One sampling parameter's editor metadata. Shared by the
+// per-instance section (ProviderInstanceDetailView) and the per-model section
+// (ModelEntryDetailSheet) — Kelivo-style: row shows value or "默认", tap opens
+// a bottom sheet with an enable toggle + slider.
+fileprivate struct SamplingParamSpec: Identifiable {
+    let id: String
+    let title: String
+    let range: ClosedRange<Double>
+    let step: Double
+    let defaultValue: Double
+    let format: (Double) -> String
+    let keyPath: WritableKeyPath<SamplingConfig, Double?>
+}
+
+fileprivate let samplingParamSpecs: [SamplingParamSpec] = [
+    SamplingParamSpec(
+        id: "temperature",
+        title: AppLocalized("Temperature"),
+        range: 0...2, step: 0.05, defaultValue: 1.0,
+        format: { String(format: "%.2f", $0) },
+        keyPath: \.temperature
+    ),
+    SamplingParamSpec(
+        id: "topP",
+        title: AppLocalized("Top P"),
+        range: 0...1, step: 0.05, defaultValue: 1.0,
+        format: { String(format: "%.2f", $0) },
+        keyPath: \.topP
+    ),
+    SamplingParamSpec(
+        id: "presencePenalty",
+        title: AppLocalized("Presence Penalty"),
+        range: -2...2, step: 0.1, defaultValue: 0,
+        format: { String(format: "%+.1f", $0) },
+        keyPath: \.presencePenalty
+    ),
+    SamplingParamSpec(
+        id: "frequencyPenalty",
+        title: AppLocalized("Frequency Penalty"),
+        range: -2...2, step: 0.1, defaultValue: 0,
+        format: { String(format: "%+.1f", $0) },
+        keyPath: \.frequencyPenalty
+    ),
+]
+
+/// A pending bottom-sheet edit request for one sampling parameter.
+fileprivate struct SamplingSheetRequest: Identifiable {
+    let id = UUID()
+    let spec: SamplingParamSpec
+    let current: Double?
+    let onSave: (Double?) -> Void
+}
+
+fileprivate struct SamplingParamRow: View {
+    let spec: SamplingParamSpec
+    let current: Double?
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack {
+                Text(spec.title)
+                Spacer()
+                Text(current.map(spec.format) ?? AppLocalized("Default"))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+fileprivate struct SamplingParamSheet: View {
+    let spec: SamplingParamSpec
+    let onSave: (Double?) -> Void
+    @State private var enabled: Bool
+    @State private var value: Double
+    @Environment(\.dismiss) private var dismiss
+
+    init(spec: SamplingParamSpec, current: Double?, onSave: @escaping (Double?) -> Void) {
+        self.spec = spec
+        self.onSave = onSave
+        _enabled = State(initialValue: current != nil)
+        _value = State(initialValue: current ?? spec.defaultValue)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Toggle(AppLocalized("Custom value"), isOn: $enabled)
+                } footer: {
+                    Text(AppLocalized("Off = provider default."))
+                }
+                if enabled {
+                    Section {
+                        HStack {
+                            Text(spec.title)
+                            Spacer()
+                            Text(spec.format(value))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                        Slider(value: $value, in: spec.range, step: spec.step)
+                    }
+                }
+            }
+            .navigationTitle(spec.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(AppLocalized("Cancel")) { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(AppLocalized("Save")) {
+                        onSave(enabled ? value : nil)
+                        dismiss()
+                    }
+                    .font(.body.weight(.semibold))
+                }
+            }
+        }
+        .presentationDetents([.medium])
     }
 }
 

@@ -78,6 +78,33 @@ enum LLMProviderFactory {
 
     // MARK: - Per-Provider Builders
 
+    /// [T-phase1-sampling] Sanitize user-defined custom headers: drop empty keys
+    /// and never allow overriding Authorization / Content-Type / User-Agent —
+    /// those are owned by the auth + identity layers of each provider.
+    static func sanitizedCustomHeaders(_ headers: [String: String]) -> [String: String] {
+        let protected: Set<String> = ["authorization", "content-type", "user-agent"]
+        var out: [String: String] = [:]
+        for (key, value) in headers {
+            let trimmedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedKey.isEmpty, !protected.contains(trimmedKey.lowercased()) else { continue }
+            out[trimmedKey] = value
+        }
+        return out
+    }
+
+    /// [T-phase1-sampling] Merge the instance's user-defined custom headers into
+    /// an OpenAI-family provider's `extraHeaders` (which every request builder
+    /// applies — chat/responses/models/image). User headers win over
+    /// pre-existing keys (e.g. OpenRouter attribution); the protected set is
+    /// stripped by `sanitizedCustomHeaders`. No-op when none are set.
+    @discardableResult
+    static func applyCustomHeaders(_ provider: OpenAIProvider, instance: ProviderInstance) -> OpenAIProvider {
+        for (key, value) in sanitizedCustomHeaders(instance.customHeaders) {
+            provider.extraHeaders[key] = value
+        }
+        return provider
+    }
+
     static func makeAnthropicProvider(instance: ProviderInstance, model: LLMModel) -> AnthropicProvider {
         let customBase = instance.effectiveCustomBaseURL
         let appendV1 = instance.appendV1Suffix
@@ -92,10 +119,12 @@ enum LLMProviderFactory {
             // SDK (which sets no UA itself) doesn't fall back to URLSession's
             // build-number default. OAuth branches below keep nil so the
             // claude-cli UA set in OAuthURLProtocol is preserved.
-            return AnthropicProvider(apiKey: key, model: model, basePath: customBase, appendV1Suffix: appendV1, customUserAgent: ua ?? MinisUserAgent.default)
+            // [T-phase1-sampling] Custom headers ride the HTTP client's
+            // httpAdditionalHeaders; OAuth stays identity-locked (skipped).
+            return AnthropicProvider(apiKey: key, model: model, basePath: customBase, appendV1Suffix: appendV1, customUserAgent: ua ?? MinisUserAgent.default, customHeaders: Self.sanitizedCustomHeaders(instance.customHeaders))
         case .oauth:
             if let manualToken = ProviderKeychainHelper.loadOAuthString(instanceId: instance.id, account: "manual-oauth-token") {
-                return AnthropicProvider(manualToken: manualToken, model: model, basePath: customBase, appendV1Suffix: appendV1, customUserAgent: ua)
+                return AnthropicProvider(manualToken: manualToken, model: model, basePath: customBase, appendV1Suffix: appendV1, customUserAgent: ua, customHeaders: Self.sanitizedCustomHeaders(instance.customHeaders))
             }
             let iid = instance.id
             return AnthropicProvider(
@@ -112,10 +141,14 @@ enum LLMProviderFactory {
         switch instance.credentialType {
         case .apiKey:
             let key = ProviderKeychainHelper.loadAPIKey(instanceId: instance.id) ?? ""
-            return GeminiProvider(apiKey: key, model: model, customBasePath: customBase)
+            let provider = GeminiProvider(apiKey: key, model: model, customBasePath: customBase)
+            provider.customHeaders = sanitizedCustomHeaders(instance.customHeaders)
+            return provider
         case .oauth:
             if let manualToken = ProviderKeychainHelper.loadOAuthString(instanceId: instance.id, account: "manual-oauth-token") {
-                return GeminiProvider(apiKey: manualToken, model: model, customBasePath: customBase)
+                let provider = GeminiProvider(apiKey: manualToken, model: model, customBasePath: customBase)
+                provider.customHeaders = sanitizedCustomHeaders(instance.customHeaders)
+                return provider
             }
             let iid = instance.id
             if GeminiOAuthManager.shared.gcpProjectID(instanceId: iid) == nil {
@@ -127,6 +160,7 @@ enum LLMProviderFactory {
                 customBasePath: customBase
             )
             provider.gcpProjectID = GeminiOAuthManager.shared.gcpProjectID(instanceId: iid)
+            provider.customHeaders = sanitizedCustomHeaders(instance.customHeaders)
             return provider
         }
     }
@@ -156,10 +190,10 @@ enum LLMProviderFactory {
         switch instance.credentialType {
         case .apiKey:
             let key = ProviderKeychainHelper.loadAPIKey(instanceId: instance.id) ?? ""
-            return applyAzure(applyCustomUserAgent(configure(OpenAIProvider(apiKey: key, model: model, customBaseURL: customBase, appendV1Suffix: appendV1)), instance: instance), instance: instance)
+            return applyCustomHeaders(applyAzure(applyCustomUserAgent(configure(OpenAIProvider(apiKey: key, model: model, customBaseURL: customBase, appendV1Suffix: appendV1)), instance: instance), instance: instance), instance: instance)
         case .oauth:
             if let manualToken = ProviderKeychainHelper.loadOAuthString(instanceId: instance.id, account: "manual-oauth-token") {
-                return applyCustomUserAgent(configure(OpenAIProvider(apiKey: manualToken, model: model, customBaseURL: customBase, appendV1Suffix: appendV1)), instance: instance)
+                return applyCustomHeaders(applyCustomUserAgent(configure(OpenAIProvider(apiKey: manualToken, model: model, customBaseURL: customBase, appendV1Suffix: appendV1)), instance: instance), instance: instance)
             }
             let iid = instance.id
             let provider = OpenAIProvider(
@@ -191,7 +225,7 @@ enum LLMProviderFactory {
         ]
         provider.useOpenRouterCompat = true
         provider.providerInstanceId = instance.id
-        return applyCustomUserAgent(provider, instance: instance)
+        return applyCustomHeaders(applyCustomUserAgent(provider, instance: instance), instance: instance)
     }
 
     static func makeOpenAIResponsesProvider(instance: ProviderInstance, model: LLMModel) -> OpenAIProvider {
@@ -209,13 +243,13 @@ enum LLMProviderFactory {
             let provider = OpenAIProvider(apiKey: key, model: model, customBaseURL: customBase, appendV1Suffix: appendV1)
             provider.forceResponsesAPI = true
             provider.providerInstanceId = instance.id
-            return applyAzure(applyCustomUserAgent(provider, instance: instance), instance: instance)
+            return applyCustomHeaders(applyAzure(applyCustomUserAgent(provider, instance: instance), instance: instance), instance: instance)
         case .oauth:
             if let manualToken = ProviderKeychainHelper.loadOAuthString(instanceId: instance.id, account: "manual-oauth-token") {
                 let provider = OpenAIProvider(apiKey: manualToken, model: model, customBaseURL: customBase, appendV1Suffix: appendV1)
                 provider.forceResponsesAPI = true
                 provider.providerInstanceId = instance.id
-                return applyCustomUserAgent(provider, instance: instance)
+                return applyCustomHeaders(applyCustomUserAgent(provider, instance: instance), instance: instance)
             }
             let iid = instance.id
             let provider = OpenAIProvider(
@@ -247,7 +281,7 @@ enum LLMProviderFactory {
             let key = ProviderKeychainHelper.loadAPIKey(instanceId: instance.id) ?? ""
             let provider = OpenAIProvider(apiKey: key, model: model, customBaseURL: customBase, appendV1Suffix: appendV1)
             provider.providerInstanceId = instance.id
-            return applyCustomUserAgent(provider, instance: instance)
+            return applyCustomHeaders(applyCustomUserAgent(provider, instance: instance), instance: instance)
         case .oauth:
             let iid = instance.id
             let provider = OpenAIProvider(
@@ -270,12 +304,12 @@ enum LLMProviderFactory {
             let key = ProviderKeychainHelper.loadAPIKey(instanceId: instance.id) ?? ""
             let provider = OpenAIProvider(apiKey: key, model: model, customBaseURL: customBase, appendV1Suffix: appendV1)
             provider.providerInstanceId = instance.id
-            return applyCustomUserAgent(provider, instance: instance)
+            return applyCustomHeaders(applyCustomUserAgent(provider, instance: instance), instance: instance)
         case .oauth:
             if let manualToken = ProviderKeychainHelper.loadOAuthString(instanceId: instance.id, account: "manual-oauth-token") {
                 let provider = OpenAIProvider(apiKey: manualToken, model: model, customBaseURL: customBase, appendV1Suffix: appendV1)
                 provider.providerInstanceId = instance.id
-                return applyCustomUserAgent(provider, instance: instance)
+                return applyCustomHeaders(applyCustomUserAgent(provider, instance: instance), instance: instance)
             }
             let iid = instance.id
             let provider = OpenAIProvider(
@@ -302,6 +336,7 @@ enum LLMProviderFactory {
         if let baseURL = AntigravityOAuthManager.shared.resolvedBaseURL(instanceId: iid) {
             provider.activeBaseURL = baseURL
         }
+        provider.customHeaders = sanitizedCustomHeaders(instance.customHeaders)
         return provider
     }
 }

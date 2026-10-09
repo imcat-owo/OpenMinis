@@ -34,6 +34,16 @@ final class AntigravityProvider: LLMProvider {
     /// Cloud Code base URL resolved during project discovery.
     var activeBaseURL: String = AntigravityOAuthManager.cloudCodeBaseURLs[0]
 
+    /// [T-phase1-sampling] Previous hardcoded temperature default.
+    static let defaultTemperature = 0.7
+
+    /// [T-phase1-sampling] User-defined extra HTTP headers for this provider's
+    /// requests. Set by LLMProviderFactory from the instance's customHeaders.
+    /// Applied BEFORE the identity-locked headers below so Antigravity's own
+    /// auth/identity headers always win; Authorization/Content-Type can never
+    /// be overridden (filtered in applyCustomHeaders).
+    var customHeaders: [String: String] = [:]
+
     init(oauthTokenProvider: @escaping () async throws -> String, model: LLMModel) {
         self.model = model
         self.authTokenProvider = oauthTokenProvider
@@ -131,7 +141,8 @@ final class AntigravityProvider: LLMProvider {
         systemPrompt: String?,
         maxTokens: Int,
         tools: [[String: Any]],
-        thinkingLevel: ThinkingLevel = .off
+        thinkingLevel: ThinkingLevel = .off,
+        sampling: SamplingConfig? = nil
     ) async throws -> AsyncThrowingStream<GeminiStreamEvent, Error> {
         var inner: [String: Any] = ["contents": contents]
 
@@ -139,10 +150,13 @@ final class AntigravityProvider: LLMProvider {
             inner["systemInstruction"] = ["parts": [["text": sys]]]
         }
 
+        // [T-phase1-sampling] User-set values win; unset falls back to the
+        // previous hardcoded default (0.7) so existing behavior is unchanged.
         var genConfig: [String: Any] = [
             "maxOutputTokens": maxTokens,
-            "temperature": 0.7,
+            "temperature": sampling?.temperature ?? Self.defaultTemperature,
         ]
+        if let topP = sampling?.topP { genConfig["topP"] = topP }
         let thinkCfg = thinkingLevel.isEnabled ? elevatedThinkingConfig(level: thinkingLevel) : minimalThinkingConfig()
         if !thinkCfg.isEmpty { genConfig["thinkingConfig"] = thinkCfg }
         inner["generationConfig"] = genConfig
@@ -194,7 +208,8 @@ final class AntigravityProvider: LLMProvider {
         contents: [[String: Any]],
         systemPrompt: String?,
         maxTokens: Int,
-        tools: [[String: Any]]
+        tools: [[String: Any]],
+        sampling: SamplingConfig? = nil
     ) async throws -> GeminiGenerateResponse {
         var inner: [String: Any] = ["contents": contents]
 
@@ -202,10 +217,12 @@ final class AntigravityProvider: LLMProvider {
             inner["systemInstruction"] = ["parts": [["text": sys]]]
         }
 
+        // [T-phase1-sampling] Same fallback rule as streamWithTools.
         var genConfig: [String: Any] = [
             "maxOutputTokens": maxTokens,
-            "temperature": 0.7,
+            "temperature": sampling?.temperature ?? Self.defaultTemperature,
         ]
+        if let topP = sampling?.topP { genConfig["topP"] = topP }
         let thinkCfg = minimalThinkingConfig()
         if !thinkCfg.isEmpty { genConfig["thinkingConfig"] = thinkCfg }
         inner["generationConfig"] = genConfig
@@ -357,6 +374,12 @@ final class AntigravityProvider: LLMProvider {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        // [T-phase1-sampling] User headers first — the identity-locked headers
+        // below (Antigravity UA / client name / auth) always win.
+        for (key, value) in customHeaders {
+            request.setValue(value, forHTTPHeaderField: key)
+        }
 
         let token = try await authTokenProvider()
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

@@ -36,6 +36,15 @@ struct ProviderInstance: Identifiable, Codable, Hashable {
     /// allow e.g. Claude Code). Applied to chat/models/responses requests of API-key
     /// and manual-token providers; OAuth providers keep their required client UA.
     var customUserAgent: String?
+    /// Per-instance default generation sampling parameters (temperature / top_p /
+    /// penalties). Per-model `ModelOverrides.sampling` wins per-field; nil here
+    /// (or per-field) = provider default. Edited in the "生成参数" section.
+    var samplingDefaults: SamplingConfig?
+    /// User-defined extra HTTP headers merged into every outbound request of this
+    /// instance (e.g. `X-Custom-Auth` for gateways). Applied AFTER the app's own
+    /// headers so identity/auth headers the provider requires always win; the
+    /// `Authorization` and `Content-Type` keys are never overridden.
+    var customHeaders: [String: String]
     /// [T-ios-azure-openai] Azure OpenAI mode. When true, OpenAIProvider auths
     /// with the `api-key:` header (not `Authorization: Bearer`) and treats the
     /// custom base URL as an Azure endpoint (the user pastes the full Azure URL
@@ -61,7 +70,9 @@ struct ProviderInstance: Identifiable, Codable, Hashable {
         imageEndpointResolved: ImageEndpointMode? = nil,
         customUserAgent: String? = nil,
         azureMode: Bool = false,
-        unknownProviderTypeRaw: String? = nil
+        unknownProviderTypeRaw: String? = nil,
+        samplingDefaults: SamplingConfig? = nil,
+        customHeaders: [String: String] = [:]
     ) {
         self.id = id
         self.label = label
@@ -76,6 +87,8 @@ struct ProviderInstance: Identifiable, Codable, Hashable {
         self.customUserAgent = customUserAgent
         self.azureMode = azureMode
         self.unknownProviderTypeRaw = unknownProviderTypeRaw
+        self.samplingDefaults = samplingDefaults
+        self.customHeaders = customHeaders
     }
 
     // MARK: - Codable (manual, for backwards compatibility)
@@ -83,6 +96,7 @@ struct ProviderInstance: Identifiable, Codable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id, label, providerType, credentialType, isEnabled, createdAt, customBaseURL, appendV1Suffix
         case imageEndpointMode, imageEndpointResolved, customUserAgent, azureMode
+        case samplingDefaults, customHeaders
     }
 
     init(from decoder: Decoder) throws {
@@ -108,6 +122,9 @@ struct ProviderInstance: Identifiable, Codable, Hashable {
         // [T-ios-azure-openai] Additive + optional: old data → false (off), so
         // existing OpenAI/Responses instances keep their exact prior behavior.
         azureMode = (try? c.decodeIfPresent(Bool.self, forKey: .azureMode)) ?? false
+        // [T-phase1-sampling] Additive + optional: old data → nil/empty.
+        samplingDefaults = try? c.decodeIfPresent(SamplingConfig.self, forKey: .samplingDefaults)
+        customHeaders = (try? c.decodeIfPresent([String: String].self, forKey: .customHeaders)) ?? [:]
     }
 
     func encode(to encoder: Encoder) throws {
@@ -128,6 +145,13 @@ struct ProviderInstance: Identifiable, Codable, Hashable {
         // [T-ios-azure-openai] Only encode when on, so off-instances serialize
         // byte-identically to before this field existed (no diff/churn, no LWW noise).
         if azureMode { try c.encode(azureMode, forKey: .azureMode) }
+        // [T-phase1-sampling] Only encode when set/non-empty (same no-churn rule).
+        if let samplingDefaults, !samplingDefaults.isEmpty {
+            try c.encode(samplingDefaults, forKey: .samplingDefaults)
+        }
+        if !customHeaders.isEmpty {
+            try c.encode(customHeaders, forKey: .customHeaders)
+        }
     }
 
     /// Returns customUserAgent if non-nil and non-empty (trimmed), otherwise nil.

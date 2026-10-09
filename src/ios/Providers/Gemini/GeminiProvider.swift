@@ -40,6 +40,14 @@ final class GeminiProvider: LLMProvider {
     /// Set by callers like ModelUseOffloadBridge before calling sendMessage.
     var extraGenerationConfig: [String: Any]?
 
+    /// [T-phase1-sampling] Previous hardcoded temperature default.
+    static let defaultTemperature = 0.7
+
+    /// [T-phase1-sampling] User-defined extra HTTP headers for this provider's
+    /// requests. Set by LLMProviderFactory from the instance's customHeaders.
+    /// Never overrides Authorization / Content-Type (see applyCustomHeaders).
+    var customHeaders: [String: String] = [:]
+
 
     /// Stable session ID for Cloud Code Assist (persists for the lifetime of this provider instance).
     private let sessionId = UUID().uuidString
@@ -173,7 +181,8 @@ final class GeminiProvider: LLMProvider {
         systemPrompt: String?,
         maxTokens: Int,
         tools: [[String: Any]],
-        thinkingLevel: ThinkingLevel = .off
+        thinkingLevel: ThinkingLevel = .off,
+        sampling: SamplingConfig? = nil
     ) async throws -> AsyncThrowingStream<GeminiStreamEvent, Error> {
         var body: [String: Any] = ["contents": contents]
 
@@ -181,10 +190,13 @@ final class GeminiProvider: LLMProvider {
             body["systemInstruction"] = ["parts": [["text": sys]]]
         }
 
+        // [T-phase1-sampling] User-set values win; unset falls back to the
+        // previous hardcoded default (0.7) so existing behavior is unchanged.
         var genConfig: [String: Any] = [
             "maxOutputTokens": maxTokens,
-            "temperature": 0.7,
+            "temperature": sampling?.temperature ?? Self.defaultTemperature,
         ]
+        if let topP = sampling?.topP { genConfig["topP"] = topP }
         let thinkCfg = thinkingLevel.isEnabled ? elevatedThinkingConfig(level: thinkingLevel) : minimalThinkingConfig()
         if !thinkCfg.isEmpty { genConfig["thinkingConfig"] = thinkCfg }
         body["generationConfig"] = genConfig
@@ -242,7 +254,8 @@ final class GeminiProvider: LLMProvider {
         contents: [[String: Any]],
         systemPrompt: String?,
         maxTokens: Int,
-        tools: [[String: Any]]
+        tools: [[String: Any]],
+        sampling: SamplingConfig? = nil
     ) async throws -> GeminiGenerateResponse {
         var body: [String: Any] = ["contents": contents]
 
@@ -250,10 +263,12 @@ final class GeminiProvider: LLMProvider {
             body["systemInstruction"] = ["parts": [["text": sys]]]
         }
 
+        // [T-phase1-sampling] Same fallback rule as streamWithTools.
         var genConfig: [String: Any] = [
             "maxOutputTokens": maxTokens,
-            "temperature": 0.7,
+            "temperature": sampling?.temperature ?? Self.defaultTemperature,
         ]
+        if let topP = sampling?.topP { genConfig["topP"] = topP }
         let thinkCfg = self.minimalThinkingConfig()
         if !thinkCfg.isEmpty { genConfig["thinkingConfig"] = thinkCfg }
         body["generationConfig"] = genConfig
@@ -437,6 +452,17 @@ final class GeminiProvider: LLMProvider {
             // URLSession would send its build-number default. Use the app default
             // (Minis/<marketing>) instead. Never overrides the Cloud Code UA above.
             request.setValue(MinisUserAgent.default, forHTTPHeaderField: "User-Agent")
+        }
+
+        // [T-phase1-sampling] User-defined extra headers. Applied AFTER the
+        // app's own headers so the identity-locked values (Cloud Code UA,
+        // Authorization) always win — and skipped entirely for Cloud Code
+        // (identity-locked endpoint). Authorization/Content-Type can never be
+        // overridden (filtered in applyCustomHeaders).
+        if !useCloudCode {
+            for (key, value) in customHeaders {
+                request.setValue(value, forHTTPHeaderField: key)
+            }
         }
 
         // sortedKeys: stable byte-level prefix so server-side prompt caches

@@ -140,6 +140,8 @@ actor ProviderConfigDB {
                     image_endpoint_resolved  TEXT,
                     custom_user_agent        TEXT,
                     azure_mode               INTEGER NOT NULL DEFAULT 0,
+                    sampling_defaults        TEXT,
+                    custom_headers           TEXT,
                     is_enabled               INTEGER NOT NULL DEFAULT 1,
                     sort_order               INTEGER NOT NULL DEFAULT 0,
                     secret_blob              TEXT,
@@ -284,6 +286,16 @@ actor ProviderConfigDB {
             exec(db: db, "ALTER TABLE provider_instances ADD COLUMN azure_mode INTEGER NOT NULL DEFAULT 0")
             logger.info("[v3] schema repair: added missing column azure_mode")
         }
+        // [T-phase1-sampling] Same idempotent backstop for sampling_defaults /
+        // custom_headers (JSON TEXT columns, added after v1 schema).
+        if !existing.contains("sampling_defaults") {
+            exec(db: db, "ALTER TABLE provider_instances ADD COLUMN sampling_defaults TEXT")
+            logger.info("[v3] schema repair: added missing column sampling_defaults")
+        }
+        if !existing.contains("custom_headers") {
+            exec(db: db, "ALTER TABLE provider_instances ADD COLUMN custom_headers TEXT")
+            logger.info("[v3] schema repair: added missing column custom_headers")
+        }
     }
 
     /// Add `removed_members_json` / `added_members_json` to provider_model_groups
@@ -382,7 +394,7 @@ actor ProviderConfigDB {
                    append_v1_suffix, image_endpoint_mode, image_endpoint_resolved,
                    is_enabled, sort_order, secret_blob, secret_kind,
                    secret_updated_at, created_at, updated_at, extras_json,
-                   custom_user_agent, azure_mode
+                   custom_user_agent, azure_mode, sampling_defaults, custom_headers
             FROM provider_instances
             ORDER BY sort_order ASC, created_at ASC
         """
@@ -408,6 +420,8 @@ actor ProviderConfigDB {
                 "extras_json": Self.optText(stmt, 15) as Any,
                 "custom_user_agent": Self.optText(stmt, 16) as Any,
                 "azure_mode": sqlite3_column_int(stmt, 17) != 0,
+                "sampling_defaults": Self.optText(stmt, 18) as Any,
+                "custom_headers": Self.optText(stmt, 19) as Any,
             ])
         }
         return rows
@@ -729,6 +743,10 @@ actor ProviderConfigDB {
                 Self.stampComponent(inst.createdAt.timeIntervalSince1970),
                 Self.stampComponent(inst.customUserAgent),
                 Self.stampComponent(inst.azureMode),
+                // [T-phase1-sampling] Stable string forms so sampling/header edits
+                // bump updated_at like every other instance field.
+                Self.stampComponent(Self.jsonString(inst.samplingDefaults)),
+                Self.stampComponent(Self.sortedHeaderString(inst.customHeaders)),
             ].joined(separator: "\u{1}")
             let instanceUpdatedAt = priorInstanceStamps[inst.id].map {
                 $0.fingerprint == instanceFingerprint ? $0.updatedAt : now
@@ -753,7 +771,9 @@ actor ProviderConfigDB {
                 updatedAt: instanceUpdatedAt,
                 extrasJson: preservedInstanceSecrets[inst.id]?.extras,
                 customUserAgent: inst.customUserAgent,
-                azureMode: inst.azureMode
+                azureMode: inst.azureMode,
+                samplingDefaultsJson: Self.jsonString(inst.samplingDefaults),
+                customHeadersJson: Self.jsonString(inst.customHeaders)
             )
         }
 
@@ -1003,7 +1023,17 @@ actor ProviderConfigDB {
                 imageEndpointResolved: imageResolved,
                 customUserAgent: row["custom_user_agent"] as? String,
                 azureMode: (row["azure_mode"] as? Bool) ?? false,
-                unknownProviderTypeRaw: unknownTypeRaw
+                unknownProviderTypeRaw: unknownTypeRaw,
+                samplingDefaults: (row["sampling_defaults"] as? String).flatMap {
+                    $0.data(using: .utf8)
+                }.flatMap {
+                    try? JSONDecoder().decode(SamplingConfig.self, from: $0)
+                },
+                customHeaders: (row["custom_headers"] as? String).flatMap {
+                    $0.data(using: .utf8)
+                }.flatMap {
+                    try? JSONDecoder().decode([String: String].self, from: $0)
+                } ?? [:]
             )
             instances.append(inst)
         }
@@ -1160,15 +1190,21 @@ actor ProviderConfigDB {
         secretBlob: String?, secretKind: String?, secretUpdatedAt: Double?,
         createdAt: Double, updatedAt: Double, extrasJson: String?,
         customUserAgent: String?,
-        azureMode: Bool = false
+        azureMode: Bool = false,
+        samplingDefaultsJson: String? = nil,
+        customHeadersJson: String? = nil
     ) -> Bool {
         guard let db else { return false }
         // LWW: skip if local row has updated_at >= incoming.
         var stmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, "SELECT updated_at FROM provider_instances WHERE id = ?", -1, &stmt, nil) == SQLITE_OK {
+        var localSamplingJson: String?
+        var localHeadersJson: String?
+        if sqlite3_prepare_v2(db, "SELECT updated_at, sampling_defaults, custom_headers FROM provider_instances WHERE id = ?", -1, &stmt, nil) == SQLITE_OK {
             sqlite3_bind_text(stmt, 1, id, -1, Self.SQLITE_TRANSIENT)
             if sqlite3_step(stmt) == SQLITE_ROW {
                 let localTs = sqlite3_column_double(stmt, 0)
+                localSamplingJson = Self.optText(stmt, 1)
+                localHeadersJson = Self.optText(stmt, 2)
                 sqlite3_finalize(stmt)
                 if localTs >= updatedAt {
                     return false
@@ -1186,7 +1222,12 @@ actor ProviderConfigDB {
             secretBlob: secretBlob, secretKind: secretKind, secretUpdatedAt: secretUpdatedAt,
             createdAt: createdAt, updatedAt: updatedAt, extrasJson: extrasJson,
             customUserAgent: customUserAgent,
-            azureMode: azureMode
+            azureMode: azureMode,
+            // [T-phase1-sampling] Records from older builds don't carry the new
+            // fields (absent = nil) — preserve the local row's values instead of
+            // wiping them. Full sync support for these fields is a later phase.
+            samplingDefaultsJson: samplingDefaultsJson ?? localSamplingJson,
+            customHeadersJson: customHeadersJson ?? localHeadersJson
         )
         return true
     }
@@ -1461,7 +1502,9 @@ actor ProviderConfigDB {
         secretBlob: String?, secretKind: String?, secretUpdatedAt: Double?,
         createdAt: Double, updatedAt: Double, extrasJson: String?,
         customUserAgent: String?,
-        azureMode: Bool = false
+        azureMode: Bool = false,
+        samplingDefaultsJson: String? = nil,
+        customHeadersJson: String? = nil
     ) {
         guard let db else { return }
         let sql = """
@@ -1469,8 +1512,9 @@ actor ProviderConfigDB {
             (id, label, provider_type, credential_type, custom_base_url,
              append_v1_suffix, image_endpoint_mode, image_endpoint_resolved,
              is_enabled, sort_order, secret_blob, secret_kind, secret_updated_at,
-             created_at, updated_at, extras_json, custom_user_agent, azure_mode)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             created_at, updated_at, extras_json, custom_user_agent, azure_mode,
+             sampling_defaults, custom_headers)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         var stmt: OpaquePointer?
         defer { sqlite3_finalize(stmt) }
@@ -1493,6 +1537,8 @@ actor ProviderConfigDB {
         Self.bindOpt(stmt, 16, extrasJson)
         Self.bindOpt(stmt, 17, customUserAgent)
         sqlite3_bind_int(stmt, 18, azureMode ? 1 : 0)
+        Self.bindOpt(stmt, 19, samplingDefaultsJson)
+        Self.bindOpt(stmt, 20, customHeadersJson)
         sqlite3_step(stmt)
     }
 
@@ -1804,6 +1850,24 @@ actor ProviderConfigDB {
         case let d as Double: return "d:\(d)"
         default: return "o:\(String(describing: value!))"
         }
+    }
+
+    /// [T-phase1-sampling] Canonical JSON string for an Encodable value (or nil).
+    /// Used for fingerprinting + persisting the new JSON TEXT columns
+    /// (sampling_defaults, custom_headers). Sorted keys keep the fingerprint
+    /// stable across runs.
+    private static func jsonString<T: Encodable>(_ value: T?) -> String? {
+        guard let value else { return nil }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(value) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    /// [T-phase1-sampling] Canonical string form of a header dict for the
+    /// updated_at fingerprint (sorted by key so order never churns).
+    private static func sortedHeaderString(_ headers: [String: String]) -> String {
+        headers.keys.sorted().map { "\($0)=\(headers[$0] ?? "")" }.joined(separator: "\n")
     }
 
     /// Convenience: counts across the four sync-domain tables. Helpful for

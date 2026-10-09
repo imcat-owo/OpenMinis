@@ -254,6 +254,8 @@ final class ProviderConfigStore: ObservableObject {
             }
         }
         registerKeychainSyncObserver()
+        // [T-phase1-sampling] Prime the per-model latency diagnostic cache.
+        loadModelLatencyCache()
         // [T-provider-sync-apply-interaction-defer] Timestamp foreground
         // activations so applyMergedConfigFromSync can hold its whole-store
         // publish out of the fragile post-foreground rebuild window.
@@ -2075,6 +2077,84 @@ final class ProviderConfigStore: ObservableObject {
     func removeInferenceConfig(for sessionId: String) {
         config.sessionInferenceConfigs.removeValue(forKey: sessionId)
         save()
+    }
+
+    // MARK: - Sampling Config (Phase 1: temperature / top_p / penalties)
+
+    /// Effective sampling config for a model entry: per-model
+    /// `ModelOverrides.sampling` wins per-field, the owning instance's
+    /// `samplingDefaults` fills the gaps. All fields nil = provider default.
+    func resolvedSampling(for entry: ModelEntry) -> SamplingConfig {
+        SamplingConfig.merged(
+            model: entry.overrides.sampling,
+            instance: instance(for: entry.providerInstanceId)?.samplingDefaults
+        )
+    }
+
+    // MARK: - Per-Model Latency Ping (Phase 1)
+
+    /// Last measured round-trip latency to first text token, in milliseconds,
+    /// keyed by `ModelEntry.compositeKey`. Diagnostic cache only (UserDefaults,
+    /// never synced) — a stale number is harmless, it's re-measured on tap.
+    @Published var modelLatencyMs: [String: Double] = [:]
+
+    private static let latencyDefaultsKey = "provider.modelLatencyMs.v1"
+
+    /// Load the latency cache. Called once from init.
+    func loadModelLatencyCache() {
+        guard let data = UserDefaults.standard.data(forKey: Self.latencyDefaultsKey),
+              let decoded = try? JSONDecoder().decode([String: Double].self, from: data)
+        else { return }
+        modelLatencyMs = decoded
+    }
+
+    func recordLatency(ms: Double, for entry: ModelEntry) {
+        modelLatencyMs[entry.compositeKey] = ms
+        if let data = try? JSONEncoder().encode(modelLatencyMs) {
+            UserDefaults.standard.set(data, forKey: Self.latencyDefaultsKey)
+        }
+    }
+
+    func clearLatency(for entry: ModelEntry) {
+        modelLatencyMs.removeValue(forKey: entry.compositeKey)
+        if let data = try? JSONEncoder().encode(modelLatencyMs) {
+            UserDefaults.standard.set(data, forKey: Self.latencyDefaultsKey)
+        }
+    }
+
+    /// Measure latency to first text token for a model entry. Builds a
+    /// throwaway agent provider through the same factory as the chat loop,
+    /// sends a minimal prompt, and records ms to the first text delta. The
+    /// stream is cancelled right after — cost is ~1 output token.
+    /// Returns the measured ms, or nil on failure.
+    @discardableResult
+    func pingModel(entry: ModelEntry) async -> Double? {
+        let provider = await AIChatViewModel.makeAgentProvider(for: entry)
+        let start = Date()
+        do {
+            let stream = try await provider.streamAgentMessage(
+                messages: [AgentMessage(
+                    role: .user,
+                    parts: [.text("Reply with exactly: OK")]
+                )],
+                systemPrompt: nil,
+                tools: [],
+                maxTokens: 8,
+                thinkingLevel: .off
+            )
+            for try await event in stream {
+                if case .textDelta = event {
+                    let ms = Date().timeIntervalSince(start) * 1000
+                    // @MainActor class — direct call is fine.
+                    recordLatency(ms: ms, for: entry)
+                    return ms
+                }
+                if case .done = event { break }
+            }
+        } catch {
+            AppLogger(category: "Ping").warning("ping failed model=\(entry.model.id): \(error.localizedDescription)")
+        }
+        return nil
     }
 
     // MARK: - Bulk Update (for migration)

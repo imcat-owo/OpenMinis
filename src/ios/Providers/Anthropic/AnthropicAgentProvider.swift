@@ -17,10 +17,16 @@ final class AnthropicAgentProvider: AgentProvider {
     var name: String { provider.name }
     var model: LLMModel { provider.model }
     var defaultMaxTokens: Int { 64_000 }
+    /// [T-phase1-sampling] Effective sampling config, set by makeAgentProvider.
+    var sampling: SamplingConfig?
 
     /// Max transparent retries when OPENING the stream fails with a transient
     /// network error. 2 retries = up to 3 total attempts, with 1s + 2s backoff.
     private static let maxStreamConnectRetries = 2
+
+    /// [T-phase1-sampling] Previous hardcoded temperature default. Kept as the
+    /// named fallback so "user didn't set anything" behaves exactly as before.
+    private static let defaultTemperature = 0.7
 
     /// True for transient connection drops that are safe to retry transparently:
     /// the request never reached the server intent (or the socket died before any
@@ -192,7 +198,12 @@ final class AnthropicAgentProvider: AgentProvider {
             messages: cachedMessages,
             maxTokens: maxTokens,
             system: try provider.resolveSystemPrompt(systemPrompt),
-            temperature: provider.effectiveTemperature(0.7),
+            // [T-phase1-sampling] User-set temperature wins; unset falls back to
+            // the previous hardcoded default (0.7) so existing behavior is
+            // unchanged. effectiveTemperature still drops it for Claude 4.6+
+            // (which rejects the parameter) and the thinking path still forces 1.
+            temperature: provider.effectiveTemperature(sampling?.temperature ?? Self.defaultTemperature),
+            topP: sampling?.topP,
             tools: anthropicTools,
             toolChoice: .init(type: .auto)
         )

@@ -23,26 +23,36 @@ extension AIChatViewModel {
             logger.error("No ProviderInstance found for entry \(entry.id)")
             return AnthropicAgentProvider(provider: AnthropicProvider(apiKey: "", model: entry.model))
         }
+        // [T-phase1-sampling] Resolve the effective sampling config once per
+        // provider construction (per-model overrides win per-field, instance
+        // defaults fill gaps). Every call site below — including group-fallback
+        // rebuilds — flows through here, so sampling follows the entry.
+        let sampling = store.resolvedSampling(for: entry)
+        func withSampling(_ provider: AgentProvider) -> AgentProvider {
+            var provider = provider
+            provider.sampling = sampling.isEmpty ? nil : sampling
+            return provider
+        }
         switch instance.providerType {
         case .anthropic:
-            return AnthropicAgentProvider(provider: LLMProviderFactory.makeAnthropicProvider(instance: instance, model: entry.model))
+            return withSampling(AnthropicAgentProvider(provider: LLMProviderFactory.makeAnthropicProvider(instance: instance, model: entry.model)))
         case .gemini:
-            return GeminiAgentProvider(provider: await LLMProviderFactory.makeGeminiProvider(instance: instance, model: entry.model))
+            return withSampling(GeminiAgentProvider(provider: await LLMProviderFactory.makeGeminiProvider(instance: instance, model: entry.model)))
         case .openAI:
-            return OpenAIAgentProvider(provider: LLMProviderFactory.makeOpenAIProvider(instance: instance, model: entry.model))
+            return withSampling(OpenAIAgentProvider(provider: LLMProviderFactory.makeOpenAIProvider(instance: instance, model: entry.model)))
         case .antigravity:
-            return AntigravityAgentProvider(provider: await LLMProviderFactory.makeAntigravityProvider(instance: instance, model: entry.model))
+            return withSampling(AntigravityAgentProvider(provider: await LLMProviderFactory.makeAntigravityProvider(instance: instance, model: entry.model)))
         case .openRouter:
-            return OpenAIAgentProvider(provider: LLMProviderFactory.makeOpenRouterProvider(instance: instance, model: entry.model))
+            return withSampling(OpenAIAgentProvider(provider: LLMProviderFactory.makeOpenRouterProvider(instance: instance, model: entry.model)))
         case .openAIResponses:
-            return OpenAIAgentProvider(provider: LLMProviderFactory.makeOpenAIResponsesProvider(instance: instance, model: entry.model))
+            return withSampling(OpenAIAgentProvider(provider: LLMProviderFactory.makeOpenAIResponsesProvider(instance: instance, model: entry.model)))
         case .xAI:
-            return OpenAIAgentProvider(provider: LLMProviderFactory.makeXAIProvider(instance: instance, model: entry.model))
+            return withSampling(OpenAIAgentProvider(provider: LLMProviderFactory.makeXAIProvider(instance: instance, model: entry.model)))
         case .kimiCode:
-            return OpenAIAgentProvider(provider: LLMProviderFactory.makeKimiProvider(instance: instance, model: entry.model))
+            return withSampling(OpenAIAgentProvider(provider: LLMProviderFactory.makeKimiProvider(instance: instance, model: entry.model)))
         case .unsupported:
             logger.error("\(instance.providerType) has no agent provider; returning placeholder")
-            return AnthropicAgentProvider(provider: AnthropicProvider(apiKey: "", model: entry.model))
+            return withSampling(AnthropicAgentProvider(provider: AnthropicProvider(apiKey: "", model: entry.model)))
         }
     }
 

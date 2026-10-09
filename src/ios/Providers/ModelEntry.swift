@@ -27,19 +27,26 @@ struct ModelOverrides: Codable, Hashable, Sendable {
     /// Thinking toggle revert).
     var supportsReasoning: Bool?
     var maxThinkingLevel: ThinkingLevel?
+    /// User-set generation sampling parameters (temperature / top_p / penalties).
+    /// nil = not set → falls back to the instance default, then the provider default.
+    /// Stored separately from the scalar overrides above so the whole group can be
+    /// enabled/disabled as one unit in the UI (Kelivo-style "生成参数" section).
+    var sampling: SamplingConfig?
 
     init(displayName: String? = nil,
          maxOutputTokens: Int? = nil,
          modalityOverride: ModelModality? = nil,
          contextWindow: Int? = nil,
          supportsReasoning: Bool? = nil,
-         maxThinkingLevel: ThinkingLevel? = nil) {
+         maxThinkingLevel: ThinkingLevel? = nil,
+         sampling: SamplingConfig? = nil) {
         self.displayName = displayName
         self.maxOutputTokens = maxOutputTokens
         self.modalityOverride = modalityOverride
         self.contextWindow = contextWindow
         self.supportsReasoning = supportsReasoning
         self.maxThinkingLevel = maxThinkingLevel
+        self.sampling = sampling
     }
 
     /// True when the user has not set any override.
@@ -50,10 +57,11 @@ struct ModelOverrides: Codable, Hashable, Sendable {
             && contextWindow == nil
             && supportsReasoning == nil
             && maxThinkingLevel == nil
+            && (sampling == nil || sampling!.isEmpty)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case displayName, maxOutputTokens, modalityOverride, contextWindow, supportsReasoning, maxThinkingLevel
+        case displayName, maxOutputTokens, modalityOverride, contextWindow, supportsReasoning, maxThinkingLevel, sampling
     }
 
     init(from decoder: Decoder) throws {
@@ -68,6 +76,7 @@ struct ModelOverrides: Codable, Hashable, Sendable {
         } else {
             self.maxThinkingLevel = nil
         }
+        self.sampling = try container.decodeIfPresent(SamplingConfig.self, forKey: .sampling)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -78,6 +87,9 @@ struct ModelOverrides: Codable, Hashable, Sendable {
         try container.encodeIfPresent(contextWindow, forKey: .contextWindow)
         try container.encodeIfPresent(supportsReasoning, forKey: .supportsReasoning)
         try container.encodeIfPresent(maxThinkingLevel?.rawValue, forKey: .maxThinkingLevel)
+        if let sampling, !sampling.isEmpty {
+            try container.encode(sampling, forKey: .sampling)
+        }
     }
 }
 
@@ -140,7 +152,7 @@ struct ModelEntry: Identifiable, Codable, Hashable {
             provider: baseModel.provider,
             modalityOverride: overrides.modalityOverride ?? baseModel.modalityOverride,
             contextWindow: overrides.contextWindow ?? baseModel.contextWindow,
-            maxOutputTokens: overrides.maxOutputTokens ?? baseModel.maxOutputTokens,
+            maxOutputTokens: overrides.sampling?.maxTokens ?? overrides.maxOutputTokens ?? baseModel.maxOutputTokens,
             supportsReasoning: overrides.supportsReasoning ?? baseModel.supportsReasoning,
             interleavedReasoningField: baseModel.interleavedReasoningField,
             reasoningEffortValues: baseModel.reasoningEffortValues,

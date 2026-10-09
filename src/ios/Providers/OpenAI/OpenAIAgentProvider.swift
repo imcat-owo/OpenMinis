@@ -34,9 +34,25 @@ final class OpenAIAgentProvider: AgentProvider {
     var name: String { provider.name }
     var model: LLMModel { provider.model }
     var defaultMaxTokens: Int { provider.usesChatCompletionsAPI ? 16_384 : 32_768 }
+    /// [T-phase1-sampling] Effective sampling config, set by makeAgentProvider.
+    var sampling: SamplingConfig?
 
     init(provider: OpenAIProvider) {
         self.provider = provider
+    }
+
+    /// [T-phase1-sampling] Merge the user-configured sampling params into a
+    /// chat-completions or responses body. Only fields the user actually set
+    /// ride the wire — everything unset keeps the previous behavior (this path
+    /// never sent temperature/top_p/penalties before, so unset = server default).
+    /// Reasoning-only models that reject these keys (o1, some gpt-5) are the
+    /// user's responsibility: the values are per-model opt-in, same as Kelivo.
+    private func applySampling(to body: inout [String: Any]) {
+        guard let s = sampling else { return }
+        if let t = s.temperature { body["temperature"] = t }
+        if let p = s.topP { body["top_p"] = p }
+        if let p = s.presencePenalty { body["presence_penalty"] = p }
+        if let p = s.frequencyPenalty { body["frequency_penalty"] = p }
     }
 
     func streamAgentMessageClamped(
@@ -155,6 +171,10 @@ final class OpenAIAgentProvider: AgentProvider {
         if !toolsPayload.isEmpty {
             body["tools"] = toolsPayload
         }
+        // [T-phase1-sampling] User-set sampling params (temperature/top_p/
+        // penalties). Only set fields ride the wire — unset = server default,
+        // which is exactly what this path did before (it never sent them).
+        applySampling(to: &body)
         // Inject provider-specific thinking parameters.
         // Some families (Qwen3, DeepSeek V4, etc.) think by default server-side —
         // when the user toggles thinking off, we MUST explicitly disable, otherwise
@@ -570,6 +590,11 @@ final class OpenAIAgentProvider: AgentProvider {
             body["tools"] = responsesTools
             body["tool_choice"] = "auto"
         }
+        // [T-phase1-sampling] Same rule as the chat-completions path above.
+        // Note: the Codex OAuth backend is identity-locked — sampling keys are
+        // still safe (they're standard Responses fields, not client-fingerprint
+        // fields), and they're user opt-in per model.
+        applySampling(to: &body)
         // [T-codex-fast-mode] Fast Mode toggle ("..." menu). This is the CHAT
         // agent-loop body builder — the injection in
         // OpenAIProvider.buildResponsesAPIRequest covers only the offload /
