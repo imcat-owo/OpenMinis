@@ -73,10 +73,10 @@ enum LLMError: LocalizedError {
     /// auto-retry is exhausted on the current model, group fallback kicks in.
     var fallbackReason: String {
         switch self {
-        case .rateLimited: return "Rate limited"
-        case .invalidAPIKey: return "Invalid API key"
-        case .providerError(let msg): return "Provider error: \(String(msg.prefix(60)))"
-        default: return "Error"
+        case .rateLimited: return AppLocalized("Rate limited", comment: "LLM fallback reason: rate limited")
+        case .invalidAPIKey: return AppLocalized("Invalid API key", comment: "LLM fallback reason: invalid API key")
+        case .providerError(let msg): return AppLocalized("Provider error: \(String(msg.prefix(60)))", comment: "LLM fallback reason: provider error")
+        default: return AppLocalized("Error", comment: "LLM fallback reason: generic")
         }
     }
 

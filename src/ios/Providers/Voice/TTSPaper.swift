@@ -91,8 +91,8 @@ enum TTSPaper {
             lines.append("备选服务（不在默认分组里）：\(others.map { "\($0.name)（音色 \($0.voice)）" }.joined(separator: "、"))。")
         }
         lines.append("")
-        lines.append("调用方法：send_voice(text=要说的话，tool_title=一句话摘要)。text 写口语化的中文，直接是主人会听到的话，别带 markdown 符号；别太长，太长分段调多次。")
-        lines.append("换音色你换不了：音色/分组是主人在「设置 > Voice Services」里定的。主人让你换声音时，别自己编个音色名传进去——跟她说去设置里换默认分组/服务。")
+        lines.append("调用方法：send_voice(text=要说的话)。text 写口语化的中文，直接是主人会听到的话，别带 markdown 符号；别太长，太长分段调多次。tool_title 可不传（不传自动按 text 开头生成摘要）。")
+        lines.append("换音色/换分组你能点名：send_voice 有 voice= 和 group= 两个可选参数。voice= 后面跟服务名（用上面列的服务名，别自己编），group= 后面跟分组名（按分组成员顺序自动 fallback）；两个都传以 group 为准。名字对不上会报错并列出可用选项，照着改就行。默认配置（哪个分组/服务是默认）是主人在「设置 > Voice Services」里定的，你改不了默认，但每次发语音都可以点名用别的。")
         lines.append("失败时：工具会明确报错。如实告诉主人这条语音没发出去，不要谎称已发送；可以建议她检查 TTS 服务配置。")
         return lines.joined(separator: "\n")
     }

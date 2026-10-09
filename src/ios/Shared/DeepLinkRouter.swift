@@ -201,9 +201,10 @@ enum DeepLinkRouter {
             // `create_key`, plain navigation to the env vars list.
             let key = components?.queryItems?.first(where: { $0.name == "create_key" })?.value
             if let key, !key.isEmpty {
-                let value = components?.queryItems?.first(where: { $0.name == "create_value" })?.value ?? ""
+                // [P2-13] create_value 在 router 层强制丢弃：密钥绝不许走 URL 明文，
+                // 提示词要求 AI 发空值，但代码层不信任调用方。
                 let note = components?.queryItems?.first(where: { $0.name == "create_note" })?.value ?? ""
-                coord.pendingEnvVarCreate = .init(key: key, value: value, note: note)
+                coord.pendingEnvVarCreate = .init(key: key, value: "", note: note)
             }
             coord.pendingSettingsTarget = .environments
 

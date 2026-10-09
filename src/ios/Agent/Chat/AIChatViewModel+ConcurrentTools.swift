@@ -1035,6 +1035,17 @@ extension AIChatViewModel {
 
         case "add_mcp", "list_mcp", "remove_mcp", "toggle_mcp":
             // [mcp-agg] MCP 聚合点管理工具（小管家专用）：定义与实现在 MCPManagementTools。
+            // [P1-5] 执行层二次门控：定义层已按人设过滤（小管家才看得见），这里防模型
+            // 幻觉直调工具名。localToolIds 的执行层过滤一直没实现，这道门就是它。
+            let sessionPID = sessionPersonaId ?? PersonaStore.currentID()
+            guard sessionPID == PersonaStore.stewardPersonaID else {
+                toolOutput = "Error: MCP 管理工具只对小管家人设（MCP小助手）开放，当前人设无权调用。"
+                toolSuccess = false
+                if msgIdx < messages.count, blockIdx < messages[msgIdx].blocks.count {
+                    messages[msgIdx].blocks[blockIdx].content = toolOutput
+                }
+                break
+            }
             let (mcpText, mcpOK) = await MCPManagementTools.handleDialogCall(name: tu.name, args: toolArgs)
             toolOutput = mcpText
             toolSuccess = mcpOK
