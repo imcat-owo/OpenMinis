@@ -59,13 +59,38 @@ enum AIVoiceMessageComposer {
     }
 
     private static func prefKey(_ sid: String) -> String { "ai.voiceReplies.\(sid)" }
+    private static func explicitKey(_ sid: String) -> String { "ai.voiceReplies.explicit.\(sid)" }
 
+    /// Effective value. Explicit user choice (voice-options menu) wins; otherwise
+    /// the stored value (auto-enable may set it). Default OFF.
     static func voiceRepliesEnabled(sessionId: String) -> Bool {
-        UserDefaults.standard.bool(forKey: prefKey(sessionId))
+        if let explicit = explicitVoiceRepliesChoice(sessionId: sessionId) { return explicit }
+        return UserDefaults.standard.bool(forKey: prefKey(sessionId))
     }
 
+    /// nil = the user never explicitly chose in the voice-options menu.
+    static func explicitVoiceRepliesChoice(sessionId: String) -> Bool? {
+        let ud = UserDefaults.standard
+        guard ud.object(forKey: explicitKey(sessionId)) != nil else { return nil }
+        return ud.bool(forKey: explicitKey(sessionId))
+    }
+
+    /// Called ONLY by the UI toggle (explicit user choice). Records the choice so
+    /// auto-enable never overrides it. Her spec: OFF = AI completely silent (master switch).
     static func setVoiceReplies(enabled: Bool, sessionId: String) {
-        UserDefaults.standard.set(enabled, forKey: prefKey(sessionId))
+        let ud = UserDefaults.standard
+        ud.set(enabled, forKey: prefKey(sessionId))
+        ud.set(enabled, forKey: explicitKey(sessionId))
+    }
+
+    /// Auto-enable after a voice-composed send. Fires ONLY when the user never made
+    /// an explicit choice — an explicit OFF is never overridden. Returns true if it changed.
+    @discardableResult
+    static func autoEnableVoiceRepliesIfUnset(sessionId: String) -> Bool {
+        guard explicitVoiceRepliesChoice(sessionId: sessionId) == nil else { return false }
+        guard !UserDefaults.standard.bool(forKey: prefKey(sessionId)) else { return false }
+        UserDefaults.standard.set(true, forKey: prefKey(sessionId))
+        return true
     }
 
     /// [T-voice-bubble-context-clean 09-12] True when an assistant text part is

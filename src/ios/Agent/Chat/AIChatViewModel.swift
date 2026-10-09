@@ -1973,6 +1973,7 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
             + "- file_edit: Edit existing files with exact string replacement (old_string → new_string). Preferred over file_write for modifications — always file_read first.\n"
             + "- browser_use: Web browsing (navigate, screenshot, click, type, get_text, scroll, scroll_and_collect, get_readable, get_backbone, fetch, etc.). "
             + "Starts with a desktop Safari user agent. Use screenshot to see the page.\n"
+            + "Search vs browse: need a quick answer or fact → web_search (fast, no page interaction). Need to open, click, scroll, type into, or otherwise interact with a page → browser_use.\n"
             + "- memory_write: Save a memory entry to today's daily log (YYYY-MM-DD.md). Use proactively to note user preferences, project patterns, and important context.\n"
             + "- memory_get: Recall memories with keyword search. Check memory at the start of new topics to leverage past knowledge.\n\n"
             // [voice-bubble-tool 2026-10-02] 让模型知道有正规发语音链路，别再去沙箱手搓。
@@ -1985,7 +1986,7 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
             + "  /var/minis/offloads/    — Auto-saved large outputs. Read with file_read.\n"
             + "  /var/minis/browser/     — Browser screenshots and extracts.\n"
             + "  /var/minis/shared/      — Cross-session shared storage for artifacts and documents. Organize by project or topic (e.g. shared/myproject/, shared/datasets/). Do NOT store temporary files here.\n"
-            + "  /var/minis/memory/GLOBAL.md    — Persistent global memory (read-only, user-maintained via Settings).\n"
+            + "  /var/minis/memory/GLOBAL.md    — Persistent global memory (you may update it via file_read then file_edit; also user-maintained via Settings).\n"
             + "  /var/minis/memory/YYYY-MM-DD.md — Daily memory log.\n"
             + "  /var/minis/shared/user-manual.md — The APP'S OWN user manual, mirrored at launch from the app bundle. "
             + "It documents this app's features (terminal, TTS, message actions, MCP, Shortcuts …) from the user's perspective — read it before answering questions about what the app can do. "
@@ -2484,11 +2485,10 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
             // the reply should arrive as a voice bubble too (wx semantics:
             // voice in, voice out). Auto-enable AI Voice Replies for this
             // session on the first voice-composed send; a typed send never
-            // turns it on, and she can still switch it off per session from
-            // the voice-options menu — auto-on only touches the default.
+            // turns it on. Tri-state: an explicit OFF from the voice-options
+            // menu is never overridden — auto-on only fires when she never chose.
             if voiceUsedInComposition, let sid = sessionId,
-               !AIVoiceMessageComposer.voiceRepliesEnabled(sessionId: sid) {
-                AIVoiceMessageComposer.setVoiceReplies(enabled: true, sessionId: sid)
+               AIVoiceMessageComposer.autoEnableVoiceRepliesIfUnset(sessionId: sid) {
                 logger.info("[AIVoice] voice-composed send → AI Voice Replies auto-ON for sid=\(sid.prefix(8))")
             }
         }
