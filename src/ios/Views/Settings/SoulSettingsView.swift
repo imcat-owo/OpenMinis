@@ -9,8 +9,8 @@ struct SoulSettingsView: View {
     /// verbatim on save so we don't rewrite a value the user (or another
     /// device) may have set in the file. It is never rendered anywhere.
     @State private var rawEmoji: String = SoulMetadata.default.emoji
-    /// [T-soul-custom-icon] The user's identity icon: a
-    /// `data:image/png;base64,…` URI, or empty for the default. (A legacy
+    /// [T-soul-custom-icon] The user's identity icon: a relative file
+    /// reference (`avatars/….png`), or empty for the default. (A legacy
     /// non-image value is kept on disk but renders as the default.)
     @State private var icon: String = SoulMetadata.default.icon
     @State private var showIconOptions = false

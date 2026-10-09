@@ -7,11 +7,11 @@ import SwiftUI
 // 图标。跟 App 其他地方一样不用 emoji。
 
 struct PersonaAvatarView: View {
-    let dataURI: String?
+    let iconRef: String?
     var size: CGFloat = 28
 
     private var uiImage: UIImage? {
-        guard let uri = dataURI, !uri.isEmpty else { return nil }
+        guard let uri = iconRef, !uri.isEmpty else { return nil }
         // [avatar-file] One shared decoder: path references and legacy
         // inline values both resolve here.
         return SoulIconImage.decode(uri)
@@ -46,7 +46,7 @@ struct PersonaSwitcherRow: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 10) {
-                PersonaAvatarView(dataURI: store.current.avatar, size: 30)
+                PersonaAvatarView(iconRef: store.current.avatar, size: 30)
                 Text(store.current.name)
                     .font(.headline)
                     .lineLimit(1)
