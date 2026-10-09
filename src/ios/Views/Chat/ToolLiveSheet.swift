@@ -265,15 +265,22 @@ struct FloatingToolBar: View {
         }
         // .shadow(color: .black.opacity(0.2), radius: 12, x: 0, y: -4)
         .animation(.easeInOut(duration: 0.15), value: displayedIdx)
-        .sheet(isPresented: $expanded) {
-            ToolLiveSheet(
-                toolBlocks: toolBlocks,
-                initialIdx: displayedIdx,
-                toolSnapshots: toolSnapshots,
-                browserPool: browserPool,
-                onBrowserTakeover: onBrowserTakeover,
-                onTakeoverDone: onTakeoverDone
-            )
+        // [T-nested-ui] Detail = pushed page, not a sheet — same as transcript
+        // rows. The floating bar is a live tool display; tapping it pushes
+        // the tool detail NavigationStack.
+        .fullScreenCover(isPresented: $expanded) {
+            NavigationStack {
+                ToolLiveSheet(
+                    toolBlocks: toolBlocks,
+                    initialIdx: displayedIdx,
+                    toolSnapshots: toolSnapshots,
+                    browserPool: browserPool,
+                    onBrowserTakeover: onBrowserTakeover,
+                    onTakeoverDone: onTakeoverDone
+                )
+                .navigationTitle(AppLocalized("Tool Detail"))
+                .navigationBarTitleDisplayMode(.inline)
+            }
         }
     }
 }
@@ -2413,27 +2420,6 @@ private struct ToolPreviewThumbnail: View {
 /// view it modifies, so an overlay would be painted under the glass and vanish.
 /// That was the FAB regression; keeping the content as the modifier's `content`
 /// is what avoids it here.
-private struct ToolStatusBarSurface: ViewModifier {
-    private var shape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
-    }
-
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content.glassEffect(.regular, in: shape)
-        } else {
-            content
-                .background(ChatColors.background)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color(UIColor.separator).opacity(0.3), lineWidth: 0.5)
-                )
-                .shadow(color: .black.opacity(0.08), radius: 8, x: 0, y: 4)
-        }
-    }
-}
-
 private struct ToolStatusBar: View {
     @ObservedObject var block: AssistantBlock
     let toolBlocks: [AssistantBlock]
@@ -2498,7 +2484,9 @@ private struct ToolStatusBar: View {
         .padding(.vertical, 5)
         .frame(minHeight: 38)
         .frame(maxWidth: .infinity)
-        .modifier(ToolStatusBarSurface())
+        // [T-nested-ui] Unified drawer background: the user's thinking-card
+        // image (or theme fallback), same as inline transcript rows.
+        .nestedDrawerBackground()
     }
 
     @ViewBuilder
