@@ -139,9 +139,9 @@ struct RootfsResetButton: View {
                     self.isProcessing = false
 
                     if keepBackup, let backup = backup {
-                        self.statusMessage = "✅ Reset complete. Backup at: \(backup.lastPathComponent)"
+                        self.statusMessage = "Reset complete. Backup at: \(backup.lastPathComponent)"
                     } else {
-                        self.statusMessage = "✅ Reset complete. Restart app to reinstall."
+                        self.statusMessage = "Reset complete. Restart app to reinstall."
                     }
 
                     // Clear message after 5 seconds
@@ -152,7 +152,7 @@ struct RootfsResetButton: View {
             } catch {
                 DispatchQueue.main.async {
                     self.isProcessing = false
-                    self.statusMessage = "❌ Error: \(error.localizedDescription)"
+                    self.statusMessage = "Error: \(error.localizedDescription)"
                 }
             }
         }

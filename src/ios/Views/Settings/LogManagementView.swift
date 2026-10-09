@@ -126,7 +126,9 @@ struct LogManagementView: View {
                             LogDetailView(url: file.url, name: file.name)
                         } label: {
                             HStack {
-                                Text("⚠️ \(file.name)")
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.orange)
+                                Text(file.name)
                                     .lineLimit(1)
                                 Spacer()
                                 Text(vm.format(file.size))

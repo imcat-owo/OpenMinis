@@ -1377,8 +1377,10 @@ struct ContentView: View {
             }
         }
         // ［persona］人设切换 → 会话列表按新的人设重查。
+        // [P2-7] 切换时清掉旧选中：否则 iPad 宽布局右侧会残留旧人设的会话，看起来像"没切过去"。
         .onReceive(NotificationCenter.default.publisher(for: .personaDidChange)) { _ in
             Task { @MainActor in
+                selectedSessionId = nil
                 refreshSessionList()
             }
         }
@@ -3506,6 +3508,14 @@ struct ContentView: View {
             ) {
                 showPlayHub = true
             }
+            // [P2-7] 人设入口 — 通讯录式，点开人设列表 sheet。
+            homeBottomTab(
+                icon: { Image(systemName: "person.2.fill") },
+                label: "人设",
+                size: 22, weight: .medium
+            ) {
+                showPersonaSheet = true
+            }
             if hasAlarms {
                 homeBottomTab(
                     icon: { Image(systemName: "alarm") },
@@ -4072,11 +4082,56 @@ struct ContentView: View {
     @State private var showAddProvider = false
     @State private var showSelectModels = false
 
+    @ViewBuilder
     private var emptyState: some View {
         let hasProviders = !providerStore.instances.isEmpty
         let hasGroups = !providerStore.modelGroups.isEmpty
 
-        return VStack(spacing: 32) {
+        // [P2-7] setup 已完成但当前人设没有会话（比如刚切到新人设）：别摆空列表，
+        // 给一个"开始和XXX聊天"的明确入口。
+        if hasProviders && hasGroups {
+            personaEmptyChatState
+        } else {
+            setupEmptyState(hasProviders: hasProviders, hasGroups: hasGroups)
+        }
+    }
+
+    // [P2-7] 当前人设暂无会话时的空态：明确告诉用户已切到谁，一键开聊。
+    private var personaEmptyChatState: some View {
+        let personaName = PersonaStore.shared.current.name
+        return VStack(spacing: 24) {
+            Spacer()
+            Image(systemName: "person.2.fill")
+                .font(.system(size: 48))
+                .foregroundStyle(.tint)
+            VStack(spacing: 8) {
+                Text("已切换到\(personaName)")
+                    .font(.title2.bold())
+                Text("还没有和\(personaName)的聊天，来一句吧。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            Button {
+                openSession(Self.makeNewSessionId())
+            } label: {
+                Text("开始和\(personaName)聊天")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 28)
+                    .padding(.vertical, 12)
+                    .background(MinisThemeList.accent)
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            Spacer()
+        }
+        .frame(maxHeight: .infinity)
+        .padding(.horizontal, 32)
+    }
+
+    private func setupEmptyState(hasProviders: Bool, hasGroups: Bool) -> some View {
+        VStack(spacing: 32) {
             Spacer()
             // App icon / hero
             Image(systemName: "sparkles")
@@ -6772,7 +6827,7 @@ private struct AppIconOption: Identifiable {
 private struct LanguageOption: Identifiable {
     let id: String   // language code, "" = system
     let name: String  // native name
-    let flag: String
+    let code: String  // short badge text, "" = system (globe icon shown)
 }
 
 // Native names are deliberately NOT localized: a language picker shows each
@@ -6785,16 +6840,16 @@ private struct LanguageOption: Identifiable {
 // the bundle — `Bundle.setLanguage(_:)` looks the directory up by this string
 // and silently falls back to the system language if it is absent.
 private let supportedLanguages: [LanguageOption] = [
-    LanguageOption(id: "",       name: "System", flag: ""),
-    LanguageOption(id: "en",     name: "English", flag: "🇺🇸"),
-    LanguageOption(id: "zh-Hans", name: "简体中文", flag: "🇨🇳"),
-    LanguageOption(id: "zh-Hant", name: "繁體中文", flag: "🇭🇰"),
-    LanguageOption(id: "ja",     name: "日本語", flag: "🇯🇵"),
-    LanguageOption(id: "ko",     name: "한국어", flag: "🇰🇷"),
-    LanguageOption(id: "es",     name: "Español", flag: "🇪🇸"),
-    LanguageOption(id: "fr",     name: "Français", flag: "🇫🇷"),
-    LanguageOption(id: "de",     name: "Deutsch", flag: "🇩🇪"),
-    LanguageOption(id: "ru",     name: "Русский", flag: "🇷🇺"),
+    LanguageOption(id: "",        name: "System", code: ""),
+    LanguageOption(id: "en",      name: "English", code: "EN"),
+    LanguageOption(id: "zh-Hans", name: "简体中文", code: "简"),
+    LanguageOption(id: "zh-Hant", name: "繁體中文", code: "繁"),
+    LanguageOption(id: "ja",      name: "日本語", code: "JA"),
+    LanguageOption(id: "ko",      name: "한국어", code: "KO"),
+    LanguageOption(id: "es",      name: "Español", code: "ES"),
+    LanguageOption(id: "fr",      name: "Français", code: "FR"),
+    LanguageOption(id: "de",      name: "Deutsch", code: "DE"),
+    LanguageOption(id: "ru",      name: "Русский", code: "RU"),
 ]
 
 private struct FontScaleRow: View {
@@ -7177,8 +7232,11 @@ private struct AppearanceSettingsView: View {
                         Bundle.setLanguage(lang.id.isEmpty ? nil : lang.id)
                     } label: {
                         HStack(spacing: 12) {
-                            if !lang.flag.isEmpty {
-                                Text(lang.flag).font(.title2)
+                            if !lang.code.isEmpty {
+                                Text(lang.code)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 28)
                             } else {
                                 Image(systemName: "globe")
                                     .font(.title3)

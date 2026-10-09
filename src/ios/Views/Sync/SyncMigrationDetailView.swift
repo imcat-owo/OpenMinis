@@ -371,13 +371,13 @@ struct SyncMigrationDetailView: View {
                         if let status = forceDeleteV1Status {
                             Text(status)
                                 .font(.caption)
-                                .foregroundStyle(status.hasPrefix("⚠️") ? .red : .secondary)
+                                .foregroundStyle(status.hasPrefix("Failed:") ? .red : .secondary)
                         }
                     }
                 } header: {
                     Text("Reclaim v1 space")
                 } footer: {
-                    Text("v1 records are deleted in batches of 100 as their v2 counterparts are confirmed saved, so iCloud usage doesn't double-up during migration.\n\n⚠️ Force-deleting the v1 zone permanently removes ALL legacy records from iCloud and CANNOT be undone. The cloud copy is gone for good. Only proceed if you've confirmed v2 push is at 100% AND every other device of yours has also finished migrating — peers that haven't yet may lose access to legacy data they hadn't received locally.")
+                    Text("v1 records are deleted in batches of 100 as their v2 counterparts are confirmed saved, so iCloud usage doesn't double-up during migration.\n\nForce-deleting the v1 zone permanently removes ALL legacy records from iCloud and CANNOT be undone. The cloud copy is gone for good. Only proceed if you've confirmed v2 push is at 100% AND every other device of yours has also finished migrating — peers that haven't yet may lose access to legacy data they hadn't received locally.")
                         .font(.caption)
                 }
 
@@ -452,7 +452,7 @@ struct SyncMigrationDetailView: View {
                             forceDeleteV1Status = nil
                             v1ZoneForceDeletedAtTs = Date().timeIntervalSince1970
                         } catch {
-                            forceDeleteV1Status = "⚠️ Failed: \(error.localizedDescription)"
+                            forceDeleteV1Status = "Failed: \(error.localizedDescription)"
                         }
                         forceDeleteV1InProgress = false
                         await refresh()
@@ -709,10 +709,10 @@ struct SyncMigrationDetailView: View {
         var lines: [String] = []
         lines.append(AppLocalized("This deletes every record + asset inside the zone. It cannot be undone."))
         if row.isOwn {
-            lines.append(AppLocalized("⚠️ This is THIS device's own zone."))
+            lines.append(AppLocalized("This is THIS device's own zone."))
         }
         if row.kind == .v2 {
-            lines.append(AppLocalized("⚠️ This is a V2 sync zone. Deleting it will stop iCloud sync for the affected category and other devices will lose access to its data."))
+            lines.append(AppLocalized("This is a V2 sync zone. Deleting it will stop iCloud sync for the affected category and other devices will lose access to its data."))
         }
         return lines.joined(separator: "\n\n")
     }
@@ -732,7 +732,7 @@ struct SyncMigrationDetailView: View {
         var lines: [String] = []
         lines.append(AppLocalized("Last chance. Permanently deleting this zone removes every record and asset Apple holds for it. There is no recovery — even Apple cannot restore this data."))
         if row.kind == .v2 {
-            lines.append(AppLocalized("⚠️ Live sync warning: this is a V2 zone that this device may currently be writing to. Any in-flight backup, new chat data, or attachment upload could fail or appear corrupted on this device and its peers until the next full sync rebuilds state."))
+            lines.append(AppLocalized("Live sync warning: this is a V2 zone that this device may currently be writing to. Any in-flight backup, new chat data, or attachment upload could fail or appear corrupted on this device and its peers until the next full sync rebuilds state."))
         }
         if row.isOwn {
             lines.append(AppLocalized("This device created this zone. Other devices of yours that haven't fetched everything yet will lose access to whatever they haven't pulled locally."))

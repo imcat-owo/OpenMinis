@@ -8989,186 +8989,176 @@
         }
       }
     },
-    "⚠️ %@" : {
-      "localizations" : {
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "⚠️ %@"
-          }
-        }
-      }
-    },
-    "⚠️ Live sync warning: this is a V2 zone that this device may currently be writing to. Any in-flight backup, new chat data, or attachment upload could fail or appear corrupted on this device and its peers until the next full sync rebuilds state." : {
+    "Live sync warning: this is a V2 zone that this device may currently be writing to. Any in-flight backup, new chat data, or attachment upload could fail or appear corrupted on this device and its peers until the next full sync rebuilds state." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "⚠️ Warnung zur Live-Synchronisierung: Dies ist eine V2-Zone, in die dieses Gerät derzeit möglicherweise schreibt. Laufende Backups, neue Chatdaten oder Anhang-Uploads könnten auf diesem Gerät und seinen Peers fehlschlagen oder beschädigt erscheinen, bis die nächste vollständige Synchronisierung den Zustand neu aufbaut."
+            "value" : "Warnung zur Live-Synchronisierung: Dies ist eine V2-Zone, in die dieses Gerät derzeit möglicherweise schreibt. Laufende Backups, neue Chatdaten oder Anhang-Uploads könnten auf diesem Gerät und seinen Peers fehlschlagen oder beschädigt erscheinen, bis die nächste vollständige Synchronisierung den Zustand neu aufbaut."
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "⚠️ Live sync warning: this is a V2 zone that this device may currently be writing to. Any in-flight backup, new chat data, or attachment upload could fail or appear corrupted on this device and its peers until the next full sync rebuilds state."
+            "value" : "Live sync warning: this is a V2 zone that this device may currently be writing to. Any in-flight backup, new chat data, or attachment upload could fail or appear corrupted on this device and its peers until the next full sync rebuilds state."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "⚠️ Aviso de sincronización activa: esta es una zona V2 en la que este dispositivo podría estar escribiendo ahora mismo. Cualquier copia de seguridad en curso, dato de chat nuevo o subida de adjuntos podría fallar o aparecer dañado en este dispositivo y en los demás hasta que la próxima sincronización completa reconstruya el estado."
+            "value" : "Aviso de sincronización activa: esta es una zona V2 en la que este dispositivo podría estar escribiendo ahora mismo. Cualquier copia de seguridad en curso, dato de chat nuevo o subida de adjuntos podría fallar o aparecer dañado en este dispositivo y en los demás hasta que la próxima sincronización completa reconstruya el estado."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "⚠️ Avertissement de synchronisation en direct : ceci est une zone V2 dans laquelle cet appareil est peut-être en train d’écrire. Toute sauvegarde en cours, nouvelle donnée de conversation ou envoi de pièce jointe pourrait échouer ou apparaître corrompu sur cet appareil et ses pairs jusqu’à ce que la prochaine synchronisation complète reconstruise l’état."
+            "value" : "Avertissement de synchronisation en direct : ceci est une zone V2 dans laquelle cet appareil est peut-être en train d’écrire. Toute sauvegarde en cours, nouvelle donnée de conversation ou envoi de pièce jointe pourrait échouer ou apparaître corrompu sur cet appareil et ses pairs jusqu’à ce que la prochaine synchronisation complète reconstruise l’état."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "⚠️ ライブ同期の警告：これはこのデバイスが現在書き込んでいる可能性がある V2 ゾーンです。次回の完全同期で状態が再構築されるまで、進行中のバックアップ、新しいチャットデータ、添付ファイルのアップロードが、このデバイスとそのピアで失敗したり破損して見えたりする可能性があります。"
+            "value" : "ライブ同期の警告：これはこのデバイスが現在書き込んでいる可能性がある V2 ゾーンです。次回の完全同期で状態が再構築されるまで、進行中のバックアップ、新しいチャットデータ、添付ファイルのアップロードが、このデバイスとそのピアで失敗したり破損して見えたりする可能性があります。"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "⚠️ 실시간 동기화 경고: 이 기기가 현재 쓰고 있을 수 있는 V2 영역입니다. 다음 전체 동기화로 상태가 재구성되기 전까지는 진행 중인 백업, 새 채팅 데이터 또는 첨부 파일 업로드가 이 기기와 다른 기기에서 실패하거나 손상된 것처럼 보일 수 있습니다."
+            "value" : "실시간 동기화 경고: 이 기기가 현재 쓰고 있을 수 있는 V2 영역입니다. 다음 전체 동기화로 상태가 재구성되기 전까지는 진행 중인 백업, 새 채팅 데이터 또는 첨부 파일 업로드가 이 기기와 다른 기기에서 실패하거나 손상된 것처럼 보일 수 있습니다."
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "⚠️ Предупреждение о живой синхронизации: это зона V2, в которую данное устройство может сейчас выполнять запись. Любое незавершённое резервное копирование, новые данные чата или загрузка вложений могут завершиться ошибкой или выглядеть повреждёнными на этом устройстве и связанных с ним, пока следующая полная синхронизация не восстановит состояние."
+            "value" : "Предупреждение о живой синхронизации: это зона V2, в которую данное устройство может сейчас выполнять запись. Любое незавершённое резервное копирование, новые данные чата или загрузка вложений могут завершиться ошибкой или выглядеть повреждёнными на этом устройстве и связанных с ним, пока следующая полная синхронизация не восстановит состояние."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "⚠️ 实时同步警告：这是一个本设备当前可能正在写入的 V2 区域。在下一次完整同步重建状态之前，任何进行中的备份、新的聊天数据或附件上传都可能在本设备及其对等设备上失败或显示为损坏。"
+            "value" : "实时同步警告：这是一个本设备当前可能正在写入的 V2 区域。在下一次完整同步重建状态之前，任何进行中的备份、新的聊天数据或附件上传都可能在本设备及其对等设备上失败或显示为损坏。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "⚠️ 即時同步警告：這是一個本裝置目前可能正在寫入的 V2 區域。在下一次完整同步重建狀態之前，任何進行中的備份、新的聊天資料或附件上傳，都可能在本裝置及其對等裝置上失敗或顯示為損毀。"
+            "value" : "即時同步警告：這是一個本裝置目前可能正在寫入的 V2 區域。在下一次完整同步重建狀態之前，任何進行中的備份、新的聊天資料或附件上傳，都可能在本裝置及其對等裝置上失敗或顯示為損毀。"
           }
         }
       }
     },
-    "⚠️ This is a V2 sync zone. Deleting it will stop iCloud sync for the affected category and other devices will lose access to its data." : {
+    "This is a V2 sync zone. Deleting it will stop iCloud sync for the affected category and other devices will lose access to its data." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "⚠️ Dies ist eine V2-Synchronisierungszone. Wenn du sie löschst, wird die iCloud-Synchronisierung für die betroffene Kategorie gestoppt und andere Geräte verlieren den Zugriff auf ihre Daten."
+            "value" : "Dies ist eine V2-Synchronisierungszone. Wenn du sie löschst, wird die iCloud-Synchronisierung für die betroffene Kategorie gestoppt und andere Geräte verlieren den Zugriff auf ihre Daten."
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "⚠️ This is a V2 sync zone. Deleting it will stop iCloud sync for the affected category and other devices will lose access to its data."
+            "value" : "This is a V2 sync zone. Deleting it will stop iCloud sync for the affected category and other devices will lose access to its data."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "⚠️ Esta es una zona de sincronización V2. Si la eliminas, se detendrá la sincronización con iCloud de la categoría afectada y los demás dispositivos perderán el acceso a sus datos."
+            "value" : "Esta es una zona de sincronización V2. Si la eliminas, se detendrá la sincronización con iCloud de la categoría afectada y los demás dispositivos perderán el acceso a sus datos."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "⚠️ Ceci est une zone de synchronisation V2. La supprimer arrêtera la synchronisation iCloud pour la catégorie concernée et les autres appareils perdront l’accès à ses données."
+            "value" : "Ceci est une zone de synchronisation V2. La supprimer arrêtera la synchronisation iCloud pour la catégorie concernée et les autres appareils perdront l’accès à ses données."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "⚠️ これは V2 同期ゾーンです。削除すると、該当カテゴリの iCloud 同期が停止し、他のデバイスはそのデータにアクセスできなくなります。"
+            "value" : "これは V2 同期ゾーンです。削除すると、該当カテゴリの iCloud 同期が停止し、他のデバイスはそのデータにアクセスできなくなります。"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "⚠️ 이것은 V2 동기화 영역입니다. 삭제하면 해당 카테고리의 iCloud 동기화가 중지되고 다른 기기에서 데이터에 접근할 수 없게 됩니다."
+            "value" : "이것은 V2 동기화 영역입니다. 삭제하면 해당 카테고리의 iCloud 동기화가 중지되고 다른 기기에서 데이터에 접근할 수 없게 됩니다."
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "⚠️ Это зона синхронизации V2. Её удаление остановит синхронизацию iCloud для соответствующей категории, и другие устройства потеряют доступ к её данным."
+            "value" : "Это зона синхронизации V2. Её удаление остановит синхронизацию iCloud для соответствующей категории, и другие устройства потеряют доступ к её данным."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "⚠️ 这是一个 V2 同步区域。删除它将停止相应类别的 iCloud 同步，其他设备将无法访问其数据。"
+            "value" : "这是一个 V2 同步区域。删除它将停止相应类别的 iCloud 同步，其他设备将无法访问其数据。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "⚠️ 這是一個 V2 同步區域。刪除它將停止相應類別的 iCloud 同步，其他裝置將無法存取其資料。"
+            "value" : "這是一個 V2 同步區域。刪除它將停止相應類別的 iCloud 同步，其他裝置將無法存取其資料。"
           }
         }
       }
     },
-    "⚠️ This is THIS device's own zone." : {
+    "This is THIS device's own zone." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "⚠️ Dies ist die eigene Zone DIESES Geräts."
+            "value" : "Dies ist die eigene Zone DIESES Geräts."
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "⚠️ This is THIS device's own zone."
+            "value" : "This is THIS device's own zone."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "⚠️ Esta es la zona propia de ESTE dispositivo."
+            "value" : "Esta es la zona propia de ESTE dispositivo."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "⚠️ Ceci est la zone propre à CET appareil."
+            "value" : "Ceci est la zone propre à CET appareil."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "⚠️ これは「このデバイス」自身のゾーンです。"
+            "value" : "これは「このデバイス」自身のゾーンです。"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "⚠️ 이것은 바로 이 기기 자체의 영역입니다."
+            "value" : "이것은 바로 이 기기 자체의 영역입니다."
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "⚠️ Это собственная зона ЭТОГО устройства."
+            "value" : "Это собственная зона ЭТОГО устройства."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "⚠️ 这是「本设备」自己的区域。"
+            "value" : "这是「本设备」自己的区域。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "⚠️ 這是「本裝置」自己的區域。"
+            "value" : "這是「本裝置」自己的區域。"
           }
         }
       }
@@ -97552,107 +97542,107 @@
         }
       }
     },
-    "v1 records are deleted in batches of 100 as their v2 counterparts are confirmed saved, so iCloud usage doesn't double-up during migration.\n\n⚠️ Force-deleting the v1 zone immediately removes ALL legacy records from this device's iCloud zone. Only do this after confirming the v2 push has completed (Records pushed = 100%). If a peer device hasn't finished migrating yet, its v1 fetch path will see an empty zone and may treat its local sessions as needing re-upload — disruptive but recoverable." : {
+    "v1 records are deleted in batches of 100 as their v2 counterparts are confirmed saved, so iCloud usage doesn't double-up during migration.\n\nForce-deleting the v1 zone immediately removes ALL legacy records from this device's iCloud zone. Only do this after confirming the v2 push has completed (Records pushed = 100%). If a peer device hasn't finished migrating yet, its v1 fetch path will see an empty zone and may treat its local sessions as needing re-upload — disruptive but recoverable." : {
       "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "V1-Datensätze werden in Stapeln von 100 gelöscht, sobald ihre V2-Gegenstücke als gespeichert bestätigt sind, sodass sich der iCloud-Speicherverbrauch während der Migration nicht verdoppelt.\n\n⚠️ Das erzwungene Löschen der V1-Zone entfernt sofort ALLE Legacy-Datensätze aus der iCloud-Zone dieses Geräts. Tu dies nur, wenn der V2-Push abgeschlossen ist (Datensätze gepusht = 100 %). Wenn ein anderes Gerät die Migration noch nicht beendet hat, sieht sein V1-Abrufpfad eine leere Zone und behandelt seine lokalen Sitzungen möglicherweise als zu erneut hochladen — störend, aber wiederherstellbar."
+            "value" : "V1-Datensätze werden in Stapeln von 100 gelöscht, sobald ihre V2-Gegenstücke als gespeichert bestätigt sind, sodass sich der iCloud-Speicherverbrauch während der Migration nicht verdoppelt.\n\nDas erzwungene Löschen der V1-Zone entfernt sofort ALLE Legacy-Datensätze aus der iCloud-Zone dieses Geräts. Tu dies nur, wenn der V2-Push abgeschlossen ist (Datensätze gepusht = 100 %). Wenn ein anderes Gerät die Migration noch nicht beendet hat, sieht sein V1-Abrufpfad eine leere Zone und behandelt seine lokalen Sitzungen möglicherweise als zu erneut hochladen — störend, aber wiederherstellbar."
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "v1 records are deleted in batches of 100 as their v2 counterparts are confirmed saved, so iCloud usage doesn't double-up during migration.\n\n⚠️ Force-deleting the v1 zone immediately removes ALL legacy records from this device's iCloud zone. Only do this after confirming the v2 push has completed (Records pushed = 100%). If a peer device hasn't finished migrating yet, its v1 fetch path will see an empty zone and may treat its local sessions as needing re-upload — disruptive but recoverable."
+            "value" : "v1 records are deleted in batches of 100 as their v2 counterparts are confirmed saved, so iCloud usage doesn't double-up during migration.\n\nForce-deleting the v1 zone immediately removes ALL legacy records from this device's iCloud zone. Only do this after confirming the v2 push has completed (Records pushed = 100%). If a peer device hasn't finished migrating yet, its v1 fetch path will see an empty zone and may treat its local sessions as needing re-upload — disruptive but recoverable."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Los registros v1 se eliminan en lotes de 100 a medida que se confirma que sus equivalentes v2 se han guardado, para que el uso de iCloud no se duplique durante la migración.\n\n⚠️ Forzar la eliminación de la zona v1 quita de inmediato TODOS los registros heredados de la zona de iCloud de este dispositivo. Hazlo solo después de confirmar que el envío de v2 ha terminado (Registros enviados = 100%). Si otro de tus dispositivos aún no ha terminado de migrar, su ruta de descarga v1 verá una zona vacía y puede considerar que sus sesiones locales deben volver a subirse: es molesto, pero recuperable."
+            "value" : "Los registros v1 se eliminan en lotes de 100 a medida que se confirma que sus equivalentes v2 se han guardado, para que el uso de iCloud no se duplique durante la migración.\n\nForzar la eliminación de la zona v1 quita de inmediato TODOS los registros heredados de la zona de iCloud de este dispositivo. Hazlo solo después de confirmar que el envío de v2 ha terminado (Registros enviados = 100%). Si otro de tus dispositivos aún no ha terminado de migrar, su ruta de descarga v1 verá una zona vacía y puede considerar que sus sesiones locales deben volver a subirse: es molesto, pero recuperable."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Les enregistrements V1 sont supprimés par lots de 100 dès que leurs équivalents V2 sont confirmés comme enregistrés, afin que l'utilisation d'iCloud ne double pas pendant la migration.\n\n⚠️ La suppression forcée de la zone V1 retire immédiatement TOUS les enregistrements hérités de la zone iCloud de cet appareil. Ne le faites qu'après avoir confirmé que la migration V2 est terminée (Enregistrements envoyés = 100 %). Si un autre appareil n'a pas terminé sa migration, sa prochaine récupération V1 verra une zone vide et pourrait traiter ses sessions locales comme à téléverser de nouveau — perturbant mais réversible."
+            "value" : "Les enregistrements V1 sont supprimés par lots de 100 dès que leurs équivalents V2 sont confirmés comme enregistrés, afin que l'utilisation d'iCloud ne double pas pendant la migration.\n\nLa suppression forcée de la zone V1 retire immédiatement TOUS les enregistrements hérités de la zone iCloud de cet appareil. Ne le faites qu'après avoir confirmé que la migration V2 est terminée (Enregistrements envoyés = 100 %). Si un autre appareil n'a pas terminé sa migration, sa prochaine récupération V1 verra une zone vide et pourrait traiter ses sessions locales comme à téléverser de nouveau — perturbant mais réversible."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "V1 レコードは V2 への保存が確認されるたびに 100 件単位で削除されるため、マイグレーション中に iCloud 使用量が二重にならないようになっています。\n\n⚠️ V1 ゾーンを強制削除すると、このデバイスの iCloud ゾーンから旧レコードがすべて即座に削除されます。V2 プッシュが完了している(送信済みレコード = 100%)ことを確認した上でのみ実行してください。マイグレーション未完了のデバイスでは次回の V1 フェッチが空となり、ローカルセッションを再アップロード対象として扱う可能性があります — 影響は大きいですが復旧可能です。"
+            "value" : "V1 レコードは V2 への保存が確認されるたびに 100 件単位で削除されるため、マイグレーション中に iCloud 使用量が二重にならないようになっています。\n\nV1 ゾーンを強制削除すると、このデバイスの iCloud ゾーンから旧レコードがすべて即座に削除されます。V2 プッシュが完了している(送信済みレコード = 100%)ことを確認した上でのみ実行してください。マイグレーション未完了のデバイスでは次回の V1 フェッチが空となり、ローカルセッションを再アップロード対象として扱う可能性があります — 影響は大きいですが復旧可能です。"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "V1 레코드는 해당 V2 레코드가 저장된 것이 확인될 때마다 100개 단위로 삭제되므로, 마이그레이션 중에 iCloud 사용량이 두 배가 되지 않습니다.\n\n⚠️ V1 영역을 강제 삭제하면 이 기기의 iCloud 영역에서 모든 레거시 레코드가 즉시 제거됩니다. V2 푸시가 완료된 경우(푸시된 레코드 = 100%)에만 진행하세요. 아직 마이그레이션을 완료하지 않은 다른 기기는 다음 V1 가져오기에서 빈 영역을 받아 로컬 세션을 재업로드 대상으로 처리할 수 있습니다 — 혼란스럽지만 복구 가능합니다."
+            "value" : "V1 레코드는 해당 V2 레코드가 저장된 것이 확인될 때마다 100개 단위로 삭제되므로, 마이그레이션 중에 iCloud 사용량이 두 배가 되지 않습니다.\n\nV1 영역을 강제 삭제하면 이 기기의 iCloud 영역에서 모든 레거시 레코드가 즉시 제거됩니다. V2 푸시가 완료된 경우(푸시된 레코드 = 100%)에만 진행하세요. 아직 마이그레이션을 완료하지 않은 다른 기기는 다음 V1 가져오기에서 빈 영역을 받아 로컬 세션을 재업로드 대상으로 처리할 수 있습니다 — 혼란스럽지만 복구 가능합니다."
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Записи v1 удаляются партиями по 100 по мере подтверждения сохранения их аналогов v2, поэтому использование iCloud не удваивается во время миграции.\n\n⚠️ Принудительное удаление зоны v1 немедленно удаляет ВСЕ устаревшие записи из зоны iCloud этого устройства. Делайте это только после подтверждения завершения выгрузки v2 (Записей выгружено = 100%). Если другое устройство ещё не завершило миграцию, его путь загрузки v1 увидит пустую зону и может счесть, что локальные сессии нужно повторно выгрузить — это создаёт неудобства, но обратимо."
+            "value" : "Записи v1 удаляются партиями по 100 по мере подтверждения сохранения их аналогов v2, поэтому использование iCloud не удваивается во время миграции.\n\nПринудительное удаление зоны v1 немедленно удаляет ВСЕ устаревшие записи из зоны iCloud этого устройства. Делайте это только после подтверждения завершения выгрузки v2 (Записей выгружено = 100%). Если другое устройство ещё не завершило миграцию, его путь загрузки v1 увидит пустую зону и может счесть, что локальные сессии нужно повторно выгрузить — это создаёт неудобства, но обратимо."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "V1 记录会在对应的 V2 记录确认保存后,每 100 条一批删除,从而避免迁移过程中 iCloud 容量翻倍。\n\n⚠️ 强制删除 V1 区将立刻清除本设备 iCloud 区里的全部旧记录。只在 V2 推送已达 100%(已推送记录 = 100%) 且理解后果的情况下执行。其他尚未完成迁移的设备下次拉取 V1 时会看到空区,可能会把本地会话当作需要重新上传 — 体验受影响,但可以恢复。"
+            "value" : "V1 记录会在对应的 V2 记录确认保存后,每 100 条一批删除,从而避免迁移过程中 iCloud 容量翻倍。\n\n强制删除 V1 区将立刻清除本设备 iCloud 区里的全部旧记录。只在 V2 推送已达 100%(已推送记录 = 100%) 且理解后果的情况下执行。其他尚未完成迁移的设备下次拉取 V1 时会看到空区,可能会把本地会话当作需要重新上传 — 体验受影响,但可以恢复。"
           }
         }
       }
     },
-    "v1 records are deleted in batches of 100 as their v2 counterparts are confirmed saved, so iCloud usage doesn't double-up during migration.\n\n⚠️ Force-deleting the v1 zone permanently removes ALL legacy records from iCloud and CANNOT be undone. The cloud copy is gone for good. Only proceed if you've confirmed v2 push is at 100% AND every other device of yours has also finished migrating — peers that haven't yet may lose access to legacy data they hadn't received locally." : {
+    "v1 records are deleted in batches of 100 as their v2 counterparts are confirmed saved, so iCloud usage doesn't double-up during migration.\n\nForce-deleting the v1 zone permanently removes ALL legacy records from iCloud and CANNOT be undone. The cloud copy is gone for good. Only proceed if you've confirmed v2 push is at 100% AND every other device of yours has also finished migrating — peers that haven't yet may lose access to legacy data they hadn't received locally." : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "V1-Datensätze werden in Stapeln von 100 gelöscht, sobald ihre V2-Gegenstücke als gespeichert bestätigt sind, sodass der iCloud-Speicher während der Migration nicht doppelt belegt wird.\n\n⚠️ Das erzwungene Löschen der V1-Zone entfernt ALLE Legacy-Datensätze dauerhaft aus iCloud und kann NICHT rückgängig gemacht werden. Die Cloud-Kopie ist endgültig weg. Fahre nur fort, wenn der V2-Push zu 100 % abgeschlossen ist UND jedes deiner anderen Geräte ebenfalls die Migration beendet hat — andernfalls können andere Geräte den Zugriff auf Legacy-Daten verlieren, die sie noch nicht lokal abgerufen haben."
+            "value" : "V1-Datensätze werden in Stapeln von 100 gelöscht, sobald ihre V2-Gegenstücke als gespeichert bestätigt sind, sodass der iCloud-Speicher während der Migration nicht doppelt belegt wird.\n\nDas erzwungene Löschen der V1-Zone entfernt ALLE Legacy-Datensätze dauerhaft aus iCloud und kann NICHT rückgängig gemacht werden. Die Cloud-Kopie ist endgültig weg. Fahre nur fort, wenn der V2-Push zu 100 % abgeschlossen ist UND jedes deiner anderen Geräte ebenfalls die Migration beendet hat — andernfalls können andere Geräte den Zugriff auf Legacy-Daten verlieren, die sie noch nicht lokal abgerufen haben."
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "v1 records are deleted in batches of 100 as their v2 counterparts are confirmed saved, so iCloud usage doesn't double-up during migration.\n\n⚠️ Force-deleting the v1 zone permanently removes ALL legacy records from iCloud and CANNOT be undone. The cloud copy is gone for good. Only proceed if you've confirmed v2 push is at 100% AND every other device of yours has also finished migrating — peers that haven't yet may lose access to legacy data they hadn't received locally."
+            "value" : "v1 records are deleted in batches of 100 as their v2 counterparts are confirmed saved, so iCloud usage doesn't double-up during migration.\n\nForce-deleting the v1 zone permanently removes ALL legacy records from iCloud and CANNOT be undone. The cloud copy is gone for good. Only proceed if you've confirmed v2 push is at 100% AND every other device of yours has also finished migrating — peers that haven't yet may lose access to legacy data they hadn't received locally."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Los registros v1 se eliminan en lotes de 100 a medida que se confirma que sus equivalentes v2 se han guardado, para que el uso de iCloud no se duplique durante la migración.\n\n⚠️ Forzar la eliminación de la zona v1 quita de forma permanente TODOS los registros heredados de iCloud y NO se puede deshacer. La copia en la nube se pierde para siempre. Continúa solo si has confirmado que el envío de v2 está al 100% Y que todos tus demás dispositivos también han terminado de migrar: los que no lo hayan hecho pueden perder el acceso a datos heredados que aún no habían recibido localmente."
+            "value" : "Los registros v1 se eliminan en lotes de 100 a medida que se confirma que sus equivalentes v2 se han guardado, para que el uso de iCloud no se duplique durante la migración.\n\nForzar la eliminación de la zona v1 quita de forma permanente TODOS los registros heredados de iCloud y NO se puede deshacer. La copia en la nube se pierde para siempre. Continúa solo si has confirmado que el envío de v2 está al 100% Y que todos tus demás dispositivos también han terminado de migrar: los que no lo hayan hecho pueden perder el acceso a datos heredados que aún no habían recibido localmente."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Les enregistrements V1 sont supprimés par lots de 100 dès que leurs équivalents V2 sont confirmés enregistrés, afin que l'utilisation d'iCloud ne double pas pendant la migration.\n\n⚠️ La suppression forcée de la zone V1 retire DÉFINITIVEMENT tous les enregistrements hérités d'iCloud et NE PEUT PAS être annulée. La copie sur le cloud est perdue à jamais. Ne continuez que si la migration V2 est à 100 % ET que tous vos autres appareils ont également terminé la migration — sinon les autres appareils pourraient perdre l'accès à des données héritées qu'ils n'avaient pas téléchargées localement."
+            "value" : "Les enregistrements V1 sont supprimés par lots de 100 dès que leurs équivalents V2 sont confirmés enregistrés, afin que l'utilisation d'iCloud ne double pas pendant la migration.\n\nLa suppression forcée de la zone V1 retire DÉFINITIVEMENT tous les enregistrements hérités d'iCloud et NE PEUT PAS être annulée. La copie sur le cloud est perdue à jamais. Ne continuez que si la migration V2 est à 100 % ET que tous vos autres appareils ont également terminé la migration — sinon les autres appareils pourraient perdre l'accès à des données héritées qu'ils n'avaient pas téléchargées localement."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "V1 レコードは V2 への保存が確認されるたびに 100 件単位で削除されるため、マイグレーション中に iCloud 使用量が二重にならないようになっています。\n\n⚠️ V1 ゾーンを強制削除すると、iCloud から旧レコードがすべて永久に削除され、元に戻すことはできません。クラウド側のコピーは完全に失われます。V2 プッシュが 100% 完了し、かつ他のすべての自分のデバイスもマイグレーションを完了している場合にのみ実行してください — 未完了のデバイスは、ローカルに取得していない旧データへのアクセスを失う可能性があります。"
+            "value" : "V1 レコードは V2 への保存が確認されるたびに 100 件単位で削除されるため、マイグレーション中に iCloud 使用量が二重にならないようになっています。\n\nV1 ゾーンを強制削除すると、iCloud から旧レコードがすべて永久に削除され、元に戻すことはできません。クラウド側のコピーは完全に失われます。V2 プッシュが 100% 完了し、かつ他のすべての自分のデバイスもマイグレーションを完了している場合にのみ実行してください — 未完了のデバイスは、ローカルに取得していない旧データへのアクセスを失う可能性があります。"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "V1 레코드는 해당 V2 레코드가 저장된 것이 확인될 때마다 100개 단위로 삭제되므로, 마이그레이션 중에 iCloud 사용량이 두 배가 되지 않습니다.\n\n⚠️ V1 영역을 강제 삭제하면 iCloud의 모든 레거시 레코드가 영구적으로 제거되며 되돌릴 수 없습니다. 클라우드 사본은 영구히 사라집니다. V2 푸시가 100%이고, 또 다른 모든 자신의 기기도 마이그레이션을 완료한 경우에만 진행하세요 — 그렇지 않으면 다른 기기는 아직 로컬로 가져오지 못한 레거시 데이터에 더 이상 접근할 수 없게 됩니다."
+            "value" : "V1 레코드는 해당 V2 레코드가 저장된 것이 확인될 때마다 100개 단위로 삭제되므로, 마이그레이션 중에 iCloud 사용량이 두 배가 되지 않습니다.\n\nV1 영역을 강제 삭제하면 iCloud의 모든 레거시 레코드가 영구적으로 제거되며 되돌릴 수 없습니다. 클라우드 사본은 영구히 사라집니다. V2 푸시가 100%이고, 또 다른 모든 자신의 기기도 마이그레이션을 완료한 경우에만 진행하세요 — 그렇지 않으면 다른 기기는 아직 로컬로 가져오지 못한 레거시 데이터에 더 이상 접근할 수 없게 됩니다."
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Записи v1 удаляются партиями по 100 по мере подтверждения сохранения их аналогов v2, поэтому использование iCloud не удваивается во время миграции.\n\n⚠️ Принудительное удаление зоны v1 безвозвратно удаляет ВСЕ устаревшие записи из iCloud, и это НЕЛЬЗЯ отменить. Облачная копия будет потеряна навсегда. Продолжайте, только если вы убедились, что выгрузка v2 достигла 100% И все остальные ваши устройства также завершили миграцию — устройства, которые ещё не завершили, могут потерять доступ к устаревшим данным, которые они не успели получить локально."
+            "value" : "Записи v1 удаляются партиями по 100 по мере подтверждения сохранения их аналогов v2, поэтому использование iCloud не удваивается во время миграции.\n\nПринудительное удаление зоны v1 безвозвратно удаляет ВСЕ устаревшие записи из iCloud, и это НЕЛЬЗЯ отменить. Облачная копия будет потеряна навсегда. Продолжайте, только если вы убедились, что выгрузка v2 достигла 100% И все остальные ваши устройства также завершили миграцию — устройства, которые ещё не завершили, могут потерять доступ к устаревшим данным, которые они не успели получить локально."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "V1 记录会在对应的 V2 记录确认保存后,每 100 条一批删除,从而避免迁移过程中 iCloud 容量翻倍。\n\n⚠️ 强制删除 V1 区将永久删除 iCloud 上的全部旧记录,且无法撤销。云端副本将彻底丢失。仅在 V2 推送已达 100%,且你其它所有设备都已完成迁移的情况下继续 — 否则其他尚未完成迁移的设备将无法再获取它们本地尚未拉取的旧数据。"
+            "value" : "V1 记录会在对应的 V2 记录确认保存后,每 100 条一批删除,从而避免迁移过程中 iCloud 容量翻倍。\n\n强制删除 V1 区将永久删除 iCloud 上的全部旧记录,且无法撤销。云端副本将彻底丢失。仅在 V2 推送已达 100%,且你其它所有设备都已完成迁移的情况下继续 — 否则其他尚未完成迁移的设备将无法再获取它们本地尚未拉取的旧数据。"
           }
         }
       }

@@ -141,9 +141,12 @@ struct RootfsManagementView: View {
 
             if let message = viewModel.resultMessage {
                 Section {
-                    Text(message)
-                        .font(.callout)
-                        .foregroundColor(viewModel.lastOperationSuccess ? .green : .red)
+                    HStack(spacing: 8) {
+                        Image(systemName: viewModel.lastOperationSuccess ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        Text(message)
+                            .font(.callout)
+                    }
+                    .foregroundColor(viewModel.lastOperationSuccess ? .green : .red)
                 }
             }
 
@@ -254,14 +257,14 @@ class RootfsManagementViewModel: ObservableObject {
                 DispatchQueue.main.async {
                     self.isProcessing = false
                     self.lastOperationSuccess = true
-                    self.resultMessage = "✅ Rootfs installed successfully"
+                    self.resultMessage = "Rootfs installed successfully"
                     self.refresh()
                 }
             } catch {
                 DispatchQueue.main.async {
                     self.isProcessing = false
                     self.lastOperationSuccess = false
-                    self.resultMessage = "❌ Installation failed: \(error.localizedDescription)"
+                    self.resultMessage = "Installation failed: \(error.localizedDescription)"
                 }
             }
         }
@@ -283,9 +286,9 @@ class RootfsManagementViewModel: ObservableObject {
                     self.hasBackup = backup != nil
 
                     if keepUserData {
-                        self.resultMessage = "✅ Rootfs reset with backup created"
+                        self.resultMessage = "Rootfs reset with backup created"
                     } else {
-                        self.resultMessage = "✅ Rootfs reset complete. Restart app to reinstall."
+                        self.resultMessage = "Rootfs reset complete. Restart app to reinstall."
                     }
 
                     self.refresh()
@@ -294,7 +297,7 @@ class RootfsManagementViewModel: ObservableObject {
                 DispatchQueue.main.async {
                     self.isProcessing = false
                     self.lastOperationSuccess = false
-                    self.resultMessage = "❌ Reset failed: \(error.localizedDescription)"
+                    self.resultMessage = "Reset failed: \(error.localizedDescription)"
                 }
             }
         }
@@ -302,7 +305,7 @@ class RootfsManagementViewModel: ObservableObject {
 
     func restoreBackup() {
         guard let backupURL = backupURL else {
-            resultMessage = "❌ No backup available"
+            resultMessage = "No backup available"
             return
         }
 
@@ -317,14 +320,14 @@ class RootfsManagementViewModel: ObservableObject {
                 DispatchQueue.main.async {
                     self.isProcessing = false
                     self.lastOperationSuccess = true
-                    self.resultMessage = "✅ User data restored successfully"
+                    self.resultMessage = "User data restored successfully"
                     self.refresh()
                 }
             } catch {
                 DispatchQueue.main.async {
                     self.isProcessing = false
                     self.lastOperationSuccess = false
-                    self.resultMessage = "❌ Restore failed: \(error.localizedDescription)"
+                    self.resultMessage = "Restore failed: \(error.localizedDescription)"
                 }
             }
         }
