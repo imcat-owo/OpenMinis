@@ -376,7 +376,7 @@ struct TTSServiceOptions: Identifiable, Codable, Equatable {
         let label = displayName.isEmpty ? kind.displayName : displayName
         let v = voice.lowercased()
         let cjk = v.range(of: "\\p{Han}", options: .regularExpression) != nil
-        let chineseKinds: [TTSServiceKind] = [.minimax, .qwen, .qwenaudio, .doubao, .xunfei]
+        let chineseKinds: [TTSServiceKind] = [.minimax, .qwen, .qwenaudio, .doubao, .xunfei, .mimo, .stepfun]
         if v.hasPrefix("zh") || cjk || chineseKinds.contains(kind) {
             return "你好，这是\(label)的试听。"
         }
