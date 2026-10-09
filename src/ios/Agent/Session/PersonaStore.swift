@@ -17,7 +17,7 @@ import SwiftUI
 struct Persona: Codable, Identifiable, Hashable {
     var id: String
     var name: String
-    var avatar: String?          // dataURI，nil = 默认图标
+    var avatar: String?          // 文件引用 avatars/….png（老版本 dataURI），nil = 默认图标
     var modelId: String?         // nil = 用全局默认模型
     var skillIds: [String]?      // nil = 全部可用
     var mcpServerIds: [String]?  // nil = 全部可用
@@ -230,6 +230,19 @@ final class PersonaStore: ObservableObject {
             return
         }
         personas = list.sorted { $0.sortOrder < $1.sortOrder }
+        // [avatar-file] One-time migration: legacy inline-base64 persona
+        // avatars become file references. Persisted so this runs once.
+        var migrated = false
+        for i in personas.indices {
+            if let a = personas[i].avatar, SoulIconImage.isDataURI(a) {
+                let name = SoulIconImage.storedName(prefix: "persona", id: personas[i].id)
+                if let path = SoulIconImage.migrateDataURIToFile(a, named: name) {
+                    personas[i].avatar = path
+                    migrated = true
+                }
+            }
+        }
+        if migrated { save(personas) }
         // 当前 id 指向的人设没了 → 回落到 default
         if !personas.contains(where: { $0.id == currentPersonaID }) {
             currentPersonaID = Self.defaultPersonaID

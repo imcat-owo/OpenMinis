@@ -623,14 +623,16 @@ private let logger = AppLogger(category: "ConfigOffload")
             //   3. A failed fetch becomes a clean tool error instead of a
             //      half-applied batch.
             //
-            // What lands in `newValue` is the finished data URI; what lands in
-            // the sheet and the audit log is the literal "<image>", so neither
-            // ever carries base64.
+            // What lands in `newValue` is the finished file reference
+            // ("avatars/<name>.png"); what lands in the sheet and the audit
+            // log is the literal "<image>", so neither ever carries base64.
             if field.path == "soul.icon", case .string(let rawIcon) = newValue,
                SoulIconSource.looksLikeImageSource(rawIcon) {
                 do {
-                    let dataURI = try await SoulIconSource.resolveToDataURI(rawIcon)
-                    newValue = .string(dataURI)
+                    let name = SoulIconImage.storedName(prefix: "soul",
+                                                       id: PersonaStore.currentID())
+                    let storedPath = try await SoulIconSource.resolveToStoredPath(rawIcon, named: name)
+                    newValue = .string(storedPath)
                     displayNew = "<image>"
                 } catch {
                     let reason = (error as? LocalizedError)?.errorDescription
@@ -659,14 +661,14 @@ private let logger = AppLogger(category: "ConfigOffload")
             }
 
             // [T-soul-icon-config-images] Keep the encoded icon out of the
-            // audit log and the confirm sheet. `displayString` truncates at 80
-            // chars, which would still splash 75 characters of base64 across
-            // both surfaces — and the audit column stores the value in full.
-            if case .string(let sv) = auditNewValue, SoulIconImage.isDataURI(sv) {
+            // audit log and the confirm sheet. A legacy inline value would
+            // splash base64 across both surfaces — and the audit column
+            // stores the value in full.
+            if case .string(let sv) = auditNewValue, SoulIconImage.isImageReference(sv) {
                 auditNewValue = .string("<image>")
                 displayNew = "<image>"
             }
-            if case .string(let ov) = oldValue, SoulIconImage.isDataURI(ov) {
+            if case .string(let ov) = oldValue, SoulIconImage.isImageReference(ov) {
                 displayOld = "<image>"
             }
 

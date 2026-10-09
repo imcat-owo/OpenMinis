@@ -185,10 +185,12 @@ struct PersonaSettingsView: View {
             await MainActor.run { iconError = "这张图读不出来，换一张试试。" }
             return
         }
-        switch SoulIconImage.encode(image) {
-        case .success(let uri):
+        // [avatar-file] Stored as a file reference, never inline base64.
+        let name = SoulIconImage.storedName(prefix: "persona", id: personaID)
+        switch SoulIconImage.store(image, named: name) {
+        case .success(let path):
             await MainActor.run {
-                avatarURI = uri
+                avatarURI = path
                 saveAvatar()
             }
         case .failure:

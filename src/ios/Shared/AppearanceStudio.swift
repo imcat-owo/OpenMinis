@@ -135,7 +135,7 @@ final class AppearanceStudio: ObservableObject {
         } else {
             customColors = [:]
         }
-        userAvatar = UserDefaults.standard.string(forKey: Keys.userAvatar) ?? ""
+        loadUserAvatar()   // includes migrate-on-read for legacy inline values
         // [PIC-6] Custom icons used to live in UserDefaults as one JSON blob
         // of base64 data URIs (23 slots × ~1MB of PNG = a multi-MB plist
         // the system rewrites on every sync). They now live as PNG files
@@ -410,10 +410,23 @@ final class AppearanceStudio: ObservableObject {
 
     // MARK: Paired avatars
 
+    /// Load the user avatar, migrating a legacy inline data URI to a file
+    /// once. After migration UserDefaults holds only the relative path.
+    private func loadUserAvatar() {
+        let raw = UserDefaults.standard.string(forKey: Keys.userAvatar) ?? ""
+        if SoulIconImage.isDataURI(raw),
+           let path = SoulIconImage.migrateDataURIToFile(raw, named: "user") {
+            UserDefaults.standard.set(path, forKey: Keys.userAvatar)
+            userAvatar = path
+        } else {
+            userAvatar = raw
+        }
+    }
+
     func setUserAvatar(_ image: UIImage) {
-        if case .success(let value) = SoulIconImage.encode(image) {
-            userAvatar = value
-            UserDefaults.standard.set(value, forKey: Keys.userAvatar)
+        if case .success(let path) = SoulIconImage.store(image, named: "user") {
+            userAvatar = path
+            UserDefaults.standard.set(path, forKey: Keys.userAvatar)
         }
     }
 
@@ -423,9 +436,10 @@ final class AppearanceStudio: ObservableObject {
     }
 
     func setAssistantAvatar(_ image: UIImage) throws {
-        guard case .success(let value) = SoulIconImage.encode(image) else { return }
+        let name = SoulIconImage.storedName(prefix: "soul", id: PersonaStore.currentID())
+        guard case .success(let path) = SoulIconImage.store(image, named: name) else { return }
         var soul = SoulStore.load() ?? SoulFile(metadata: .default, body: "")
-        soul.metadata.icon = value
+        soul.metadata.icon = path
         try SoulStore.save(soul)
     }
 
@@ -759,7 +773,7 @@ struct PersonAvatarView: View {
             // [avatar] Only an image counts as an avatar. A legacy
             // non-image value (an emoji stored by an older build) is
             // treated as unset and falls through to the default tile.
-            if SoulIconImage.isDataURI(icon) {
+            if SoulIconImage.isImageReference(icon) {
                 SoulIconView(icon: icon, size: size)
             } else {
                 ZStack {
@@ -956,7 +970,7 @@ extension AppearanceStudio {
             customColors = [:]
         }
         Self.colorSnapshot = customColors
-        userAvatar = UserDefaults.standard.string(forKey: Keys.userAvatar) ?? ""
+        loadUserAvatar()
         surfaceOpacity = UserDefaults.standard.object(forKey: Keys.surfaceOpacity) as? Double ?? 0.88
         bubbleOpacity = UserDefaults.standard.object(forKey: Keys.bubbleOpacity) as? Double ?? 1.0
         wallpaperShade = UserDefaults.standard.object(forKey: Keys.wallpaperShade) as? Double ?? 0.08

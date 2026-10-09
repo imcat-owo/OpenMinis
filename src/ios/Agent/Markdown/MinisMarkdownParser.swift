@@ -727,7 +727,11 @@ extension BlockNode {
                         items: unsafeNode.children.map(RawListItem.init(unsafeNode:))
                     )
                 default:
-                    fatalError("cmark reported a list node without a list type.")
+                    // [P1-4] Never crash on untrusted model output: an
+                    // unexpected list shape drops the node instead.
+                    AppLogger(category: "Markdown").error(
+                        "cmark reported a list node without a list type; dropping the node.")
+                    return nil
                 }
             }
         case .codeBlock:
@@ -757,8 +761,13 @@ extension BlockNode {
 
 extension RawListItem {
     fileprivate init(unsafeNode: UnsafeNode) {
-        guard unsafeNode.nodeType == .item else {
-            fatalError("Expected a list item but got a '\(unsafeNode.nodeType)' instead.")
+        let actual = unsafeNode.nodeType
+        guard actual == .item else {
+            // [P1-4] Degrade, don't crash: a malformed list item renders empty.
+            AppLogger(category: "Markdown").error(
+                "Expected a list item but got a '\(actual)' instead; degrading to an empty item.")
+            self.init(children: [])
+            return
         }
         self.init(children: unsafeNode.children.compactMap(BlockNode.init(unsafeNode:)))
     }
@@ -766,8 +775,13 @@ extension RawListItem {
 
 extension RawTaskListItem {
     fileprivate init(unsafeNode: UnsafeNode) {
-        guard unsafeNode.nodeType == .taskListItem || unsafeNode.nodeType == .item else {
-            fatalError("Expected a list item but got a '\(unsafeNode.nodeType)' instead.")
+        let actual = unsafeNode.nodeType
+        guard actual == .taskListItem || actual == .item else {
+            // [P1-4] Degrade, don't crash.
+            AppLogger(category: "Markdown").error(
+                "Expected a list item but got a '\(actual)' instead; degrading to an empty item.")
+            self.init(isCompleted: false, children: [])
+            return
         }
         self.init(
             isCompleted: unsafeNode.isTaskListItemChecked,
@@ -778,8 +792,13 @@ extension RawTaskListItem {
 
 extension RawTableRow {
     fileprivate init(unsafeNode: UnsafeNode) {
-        guard unsafeNode.nodeType == .tableRow || unsafeNode.nodeType == .tableHead else {
-            fatalError("Expected a table row but got a '\(unsafeNode.nodeType)' instead.")
+        let actual = unsafeNode.nodeType
+        guard actual == .tableRow || actual == .tableHead else {
+            // [P1-4] Degrade, don't crash.
+            AppLogger(category: "Markdown").error(
+                "Expected a table row but got a '\(actual)' instead; degrading to an empty row.")
+            self.init(cells: [])
+            return
         }
         self.init(cells: unsafeNode.children.map(RawTableCell.init(unsafeNode:)))
     }
@@ -787,8 +806,13 @@ extension RawTableRow {
 
 extension RawTableCell {
     fileprivate init(unsafeNode: UnsafeNode) {
-        guard unsafeNode.nodeType == .tableCell else {
-            fatalError("Expected a table cell but got a '\(unsafeNode.nodeType)' instead.")
+        let actual = unsafeNode.nodeType
+        guard actual == .tableCell else {
+            // [P1-4] Degrade, don't crash.
+            AppLogger(category: "Markdown").error(
+                "Expected a table cell but got a '\(actual)' instead; degrading to empty content.")
+            self.init(content: [])
+            return
         }
         self.init(content: unsafeNode.children.compactMap(InlineNode.init(unsafeNode:)))
     }
@@ -833,7 +857,11 @@ extension UnsafeNode {
     fileprivate var nodeType: NodeType {
         let typeString = String(cString: cmark_node_get_type_string(self))
         guard let nodeType = NodeType(rawValue: typeString) else {
-            fatalError("Unknown node type '\(typeString)' found.")
+            // [P1-4] Unknown node types must not crash: they flow into the
+            // `default:` branches below, which already degrade to nil.
+            AppLogger(category: "Markdown").error(
+                "Unknown cmark node type '\(typeString)'; treating as .unknown.")
+            return .unknown
         }
         return nodeType
     }

@@ -126,9 +126,10 @@ extension ConfigRegistry {
         // An image may be given as a data URI, bare base64, a `minis-clone://`
         // resource, a path inside the minis directories, or an http(s) URL.
         // Whatever the source, it is decoded and pushed through the SAME
-        // `SoulIconImage.encode` the Settings picker uses — square crop,
-        // 512px stored bound, PNG — and the RESULT is stored inline. There is
-        // no stored-size refusal on this path either.
+        // `SoulIconImage.store(_:named:)` the Settings picker uses — square
+        // crop, 512px stored bound, PNG file — and the RESULT is a relative
+        // path reference ("avatars/<name>.png"). There is no stored-size
+        // refusal on this path either.
         //
         // An address is an import source only, never the stored value: keeping
         // a path would leave the icon dangling the moment the attachment is
@@ -138,9 +139,9 @@ extension ConfigRegistry {
         // The resolution (including the download) happens in
         // `ConfigOffloadBridge.performWriteBatch`, which is `async`, so by the
         // time this synchronous writer runs the value is already a finished
-        // data URI. See `SoulIconSource` for why.
+        // file reference. See `SoulIconSource` for why.
         //
-        // Reading stays summarized: a data URI is reported as `<image>` so
+        // Reading stays summarized: an image is reported as `<image>` so
         // `minis-config get` never floods the context with base64, and the
         // same substitution keeps the confirmation sheet and the audit log
         // clean. Clearing (empty string) restores the default sparkle.
@@ -159,7 +160,7 @@ extension ConfigRegistry {
                 + "and on the Soul settings card. Accepts an image only — emoji are not accepted.\n"
                 + "\n"
                 + "IMAGE — any of these forms:\n"
-                + "  • data URI (preferred for inline bytes):\n"
+                + "  • data URI (imported — converted to a local file on write, never stored inline):\n"
                 + "      data:image/png;base64,iVBORw0KGgo...\n"
                 + "      MIME may be image/png, image/jpeg, image/webp, image/gif, image/heic or image/tiff.\n"
                 + "  • bare base64 (no data: prefix) — auto-detected, e.g. iVBORw0KGgo...\n"
@@ -175,7 +176,8 @@ extension ConfigRegistry {
                 + "\n"
                 + "PROCESSING — identical to picking an image in Settings → Soul: "
                 + "the image is centre-cropped to a square, downscaled to at most 512×512 and re-encoded as PNG, "
-                + "then stored inline. An address is only an import source — "
+                + "then stored as a local file (Application Support/avatars/); SOUL.md keeps only the relative path. "
+                + "An address is only an import source — "
                 + "it is never persisted, so the file can be deleted afterwards and the icon survives "
                 + "attachment cleanup and syncing to other devices.\n"
                 + "\n"
@@ -206,8 +208,9 @@ extension ConfigRegistry {
             revertable: false,
             reader: {
                 let raw = currentFile().metadata.icon
-                // Never surface the base64 payload.
-                return .string(SoulIconImage.isDataURI(raw) ? "<image>" : raw)
+                // Never surface the image payload — a path or a legacy
+                // inline value both report as <image>.
+                return .string(SoulIconImage.isImageReference(raw) ? "<image>" : raw)
             },
             writer: { v in
                 guard case .string(let s) = v else { throw ConfigError.typeMismatch(expected: "string") }
@@ -217,10 +220,23 @@ extension ConfigRegistry {
                     try updateMetadata { $0.icon = "" }
                     return
                 }
-                // Already a stored icon: either the bridge resolved an image
-                // source into one, or a caller handed us the final form.
-                if SoulIconImage.isDataURI(trimmed) {
-                    try updateMetadata { $0.icon = trimmed }
+                // A finished stored reference, or a legacy inline data URI
+                // handed over directly: the inline form is migrated to a
+                // file here, so SOUL.md never stores base64 again.
+                if SoulIconImage.isImageReference(trimmed) {
+                    let stored: String
+                    if SoulIconImage.isDataURI(trimmed) {
+                        let name = SoulIconImage.storedName(prefix: "soul",
+                                                           id: PersonaStore.currentID())
+                        guard let migrated = SoulIconImage.migrateDataURIToFile(trimmed, named: name) else {
+                            throw ConfigError.invalidValue(
+                                "that image couldn't be read — try a different source.")
+                        }
+                        stored = migrated
+                    } else {
+                        stored = trimmed
+                    }
+                    try updateMetadata { $0.icon = stored }
                     return
                 }
                 // An image source that reached the writer unresolved means the

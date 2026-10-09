@@ -48,8 +48,6 @@ let builtinsSource = (try? String(contentsOfFile: builtinsPath, encoding: .utf8)
 
 // MARK: - Logic under test (mirrors SoulIconSource)
 
-let dataURIPrefix = "data:image/png;base64,"
-
 func isProbablyBareBase64(_ s: String) -> Bool {
     guard !s.isEmpty else { return false }
     let allowed = CharacterSet(charactersIn:
@@ -203,7 +201,7 @@ check("SoulIconView never renders the icon as a Text glyph",
 check("SoulIconView's default is the SF Symbol sparkle",
       soulSource.contains("Image(systemName: \"sparkles\")"))
 check("displayIcon only surfaces an image value",
-      soulSource.contains("SoulIconImage.isDataURI(icon) ? icon : \"\""))
+      soulSource.contains("SoulIconImage.isImageReference(icon) ? icon : \"\""))
 check("the ✨ displayEmoji fallback is gone", !soulSource.contains("displayEmoji"))
 
 print("\nOpaque images — [T-soul-icon-opaque-rounded] these are now ACCEPTED")
@@ -309,22 +307,27 @@ check("a sibling whose name prefixes the root is refused",
       !isInsideAnyRoot(impostor.appendingPathComponent("x.png"), roots: roots))
 
 print("\nNo stored-size cap — [avatar] the stored icon is never refused for size")
+print("[avatar-file] the stored form is a FILE, never inline base64")
 // The 64 KB stored cap (Android TOO_LARGE parity) was removed by user
 // request: the avatar is a normal photo-library pick and must not be
-// turned away for being large. `encode` bounds only the stored RESOLUTION
-// (512px, never upscaling); the encoded length is whatever it is.
-let encodedReal = dataURIPrefix + makePNG(width: 96, height: 96, alpha: true).base64EncodedString()
-check("a real icon still encodes to a data URI (\(encodedReal.count) chars)",
-      encodedReal.hasPrefix(dataURIPrefix))
+// turned away for being large. `store` bounds only the stored RESOLUTION
+// (512px, never upscaling); the file is whatever size the PNG is.
+// SOUL.md keeps only the relative path — inline base64 is banned.
+check("store returns a path reference, not a data URI",
+      soulSource.contains("return .success(\"avatars/\\(name).png\")"))
+check("the legacy base64 producer is fenced to custom icons only",
+      soulSource.contains("LEGACY producer"))
+check("resolveToDataURI is gone (resolution now stores a file)",
+      !soulSource.contains("resolveToDataURI"))
 check("shipping code has no stored-char cap left",
       !soulSource.contains("maxStoredChars"))
-check("shipping encode has no size refusal",
+check("shipping store has no size refusal",
       !soulSource.contains("case tooLarge(Int)"))
 
 print("\nShipping code agreement — the copies above must not drift")
 check("SoulIconSource exists in SoulStore.swift", soulSource.contains("enum SoulIconSource"))
-check("resolution reuses SoulIconImage.encode (rules are not duplicated)",
-      soulSource.contains("SoulIconImage.encode(image)"))
+check("resolution reuses SoulIconImage.store (rules are not duplicated)",
+      soulSource.contains("SoulIconImage.store(image, named:"))
 // [avatar] The stored-size cap is GONE from encode, so neither the Settings
 // picker nor the config path can refuse an image for its size.
 check("SoulIconImage.encode has no stored-size cap (picker + config share it)",

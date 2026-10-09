@@ -15,17 +15,63 @@ enum SoulIconImage {
     /// Stored edge in pixels. Deliberately far above any render surface
     /// (the largest draws at 54pt, i.e. 162px @3x): this is the normal
     /// avatar treatment — keep the picked photo at a useful resolution,
-    /// bounded only so the stored value stays a sane size for SOUL.md.
+    /// bounded only so the stored file stays a sane size.
     /// Smaller sources are never upscaled. There is NO stored-size
     /// refusal: no image is turned away for being too large.
     static let storedPixels: CGFloat = 512
 
+    /// Legacy inline form. Still RECOGNIZED (migrate-on-read) but never
+    /// WRITTEN by any current code path.
     private static let prefix = "data:image/png;base64,"
 
     static func isDataURI(_ s: String) -> Bool { s.hasPrefix(prefix) }
 
+    /// Application Support/avatars — home of every stored avatar PNG
+    /// (soul icons, persona avatars, the user avatar).
+    static func avatarsDirectory() -> URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory,
+                                            in: .userDomainMask).first!
+        return base.appendingPathComponent("avatars", isDirectory: true)
+    }
+
+    /// A stored avatar reference: "avatars/<name>.png", relative to
+    /// Application Support. This is what SOUL.md, Persona.avatar and
+    /// UserDefaults hold now — never base64.
+    static func isPathReference(_ s: String) -> Bool {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.hasPrefix("avatars/"), t.hasSuffix(".png"), !t.contains("..") else { return false }
+        // Exactly one path component after the prefix — no nested dirs.
+        return !t.dropFirst("avatars/".count).contains("/")
+    }
+
+    /// Anything that identifies a stored avatar: a path reference, or a
+    /// legacy inline data URI (recognized for migrate-on-read only).
+    static func isImageReference(_ s: String) -> Bool {
+        isPathReference(s) || isDataURI(s)
+    }
+
+    /// Resolve a path reference to its file URL. Nil for anything else.
+    static func fileURL(forReference ref: String) -> URL? {
+        guard isPathReference(ref),
+              let base = FileManager.default.urls(for: .applicationSupportDirectory,
+                                                  in: .userDomainMask).first else { return nil }
+        return base.appendingPathComponent(ref)
+    }
+
+    /// Stable on-disk name for an avatar file. The id is sanitized so a
+    /// caller-supplied value can never escape the avatars directory.
+    /// Fixed names (not UUIDs) mean replacing an avatar overwrites in
+    /// place — no orphan files accumulate.
+    static func storedName(prefix: String, id: String) -> String {
+        let safe = String(id.unicodeScalars.map {
+            CharacterSet.alphanumerics.contains($0) ? Character($0) : "-"
+        }.prefix(64))
+        return "\(prefix)-\(safe)"
+    }
+
     /// [PIC-6] Raw PNG bytes behind a stored data URI (what `encode`
     /// produced), for writing the value to a file without re-encoding.
+    /// Also the workhorse of the legacy migration below.
     static func pngData(from value: String) -> Data? {
         guard isDataURI(value) else { return nil }
         return Data(base64Encoded: String(value.dropFirst(prefix.count)))
@@ -45,14 +91,17 @@ enum SoulIconImage {
         case unreadable
     }
 
-    /// Normalize a picked image into the stored form: square, downscaled
-    /// to at most `storedPixels`, PNG, base64 data URI. No size limit is
-    /// applied to the result — a large photo is stored, never refused.
+    /// Normalize a picked image into the legacy stored form: square,
+    /// downscaled to at most `storedPixels`, PNG, base64 data URI.
     ///
-    /// Accepts opaque and transparent images alike — anything UIKit can
-    /// decode. Re-encoding to PNG regardless keeps one stored format (so
-    /// `isDataURI`'s single prefix stays valid) and preserves alpha when the
-    /// source had it.
+    /// LEGACY producer — kept only for the replaceable custom-icon path
+    /// (`AppearanceStudio.setIcon(_:for:)`), which writes the PNG bytes to
+    /// its own files immediately and treats the URI as an in-memory
+    /// intermediate. Every avatar surface (soul / persona / user) now goes
+    /// through `store(_:named:)` instead and never produces base64.
+    ///
+    /// No size limit is applied to the result — a large photo is stored,
+    /// never refused. Accepts opaque and transparent images alike.
     static func encode(_ image: UIImage) -> Result<String, RejectionReason> {
         guard image.cgImage != nil else { return .failure(.unreadable) }
 
@@ -74,21 +123,80 @@ enum SoulIconImage {
         return .success(prefix + png.base64EncodedString())
     }
 
-    /// Decode a stored data URI back to an image. Returns nil for a
+    /// Normalize a picked image into the CURRENT stored form: square,
+    /// downscaled to at most `storedPixels`, PNG written to
+    /// Application Support/avatars/<name>.png. Returns the relative path
+    /// ("avatars/<name>.png") — never base64.
+    ///
+    /// No size limit is applied — a large photo is stored, never refused.
+    /// The fixed name means replacing an avatar overwrites in place.
+    static func store(_ image: UIImage, named name: String) -> Result<String, RejectionReason> {
+        guard image.cgImage != nil else { return .failure(.unreadable) }
+
+        let square = squareCropped(image)
+        // Square and bounded: the chat header's row height is a hardcoded
+        // layout estimate (28pt), so a non-square icon there would fight the
+        // measured height. Cropping here means every consumer can assume 1:1.
+        let side = min(storedPixels, max(square.size.width, square.size.height) * square.scale)
+        let target = CGSize(width: side, height: side)
+
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1              // size is already in pixels
+        format.opaque = false         // preserve alpha
+        let scaled = UIGraphicsImageRenderer(size: target, format: format).image { _ in
+            square.draw(in: CGRect(origin: .zero, size: target))
+        }
+
+        guard let png = scaled.pngData() else { return .failure(.unreadable) }
+        let dir = avatarsDirectory()
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try png.write(to: dir.appendingPathComponent("\(name).png"), options: .atomic)
+        } catch {
+            return .failure(.unreadable)
+        }
+        return .success("avatars/\(name).png")
+    }
+
+    /// One-time migration: decode a legacy inline data URI and persist it
+    /// as a file, returning the new relative-path reference. Returns nil
+    /// when the value isn't a decodable data URI or the write fails —
+    /// callers then keep the in-memory value so the avatar still renders.
+    static func migrateDataURIToFile(_ value: String, named name: String) -> String? {
+        guard let png = pngData(from: value) else { return nil }
+        let dir = avatarsDirectory()
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try png.write(to: dir.appendingPathComponent("\(name).png"), options: .atomic)
+        } catch {
+            return nil
+        }
+        return "avatars/\(name).png"
+    }
+
+    /// Decode a stored avatar reference back to an image. Accepts a path
+    /// reference ("avatars/<name>.png") or a legacy inline data URI
+    /// (still decodable so a not-yet-migrated value renders; the migration
+    /// itself happens at the load sites, not here). Returns nil for a
     /// non-image value (including a legacy emoji) or anything malformed,
     /// so callers fall back to the default presentation.
-    static func decode(_ value: String) -> UIImage? {        guard isDataURI(value) else { return nil }
+    static func decode(_ value: String) -> UIImage? {
         // [PIC-1] Decoded-image cache: every chat bubble header, settings
-        // preview and icon picker row decodes the same data URI on each
-        // render — base64 + full decode per frame. Cache per value (keyed
-        // by the process-stable hash; a new avatar is a new value, so
-        // replacing the icon can never serve the old image).
+        // preview and icon picker row decodes the same reference on each
+        // render. Cache per value (keyed by the process-stable hash; a new
+        // avatar is a new value, so replacing the icon can never serve the
+        // old image).
         let key = "soulavatar:\(value.hashValue)" as NSString
         if let hit = avatarCache.object(forKey: key) { return hit }
-        let b64 = String(value.dropFirst(prefix.count))
-        guard let data = Data(base64Encoded: b64),
-              let image = UIImage(data: data) else { return nil }
-        avatarCache.setObject(image, forKey: key)
+        var image: UIImage?
+        if let url = fileURL(forReference: value),
+           let data = try? Data(contentsOf: url) {
+            image = UIImage(data: data)
+        } else if isDataURI(value),
+                  let data = pngData(from: value) {
+            image = UIImage(data: data)
+        }
+        if let image { avatarCache.setObject(image, forKey: key) }
         return image
     }
 
@@ -119,19 +227,20 @@ enum SoulIconImage {
 /// was given into a stored icon value, so the tool and the Settings picker
 /// end up applying the SAME rules.
 ///
-/// The picker path is `SoulIconImage.encode` and nothing here re-implements
-/// it: every image source below decodes to a `UIImage` and then goes through
-/// that one function, so square cropping, the stored-pixel bound and PNG
-/// re-encoding are shared by construction rather than by copy.
+/// The picker path is `SoulIconImage.store(_:named:)` and nothing here
+/// re-implements it: every image source below decodes to a `UIImage` and
+/// then goes through that one function, so square cropping, the
+/// stored-pixel bound and PNG file writing are shared by construction
+/// rather than by copy.
 ///
 /// Why resolution happens HERE and not in the field's `writer`:
 /// `ConfigField.write` is synchronous and `@MainActor`, but an https source
 /// has to be downloaded. `ConfigOffloadBridge.performWriteBatch` is already
-/// `async`, so the bridge resolves the source to a finished data URI during
-/// the resolve phase — before the confirmation sheet — and the writer stays
-/// synchronous and network-free. That also means the user confirms a change
-/// whose image has already been fetched and validated: the sheet cannot
-/// promise something the write then fails to deliver.
+/// `async`, so the bridge resolves the source to a finished FILE REFERENCE
+/// during the resolve phase — before the confirmation sheet — and the
+/// writer stays synchronous and network-free. That also means the user
+/// confirms a change whose image has already been fetched and validated:
+/// the sheet cannot promise something the write then fails to deliver.
 enum SoulIconSource {
     /// Ceiling on what any source may expand to in memory before decoding.
     /// Generous next to a real icon and small enough that a hostile or
@@ -202,11 +311,12 @@ enum SoulIconSource {
         return false
     }
 
-    /// Resolve any accepted source to a stored `data:image/png;base64,…` URI.
-    /// Never returns a path or a remote URL: an address is an import source
-    /// only, so a cleaned-up attachment or a different device cannot leave the
-    /// icon dangling.
-    static func resolveToDataURI(_ raw: String) async throws -> String {
+    /// Resolve any accepted source to a STORED avatar file reference
+    /// ("avatars/<name>.png" under Application Support). Never returns a
+    /// data URI or a remote URL: an address is an import source only, so a
+    /// cleaned-up attachment or a different device cannot leave the icon
+    /// dangling — and SOUL.md never carries base64 again.
+    static func resolveToStoredPath(_ raw: String, named name: String) async throws -> String {
         let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // Already stored form — re-encode anyway rather than trusting it, so a
@@ -241,11 +351,11 @@ enum SoulIconSource {
         }
 
         // The shared rules. Not reimplemented — this is the picker's function.
-        // No stored-size check: encode never refuses an image for its size.
-        switch SoulIconImage.encode(image) {
+        // No stored-size check: store never refuses an image for its size.
+        switch SoulIconImage.store(image, named: name) {
         case .failure(.unreadable): throw SourceError.unreadable
-        case .success(let uri):
-            return uri
+        case .success(let path):
+            return path
         }
     }
 
@@ -541,17 +651,17 @@ struct SoulMetadata: Equatable {
     /// `"auto"`, `"zh"`, `"en"`, or any free-form tag.
     var lang: String
 
-    /// [T-soul-custom-icon] User-chosen identity icon: a
-    /// `data:image/png;base64,…` URI produced by
-    /// `SoulIconImage.encode`. Empty means "use the default". A non-image
-    /// value can only be a legacy emoji stored by an older build; it is
-    /// kept on disk untouched but never rendered as an avatar.
+    /// [T-soul-custom-icon] User-chosen identity icon: a relative path
+    /// reference ("avatars/<name>.png") produced by
+    /// `SoulIconImage.store(_:named:)`. Empty means "use the default". A
+    /// non-image value can only be a legacy emoji stored by an older build;
+    /// it is kept on disk untouched but never rendered as an avatar.
     ///
     /// This lives in SOUL.md frontmatter, NOT in the body, and that is
     /// load-bearing: `identitySection()` builds the system prompt from a
     /// fixed whitelist (`name` / `style` / body) and never serializes
-    /// frontmatter wholesale, so a data URI here costs zero prompt
-    /// tokens. Putting it in the body would both burn context and count
+    /// frontmatter wholesale, so the icon costs zero prompt tokens.
+    /// Putting it in the body would both burn context and count
     /// against the body length limit.
     var icon: String
 
@@ -564,11 +674,11 @@ struct SoulMetadata: Equatable {
     /// removed pre-2026-05 customization (see its comment); reviving it
     /// implicitly would resurrect a value users last set under different
     /// UI they may not remember. `icon` is opt-in from a fresh choice.
-    var displayIcon: String { SoulIconImage.isDataURI(icon) ? icon : "" }
+    var displayIcon: String { SoulIconImage.isImageReference(icon) ? icon : "" }
 
     /// True when `icon` holds an image, i.e. the UI must decode it;
     /// any other value is treated as "no avatar set".
-    var iconIsImage: Bool { SoulIconImage.isDataURI(icon) }
+    var iconIsImage: Bool { SoulIconImage.isImageReference(icon) }
 
     static let `default` = SoulMetadata(
         name: "我的小家",
@@ -633,10 +743,11 @@ enum SoulMDParser {
             switch key {
             case "name":  if !value.isEmpty { meta.name = value }
             case "emoji": if !value.isEmpty { meta.emoji = value }
-            // [T-soul-custom-icon] The value may be a data URI, which itself
-            // contains a colon (`data:image/png;base64,…`). Safe here because
-            // the split above uses `firstIndex(of: ":")` — the key is
-            // everything before the FIRST colon and the rest is taken whole.
+            // [avatar-file] The stored form is a relative path
+            // ("avatars/<name>.png"); a legacy inline data URI is still
+            // accepted here so `SoulStore.load` can migrate it to a file
+            // (migrate-on-read). Inline base64 is banned at every WRITE
+            // entry point, so no new data URI can arrive through the app.
             case "icon":  meta.icon = value
             case "style": meta.style = value
             case "lang":  if !value.isEmpty { meta.lang = value }
@@ -887,7 +998,24 @@ enum SoulStore {
         guard FileManager.default.fileExists(atPath: url.path),
               let data = try? Data(contentsOf: url),
               let str = String(data: data, encoding: .utf8) else { return nil }
-        return SoulMDParser.parse(str)
+        var file = SoulMDParser.parse(str)
+        // [avatar-file] One-time migration: a legacy inline-base64 icon
+        // becomes a file reference. Persisted immediately so this runs
+        // once. A failed migration keeps the in-memory value (the avatar
+        // still renders via `decode`'s legacy branch) without rewriting
+        // the file, so a retry happens on the next load.
+        if SoulIconImage.isDataURI(file.metadata.icon) {
+            let name = SoulIconImage.storedName(prefix: "soul", id: personaID)
+            if let path = SoulIconImage.migrateDataURIToFile(file.metadata.icon, named: name) {
+                file.metadata.icon = path
+                let text = SoulMDParser.serialize(file)
+                try? text.data(using: .utf8)?.write(to: url, options: .atomic)
+            } else {
+                AppLogger(category: "Soul").error(
+                    "soul icon migration failed; keeping in-memory value")
+            }
+        }
+        return file
     }
 
     /// Best-effort cached metadata for synchronous call sites that cannot

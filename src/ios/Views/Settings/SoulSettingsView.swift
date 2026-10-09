@@ -404,10 +404,13 @@ private struct SoulIconEditing: ViewModifier {
         // [T-soul-icon-opaque-rounded] Opaque images are accepted now — the
         // transparency requirement was a presentation concern and moved to
         // `SoulIconView`, which clips every image to a rounded rectangle.
-        // Encode applies no size limit, so a large photo is never refused.
-        switch SoulIconImage.encode(image) {
-        case .success(let uri):
-            await MainActor.run { icon = uri }
+        // store() applies no size limit, so a large photo is never refused.
+        // The avatar lands in Application Support/avatars/; SOUL.md keeps
+        // only the relative path.
+        let name = SoulIconImage.storedName(prefix: "soul", id: PersonaStore.currentID())
+        switch SoulIconImage.store(image, named: name) {
+        case .success(let path):
+            await MainActor.run { icon = path }
         case .failure(.unreadable):
             await MainActor.run {
                 iconError = AppLocalized("That image couldn't be read.")
