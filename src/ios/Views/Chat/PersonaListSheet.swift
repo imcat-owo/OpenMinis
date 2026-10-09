@@ -22,7 +22,7 @@ struct PersonaListSheet: View {
                         dismiss()
                     } label: {
                         HStack(spacing: 12) {
-                            PersonaAvatarView(dataURI: persona.avatar, size: 34)
+                            PersonaAvatarView(iconRef: persona.avatar, size: 34)
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack(spacing: 6) {
                                     Text(persona.name)

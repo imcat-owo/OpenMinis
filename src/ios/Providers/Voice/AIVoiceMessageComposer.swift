@@ -170,9 +170,8 @@ enum AIVoiceMessageComposer {
         // 默认链路：和以前完全一致（默认 TTS 分组 → 选中服务 → 模型分组）。
         // 取消透传（不能 try? 吞掉），其他失败才落到下面的 synthesisFailed。
         do {
-            if let (data, _) = try await synthesizeWithServiceOrGroup(text) {
-                return (data, VoiceOutputPlayer.wavDurationOf(data), nil)
-            }
+            let (data, _) = try await synthesizeWithServiceOrGroup(text)
+            return (data, VoiceOutputPlayer.wavDurationOf(data), nil)
         } catch is CancellationError {
             throw CancellationError()
         } catch {
@@ -279,8 +278,9 @@ enum AIVoiceMessageComposer {
         while i < chunks.count {
             if Task.isCancelled { throw CancellationError() }
             if i + 1 < chunks.count {
-                async let d0 = synthWithRetry(chunks[i], synth)
-                async let d1 = synthWithRetry(chunks[i + 1], synth)
+                let idx = i
+                async let d0 = synthWithRetry(chunks[idx], synth)
+                async let d1 = synthWithRetry(chunks[idx + 1], synth)
                 let (a, b) = try await (d0, d1)
                 guard !a.isEmpty, !b.isEmpty else { throw VoiceProviderError.noAudioData }
                 pieces.append(a)
@@ -366,9 +366,10 @@ enum AIVoiceMessageComposer {
             // the conservative shared limit (safe for every vendor).
             // 取消透传（不能 try? 吞掉），普通失败才 continue 试下一个。
             do {
-                if let data = try await synthesizeChunked(text, limit: 1000, { chunk in
+                let data = try await synthesizeChunked(text, limit: 1000, { chunk in
                     try await provider.synthesize(VoiceOutputRequest(input: chunk, model: entry.model.id))
-                }), !data.isEmpty {
+                })
+                if !data.isEmpty {
                     logger.info("[AIVoice] synthesized via model-group entry \(entry.model.displayName)")
                     return (data, VoiceProviderResolver.isSystemEntry(entry.providerInstanceId) ? "wav" : "mp3")
                 }

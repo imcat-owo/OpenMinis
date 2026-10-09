@@ -32,7 +32,7 @@ struct PersonaSettingsView: View {
             Form {
                 Section("基本") {
                     HStack {
-                        PersonaAvatarView(dataURI: avatarURI, size: 52)
+                        PersonaAvatarView(iconRef: avatarURI, size: 52)
                         Button("换头像") { showPhotoPicker = true }
                             .font(.callout)
                         if avatarURI != nil {
