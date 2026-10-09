@@ -138,6 +138,11 @@ enum AIVoiceMessageComposer {
             logger.warning("voice message write failed: \(error.localizedDescription)")
             throw VoiceComposeError.synthesisFailed(detail: "音频写盘失败")
         }
+        // [P1-6] 转文字 sidecar: persist the sanitized source text next to the
+        // audio so the bubble's 转文字 reads it with zero STT cost.
+        // Best-effort — a missing sidecar just means no 转文字 for old bubbles.
+        let txtDest = dest.deletingPathExtension().appendingPathExtension("txt")
+        try? sanitized.write(to: txtDest, atomically: true, encoding: .utf8)
         let linuxPath = "/var/minis/attachments/\(fname)"
         let minisURL = "minis-clone://attachments/\(fname.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? fname)"
         logger.info("voice message composed: \(linuxPath) dur=\(String(format: "%.1f", dur))s size=\(data.count) service=\(usedService ?? "default-chain")")
@@ -212,6 +217,15 @@ enum AIVoiceMessageComposer {
             return [svc]
         }
         return nil
+    }
+
+    /// [P1-6] Sidecar transcript for a composed voice file: the .txt written
+    /// next to the audio at compose time (zero-STT 转文字 source).
+    /// Returns the text, or nil when the sidecar is absent (old bubbles).
+    nonisolated static func transcriptForAudioFile(_ audioURL: URL) -> String? {
+        let txtURL = audioURL.deletingPathExtension().appendingPathExtension("txt")
+        guard FileManager.default.fileExists(atPath: txtURL.path) else { return nil }
+        return try? String(contentsOf: txtURL, encoding: .utf8)
     }
 
     /// linuxPathFor(url:) — turn the minis-clone URL back into the /var/minis

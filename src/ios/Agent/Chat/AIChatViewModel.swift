@@ -2149,6 +2149,59 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
         }
     }
 
+    // MARK: - [P1-7] Single system-prompt builder
+
+    /// Single source of truth for the per-turn system prompt.
+    /// [P1-7] The group-fallback paths in AIChatViewModel+Fallback.swift used
+    /// to hand-rebuild only base + capability + behavior, silently dropping
+    /// skill metadata, MCP Top-20, the TTS paper, and memory injection — so a
+    /// fallback request went out with the model "amnesiac" about its tools.
+    /// Every assemble site (first turn, applyFallbackSwitch, all fallback
+    /// advances) routes through this builder. The result diffs empty against
+    /// the first-turn prompt except the per-model capability/behavior swap.
+    func buildTurnSystemPrompt(base: String, model: LLMModel) -> String {
+        var p = base
+        if let capFragment = model.capabilityPromptFragment {
+            p += "\n\n" + capFragment
+        }
+        if let behaviorFragment = model.agentBehaviorPromptFragment {
+            p += "\n\n" + behaviorFragment
+        }
+        // Inject enabled skill metadata into system prompt
+        if let sid = sessionId,
+           let skillFragment = SkillStore.shared.skillPromptFragment(for: sid, personaID: sessionPersonaId) {
+            p += "\n\n" + skillFragment
+        }
+        // [T-mcp-integration-ios] Inject Top-20 enabled MCP server metadata.
+        if let sid = sessionId,
+           let mcpFragment = MCPStore.shared.systemPromptSnippet(for: sid, personaID: sessionPersonaId) {
+            p += "\n\n" + mcpFragment
+        }
+        // [tts-paper 2026-10-02] TTS 能力纸条：用户这轮在聊语音/TTS 才塞进
+        // prompt（见 TTSPaper.paperIfRelevant 的宽松触发判定），平时不占。
+        // 内容按当前 TTS 配置现拼；没配 TTS 时纸条为 nil，模型不会知道这功能。
+        if let ttsPaper = TTSPaper.paperIfRelevant(userMessage: Self.lastUserText(in: agentHistory)) {
+            p += "\n\n" + ttsPaper
+        }
+        // [T-memory-toggle-gates-injection-and-tools-ios] Memory injection
+        // (GLOBAL.md + recent daily logs) is gated by the per-session
+        // memoryEnabled toggle. SOUL.md (identity / persona) is rendered
+        // by SystemPromptBuilder.identitySection() above and is NOT
+        // affected by this toggle.
+        if memoryEnabled {
+            if let memoryFragment = Self.loadGlobalMemoryFragment(personaID: sessionPersonaId) {
+                p += "\n\n" + memoryFragment
+            }
+            if let dailyFragment = Self.loadRecentDailyMemoryFragment(personaID: sessionPersonaId) {
+                p += "\n\n" + dailyFragment
+            }
+        }
+        // Authoritative memory-status footer (overrides any earlier
+        // baseSystemPrompt mentions when memory is disabled).
+        p += memoryStatusFragment
+        return p
+    }
+
     /// Session ID for persistence integration. Set by the view on appear.
     var sessionId: String? {
         didSet { browserTabPool.sessionId = sessionId }
@@ -5150,55 +5203,15 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
         }
         let tools = makeAgentTools()
 
-        var userSystemPrompt = baseSystemPrompt
         let activeModel = ProviderConfigStore.shared.entry(for: entry.id)?.model ?? selectedModel
-        if let capFragment = activeModel.capabilityPromptFragment {
-            userSystemPrompt += "\n\n" + capFragment
-        }
-        if let behaviorFragment = activeModel.agentBehaviorPromptFragment {
-            userSystemPrompt += "\n\n" + behaviorFragment
-        }
-
-        // Inject enabled skill metadata into system prompt
-        if let sid = sessionId,
-           let skillFragment = SkillStore.shared.skillPromptFragment(for: sid, personaID: sessionPersonaId) {
-            userSystemPrompt += "\n\n" + skillFragment
-        }
-
-        // [T-mcp-integration-ios] Inject Top-20 enabled MCP server metadata.
-        if let sid = sessionId,
-           let mcpFragment = MCPStore.shared.systemPromptSnippet(for: sid, personaID: sessionPersonaId) {
-            userSystemPrompt += "\n\n" + mcpFragment
-        }
-
-        // [tts-paper 2026-10-02] TTS 能力纸条：用户这轮在聊语音/TTS 才塞进
-        // prompt（见 TTSPaper.paperIfRelevant 的宽松触发判定），平时不占。
-        // 内容按当前 TTS 配置现拼；没配 TTS 时纸条为 nil，模型不会知道这功能。
-        if let ttsPaper = TTSPaper.paperIfRelevant(userMessage: Self.lastUserText(in: agentHistory)) {
-            userSystemPrompt += "\n\n" + ttsPaper
-        }
-
-        // [T-memory-toggle-gates-injection-and-tools-ios] Memory injection
-        // (GLOBAL.md + recent daily logs) is gated by the per-session
-        // memoryEnabled toggle. SOUL.md (identity / persona) is rendered
-        // by SystemPromptBuilder.identitySection() above and is NOT
-        // affected by this toggle.
         // [T-memory-enabled-new-session-bug DIAG] vm.memoryEnabled is the
         // value the injection actually keys off. Trace it against the
         // session so a repro shows whether loadSession seeded it from the
         // global default.
         AppLogger(category: "MemDiag").info("[MemDiag] inject-decision sid=\(self.sessionId?.prefix(8) ?? "nil") vm.memoryEnabled=\(self.memoryEnabled)")
-        if memoryEnabled {
-            if let memoryFragment = Self.loadGlobalMemoryFragment(personaID: sessionPersonaId) {
-                userSystemPrompt += "\n\n" + memoryFragment
-            }
-            if let dailyFragment = Self.loadRecentDailyMemoryFragment(personaID: sessionPersonaId) {
-                userSystemPrompt += "\n\n" + dailyFragment
-            }
-        }
-        // Authoritative memory-status footer (overrides any earlier
-        // baseSystemPrompt mentions when memory is disabled).
-        userSystemPrompt += memoryStatusFragment
+        // [P1-7] Single builder — the old hand-written recipe drifted from
+        // the fallback paths (which dropped skills/MCP/TTS/memory).
+        var userSystemPrompt = buildTurnSystemPrompt(base: baseSystemPrompt, model: activeModel)
 
         let promptBuildMs = (CFAbsoluteTimeGetCurrent() - loopSetupStart) * 1000
         logger.info("⏱️ [runAgentLoop] prompt build elapsed=\(String(format: "%.1f", promptBuildMs))ms history=\(self.agentHistory.count)")
@@ -5661,39 +5674,9 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
                 }
                 logger.info("🔀AGENT_LOOP provider updated after fallback: \(prevEntryId ?? "nil") → \(newEntryId)")
                 provider = await makeAgentProvider(for: newEntry)
-                userSystemPrompt = baseSystemPrompt
-                if let capFragment = newEntry.model.capabilityPromptFragment {
-                    userSystemPrompt += "\n\n" + capFragment
-                }
-                if let behaviorFragment = newEntry.model.agentBehaviorPromptFragment {
-                    userSystemPrompt += "\n\n" + behaviorFragment
-                }
-                if let sid = sessionId,
-                   let skillFragment = SkillStore.shared.skillPromptFragment(for: sid, personaID: sessionPersonaId) {
-                    userSystemPrompt += "\n\n" + skillFragment
-                }
-                // [T-mcp-integration-ios] Inject Top-20 enabled MCP metadata.
-                if let sid = sessionId,
-                   let mcpFragment = MCPStore.shared.systemPromptSnippet(for: sid, personaID: sessionPersonaId) {
-                    userSystemPrompt += "\n\n" + mcpFragment
-                }
-                // [tts-paper 2026-10-02] fallback 换模型时和第一注入点保持一致。
-                if let ttsPaper = TTSPaper.paperIfRelevant(userMessage: Self.lastUserText(in: agentHistory)) {
-                    userSystemPrompt += "\n\n" + ttsPaper
-                }
-                // [T-memory-toggle-gates-injection-and-tools-ios] Mirror
-                // the gate from the first injection site — fallback to a
-                // new provider must respect the per-session memoryEnabled
-                // toggle the same way the initial system prompt did.
-                if memoryEnabled {
-                    if let memoryFragment = Self.loadGlobalMemoryFragment(personaID: sessionPersonaId) {
-                        userSystemPrompt += "\n\n" + memoryFragment
-                    }
-                    if let dailyFragment = Self.loadRecentDailyMemoryFragment(personaID: sessionPersonaId) {
-                        userSystemPrompt += "\n\n" + dailyFragment
-                    }
-                }
-                userSystemPrompt += memoryStatusFragment
+                // [P1-7] Route through the single builder — the old hand-written
+                // recipe dropped skills/MCP/TTS/memory on fallback.
+                userSystemPrompt = buildTurnSystemPrompt(base: baseSystemPrompt, model: newEntry.model)
                 fallbackTrigger += 1
                 if !fallbackReasons.isEmpty {
                     // Resync the assistant message index by its stable id before

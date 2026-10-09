@@ -364,14 +364,9 @@ extension AIChatViewModel {
                     logger.info("🔀ROUTE image payloads restored for entry=\(nextEntryId)")
                 }
                 // Rebuild system prompt for the new model's capabilities
-                var rebuiltPrompt = baseSystemPrompt
-                if let capFragment = nextEntry.model.capabilityPromptFragment {
-                    rebuiltPrompt += "\n\n" + capFragment
-                }
-                if let behaviorFragment = nextEntry.model.agentBehaviorPromptFragment {
-                    rebuiltPrompt += "\n\n" + behaviorFragment
-                }
-                currentSystemPrompt = rebuiltPrompt
+                // [P1-7] Single builder — the old hand-written recipe dropped
+                // skills/MCP/TTS/memory on fallback.
+                currentSystemPrompt = buildTurnSystemPrompt(base: baseSystemPrompt, model: nextEntry.model)
                 // continue loop — will try next entry immediately
             } catch {
                 // [IMG-2b] Same image-payload self-heal for errors that
@@ -445,14 +440,9 @@ extension AIChatViewModel {
                         effectiveMessages = messages
                         logger.info("🔀ROUTE image payloads restored for entry=\(nextEntryId)")
                     }
-                    var rebuiltPrompt = baseSystemPrompt
-                    if let capFragment = nextEntry.model.capabilityPromptFragment {
-                        rebuiltPrompt += "\n\n" + capFragment
-                    }
-                    if let behaviorFragment = nextEntry.model.agentBehaviorPromptFragment {
-                        rebuiltPrompt += "\n\n" + behaviorFragment
-                    }
-                    currentSystemPrompt = rebuiltPrompt
+                    // [P1-7] Single builder — the old hand-written recipe dropped
+                    // skills/MCP/TTS/memory on fallback.
+                    currentSystemPrompt = buildTurnSystemPrompt(base: baseSystemPrompt, model: nextEntry.model)
                     continue
                 }
 
@@ -534,14 +524,9 @@ extension AIChatViewModel {
                         effectiveMessages = messages
                         logger.info("🔀ROUTE image payloads restored for entry=\(nextEntryId)")
                     }
-                    var rebuiltPrompt = baseSystemPrompt
-                    if let capFragment = nextEntry.model.capabilityPromptFragment {
-                        rebuiltPrompt += "\n\n" + capFragment
-                    }
-                    if let behaviorFragment = nextEntry.model.agentBehaviorPromptFragment {
-                        rebuiltPrompt += "\n\n" + behaviorFragment
-                    }
-                    currentSystemPrompt = rebuiltPrompt
+                    // [P1-7] Single builder — the old hand-written recipe dropped
+                    // skills/MCP/TTS/memory on fallback.
+                    currentSystemPrompt = buildTurnSystemPrompt(base: baseSystemPrompt, model: nextEntry.model)
                     // continue loop — will try next entry
                 }
             }
@@ -670,14 +655,9 @@ extension AIChatViewModel {
                     }
                     currentProvider = await makeAgentProvider(for: nextEntry)
                     currentModel = nextEntry.model
-                    var rebuiltPrompt = baseSystemPrompt
-                    if let capFragment = nextEntry.model.capabilityPromptFragment {
-                        rebuiltPrompt += "\n\n" + capFragment
-                    }
-                    if let behaviorFragment = nextEntry.model.agentBehaviorPromptFragment {
-                        rebuiltPrompt += "\n\n" + behaviorFragment
-                    }
-                    currentSystemPrompt = rebuiltPrompt
+                    // [P1-7] Single builder — the old hand-written recipe dropped
+                    // skills/MCP/TTS/memory on fallback.
+                    currentSystemPrompt = buildTurnSystemPrompt(base: baseSystemPrompt, model: nextEntry.model)
                 } else {
                     logger.error("🔀ROUTE-CONTENT no more untried entries")
                     return result

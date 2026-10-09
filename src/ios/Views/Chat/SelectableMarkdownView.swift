@@ -1448,6 +1448,11 @@ final class CodeBlockAttachment: NSTextAttachment {
     static let fadeViewTag = 9871
     /// Tag for the header collapse chevron.
     static let chevronTag = 9872
+    /// Tag for the code UITextView inside the scroll view (distinguishes it
+    /// from the line-number gutter, which is also a UITextView).
+    static let codeTextViewTag = 9873
+    /// Tag for the line-number gutter UITextView inside the scroll view.
+    static let gutterTag = 9874
 
     // MARK: [chat-ui] collapse state (Kelivo-style)
 
@@ -1498,10 +1503,13 @@ final class CodeBlockAttachment: NSTextAttachment {
         let bottomPadding: CGFloat
         let language: String?
         let theme: SelectableMarkdownTheme
+        /// Width of the line-number gutter (0 when the gutter is hidden).
+        /// fittingWidth INCLUDES this width (gutter + code).
+        var gutterWidth: CGFloat
         init(fullWidth: CGFloat, inset: CGFloat, contentWidth: CGFloat, topOffset: CGFloat,
              fullHeight: CGFloat, fittingWidth: CGFloat, collapsedHeight: CGFloat,
              maxCodeHeight: CGFloat, bottomPadding: CGFloat,
-             language: String?, theme: SelectableMarkdownTheme) {
+             language: String?, theme: SelectableMarkdownTheme, gutterWidth: CGFloat) {
             self.fullWidth = fullWidth
             self.inset = inset
             self.contentWidth = contentWidth
@@ -1513,7 +1521,47 @@ final class CodeBlockAttachment: NSTextAttachment {
             self.bottomPadding = bottomPadding
             self.language = language
             self.theme = theme
+            self.gutterWidth = gutterWidth
         }
+    }
+
+    /// Width of the line-number gutter for a given line count. Digits are
+    /// Menlo (~0.6em); the +16 covers right padding + a hair of air.
+    static func gutterWidth(forLineCount lineCount: Int) -> CGFloat {
+        let digits = max(1, String(lineCount).count)
+        return max(32, CGFloat(digits) * 9 + 16)
+    }
+
+    /// Builds the gutter's attributed text (right-aligned line numbers) with
+    /// the same font + lineSpacing as the code view so rows line up 1:1.
+    static func gutterAttributedText(lineCount: Int, font: UIFont, color: UIColor) -> NSAttributedString {
+        let style = NSMutableParagraphStyle()
+        style.lineSpacing = 4
+        style.alignment = .right
+        style.lineBreakMode = .byClipping
+        let text = (1...max(1, lineCount)).map(String.init).joined(separator: "\n")
+        return NSAttributedString(string: text, attributes: [
+            .font: font,
+            .foregroundColor: color,
+            .paragraphStyle: style,
+        ])
+    }
+
+    /// Configures a UITextView as a non-interactive line-number gutter.
+    /// Same text engine as the code view → identical line metrics.
+    static func makeGutterTextView(theme: SelectableMarkdownTheme) -> UITextView {
+        let gutter = UITextView()
+        gutter.tag = gutterTag
+        gutter.isEditable = false
+        gutter.isSelectable = false
+        gutter.isScrollEnabled = false
+        gutter.isUserInteractionEnabled = false
+        gutter.backgroundColor = .clear
+        gutter.textContainerInset = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 6)
+        gutter.textContainer.lineFragmentPadding = 0
+        gutter.textContainer.lineBreakMode = .byClipping
+        gutter.font = theme.codeBlockFont
+        return gutter
     }
 
     /// Height of the first `lines` source lines (collapsed viewport).
@@ -1630,7 +1678,7 @@ final class CodeBlockAttachment: NSTextAttachment {
         guard let metrics = objc_getAssociatedObject(wrapper, &metricsKey) as? CodeLayoutMetrics,
               let container = wrapper.subviews.first,
               let scrollView = container.subviews.first(where: { $0 is UIScrollView }) as? UIScrollView,
-              let codeTextView = scrollView.subviews.first(where: { $0 is UITextView }) as? UITextView else { return }
+              let codeTextView = scrollView.viewWithTag(codeTextViewTag) as? UITextView else { return }
         let code = codeTextView.text ?? ""
         guard !code.isEmpty else { return }
         let highlighted = CodeSyntaxHighlighter.highlight(
@@ -1759,6 +1807,7 @@ final class CodeBlockAttachment: NSTextAttachment {
         scrollView.clipsToBounds = true
 
         let codeTextView = UITextView()
+        codeTextView.tag = Self.codeTextViewTag
         codeTextView.isEditable = false
         codeTextView.isSelectable = true
         codeTextView.isScrollEnabled = false // scrollView handles scrolling
@@ -1784,20 +1833,29 @@ final class CodeBlockAttachment: NSTextAttachment {
         let fitting = codeTextView.sizeThatFits(CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude))
         let contentHeight = fitting.height
         let fittingWidth = fitting.width
-        codeTextView.frame = CGRect(x: 0, y: 0, width: fittingWidth, height: contentHeight)
+        // [P1-5] Line-number gutter: lives inside the scroll view so it stays
+        // in sync for free; same text engine → identical line metrics.
+        let gutterW = Self.gutterWidth(forLineCount: lineCount)
+        let gutter = Self.makeGutterTextView(theme: theme)
+        gutter.attributedText = Self.gutterAttributedText(
+            lineCount: lineCount, font: theme.codeBlockFont,
+            color: theme.codeBlockTextColor.withAlphaComponent(0.35))
+        gutter.frame = CGRect(x: 0, y: 0, width: gutterW, height: contentHeight)
+        codeTextView.frame = CGRect(x: gutterW, y: 0, width: fittingWidth, height: contentHeight)
 
         let maxCodeHeight: CGFloat = 400 - topOffset - 12
         let bottomPadding: CGFloat = 12
         let metrics = CodeLayoutMetrics(
             fullWidth: width, inset: inset, contentWidth: contentWidth, topOffset: topOffset,
-            fullHeight: contentHeight, fittingWidth: fittingWidth,
+            fullHeight: contentHeight, fittingWidth: gutterW + fittingWidth,
             collapsedHeight: min(measurePrefixHeight(lines: Self.collapsedVisibleLines), maxCodeHeight),
             maxCodeHeight: maxCodeHeight, bottomPadding: bottomPadding,
-            language: language, theme: theme)
+            language: language, theme: theme, gutterWidth: gutterW)
         objc_setAssociatedObject(wrapper, &Self.metricsKey, metrics, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
 
+        scrollView.addSubview(gutter)
         scrollView.addSubview(codeTextView)
-        scrollView.contentSize = CGSize(width: fittingWidth, height: contentHeight)
+        scrollView.contentSize = CGSize(width: gutterW + fittingWidth, height: contentHeight)
         container.addSubview(scrollView)
         wrapper.addSubview(container)
 
@@ -1946,7 +2004,7 @@ final class CodeBlockAttachment: NSTextAttachment {
     func updateExistingView(_ wrapper: UIView) {
         guard let container = wrapper.subviews.first else { return }
         guard let scrollView = container.subviews.first(where: { $0 is UIScrollView }) as? UIScrollView else { return }
-        guard let codeTextView = scrollView.subviews.first(where: { $0 is UITextView }) as? UITextView else { return }
+        guard let codeTextView = scrollView.viewWithTag(Self.codeTextViewTag) as? UITextView else { return }
         guard var metrics = objc_getAssociatedObject(wrapper, &Self.metricsKey) as? CodeLayoutMetrics else { return }
 
         let codeStyle = NSMutableParagraphStyle()
@@ -1960,8 +2018,17 @@ final class CodeBlockAttachment: NSTextAttachment {
         codeTextView.attributedText = codeAttr
 
         let fitting = codeTextView.sizeThatFits(CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude))
-        codeTextView.frame = CGRect(x: 0, y: 0, width: fitting.width, height: fitting.height)
-        scrollView.contentSize = fitting
+        // [P1-5] Keep the gutter in step as the code grows mid-stream.
+        let lineCount = code.components(separatedBy: "\n").count
+        let gutterW = Self.gutterWidth(forLineCount: lineCount)
+        if let gutter = scrollView.viewWithTag(Self.gutterTag) as? UITextView {
+            gutter.attributedText = Self.gutterAttributedText(
+                lineCount: lineCount, font: theme.codeBlockFont,
+                color: theme.codeBlockTextColor.withAlphaComponent(0.35))
+            gutter.frame = CGRect(x: 0, y: 0, width: gutterW, height: fitting.height)
+        }
+        codeTextView.frame = CGRect(x: gutterW, y: 0, width: fitting.width, height: fitting.height)
+        scrollView.contentSize = CGSize(width: gutterW + fitting.width, height: fitting.height)
 
         // The fresh attachment has a new fingerprint, but the VIEW's visual
         // state is the truth mid-stream — sync the map so attachmentBounds
@@ -1980,7 +2047,8 @@ final class CodeBlockAttachment: NSTextAttachment {
         let oldVisible = wrapperCollapsed ? metrics.collapsedHeight : min(metrics.fullHeight, metrics.maxCodeHeight)
         let oldTotal = metrics.topOffset + oldVisible + metrics.bottomPadding
         metrics.fullHeight = fitting.height
-        metrics.fittingWidth = fitting.width
+        metrics.fittingWidth = gutterW + fitting.width
+        metrics.gutterWidth = gutterW
         metrics.collapsedHeight = min(measurePrefixHeight(lines: Self.collapsedVisibleLines), metrics.maxCodeHeight)
         let newTotal = metrics.topOffset + min(metrics.fullHeight, metrics.maxCodeHeight) + metrics.bottomPadding
         let heightGrew = newTotal > oldTotal + 0.5
@@ -4997,7 +5065,20 @@ final class AudioAttachment: NSTextAttachment {
 
     static let attachmentHeight: CGFloat = 70
     /// Voice-bubble rows are much shorter than the file-player card.
-    static let voiceBubbleHeight: CGFloat = 44
+    /// [P1-6] Compact WeChat-style capsule: 44 → 37pt, tighter padding.
+    static let voiceBubbleHeight: CGFloat = 37
+    /// Gap between the capsule and the expanded 转文字 transcript.
+    static let transcriptTopGap: CGFloat = 6
+    /// Tag for the transcript label inside the bubble container.
+    static let transcriptTag = 9875
+
+    /// [P1-6] 转文字 expansion state (persisted on the cached attachment so
+    /// a re-render rebuilds the expanded layout).
+    var transcriptExpanded = false
+    fileprivate(set) var transcriptText: String?
+    fileprivate(set) var transcriptHeight: CGFloat = 0
+    /// Capsule content width from the last makeVoiceBubbleView (transcript layout).
+    fileprivate var voiceBubbleContentWidth: CGFloat = 0
 
     init(source: String, theme: SelectableMarkdownTheme) {
         self.source = source
@@ -5042,8 +5123,10 @@ final class AudioAttachment: NSTextAttachment {
     override func attachmentBounds(for textContainer: NSTextContainer?, proposedLineFragment lineFrag: CGRect, glyphPosition position: CGPoint, characterIndex charIndex: Int) -> CGRect {
         let width = lineFrag.width
         // [T-ai-voice-messages 09-12] WX-style bubble is a short capsule row.
+        // [P1-6] Grows when the 转文字 transcript is expanded.
         let h = isVoiceBubble ? Self.voiceBubbleHeight : Self.attachmentHeight
-        return CGRect(x: 0, y: 0, width: width, height: h)
+        let extra = (isVoiceBubble && transcriptExpanded) ? (Self.transcriptTopGap + transcriptHeight) : 0
+        return CGRect(x: 0, y: 0, width: width, height: h + extra)
     }
 
     func makeView(width: CGFloat) -> UIView {
@@ -5145,14 +5228,18 @@ final class AudioAttachment: NSTextAttachment {
     /// animate while playing + trailing duration ("3\""). Tap → GlobalAudioPlayer.
     /// Bubble width grows with duration (WX semantics: longer voice, longer
     /// bubble), clamped to the message column.
+    /// [P1-6] Compact WeChat-style voice capsule (37pt): tap = inline
+    /// play/pause, thin progress bar, long-press → 转文字 / 更多.
     private func makeVoiceBubbleView(width: CGFloat) -> UIView {
         let h = Self.voiceBubbleHeight
-        // Width: 70pt base + 10pt per 5s, capped at 60% of column width.
+        // Compact: 64pt base + 9pt per 5s, capped at 55% of column width —
+        // slimmer than the old 44pt chunky player, still duration-scaled.
         let dur: Double = voiceDuration > 0 ? voiceDuration : 3
-        let baseW: CGFloat = 70.0 + CGFloat(dur / 5.0 * 10.0)
-        let capW: CGFloat = width * 0.6
-        let w: CGFloat = min(baseW, capW)
-        let container = UIView(frame: CGRect(x: 0, y: 0, width: width, height: h))
+        let w: CGFloat = min(64.0 + CGFloat(dur / 5.0 * 9.0), width * 0.55)
+        voiceBubbleContentWidth = w
+
+        let containerH = h + (transcriptExpanded ? (Self.transcriptTopGap + transcriptHeight) : 0)
+        let container = UIView(frame: CGRect(x: 0, y: 0, width: width, height: containerH))
         container.backgroundColor = .clear
         container.isUserInteractionEnabled = true
 
@@ -5164,70 +5251,76 @@ final class AudioAttachment: NSTextAttachment {
         // AI's voice bubble uses the assistant bubble color (this is the AI
         // speaking, not the user).
         bubble.backgroundColor = bubbleFill.withAlphaComponent(0.35)
-        bubble.layer.cornerRadius = 14
+        bubble.layer.cornerRadius = 17
         let mask: CACornerMask = [.layerMinXMinYCorner, .layerMinXMaxYCorner, .layerMaxXMinYCorner]
         bubble.layer.maskedCorners = mask
         container.addSubview(bubble)
 
-        // Speaker glyph
-        let iconConfig = UIImage.SymbolConfiguration(pointSize: 16, weight: .medium)
+        // Speaker glyph (smaller, tighter padding)
+        let iconConfig = UIImage.SymbolConfiguration(pointSize: 13, weight: .medium)
         let speaker = UIImageView(image: UIImage(systemName: "speaker.wave.2.fill", withConfiguration: iconConfig))
         speaker.tintColor = accent
-        let spX: CGFloat = 14.0
-        let spY: CGFloat = (h - 16.0) / 2.0
-        speaker.frame = CGRect(x: spX, y: spY, width: 18.0, height: 16.0)
+        speaker.frame = CGRect(x: 11, y: (h - 13.0) / 2.0, width: 15.0, height: 13.0)
         bubble.addSubview(speaker)
 
-        // Duration label
-        // [T-ai-voice-mp3-duration 09-12] 修复审查问题9: dur=0（mp3 探不到）时别先
-        // 渲染「0\"」再异步改成真值——中间态是错的。先占位 "--\""，Task 探到真实
-        // 时长后一次写对。
+        // Duration label (crisp, smaller)
         let durLabel = UILabel()
-        if dur > 0 {
-            durLabel.text = "\(Int(dur.rounded()))\""
-        } else {
-            durLabel.text = "--\""
-        }
-        durLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        durLabel.text = dur > 0 ? "\(Int(dur.rounded()))\"" : "--\""
+        durLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         durLabel.textColor = textFill.withAlphaComponent(0.8)
         durLabel.sizeToFit()
         let dlW: CGFloat = durLabel.frame.width
         let dlH: CGFloat = durLabel.frame.height
-        let dlX: CGFloat = w - dlW - 12.0
-        let dlY: CGFloat = (h - dlH) / 2.0
-        durLabel.frame = CGRect(x: dlX, y: dlY, width: dlW, height: dlH)
+        durLabel.frame = CGRect(x: w - dlW - 10.0, y: (h - dlH) / 2.0, width: dlW, height: dlH)
         bubble.addSubview(durLabel)
 
         // Three animated arcs — animate while THIS bubble's file is playing.
         var arcs: [UIView] = []
         for i in 0..<3 {
-            let arcX: CGFloat = 38.0 + CGFloat(i) * 5.0
-            let arcH: CGFloat = 8.0 - (i % 2 == 0 ? 0.0 : 4.0)
+            let arcX: CGFloat = 31.0 + CGFloat(i) * 4.5
+            let arcH: CGFloat = i % 2 == 0 ? 7.0 : 3.5
             let arcY: CGFloat = h / 2.0 - arcH / 2.0
-            let arc = UIView(frame: CGRect(x: arcX, y: arcY, width: 2.5, height: arcH))
+            let arc = UIView(frame: CGRect(x: arcX, y: arcY, width: 2.0, height: arcH))
             arc.backgroundColor = accent
-            arc.layer.cornerRadius = 1.25
+            arc.layer.cornerRadius = 1.0
             arc.alpha = 0.35
             bubble.addSubview(arc)
             arcs.append(arc)
         }
 
+        // [P1-6] Thin progress bar along the capsule bottom, driven by the
+        // global player's progress publisher.
+        let barH: CGFloat = 2.0
+        let barX: CGFloat = 11.0
+        let barW: CGFloat = w - barX * 2
+        let track = UIView(frame: CGRect(x: barX, y: h - 3.0 - barH, width: barW, height: barH))
+        track.backgroundColor = textFill.withAlphaComponent(0.12)
+        track.layer.cornerRadius = 1.0
+        track.clipsToBounds = true
+        track.alpha = 0.5
+        let fill = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: barH))
+        fill.backgroundColor = accent
+        fill.layer.cornerRadius = 1.0
+        track.addSubview(fill)
+        bubble.addSubview(track)
+        let progress = VoiceBubbleProgressController(track: track, fill: fill, fileURL: resolvedURL)
+        objc_setAssociatedObject(container, &VoiceBubbleProgressController.associatedKey,
+                                 progress, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+
         // [T-ai-voice-mp3-duration 09-12] The `dur=` query is a best-effort
         // hint written at compose time — it reads 0 for mp3 payloads (the WAV
         // header parser can't see mp3 frames). When it's missing/0, resolve
         // the real duration from the file itself (AVAudioPlayer reads both
-        // containers) and update the label once. 修复审查问题9/10: 占位 "--\"" 先
-        // 渲染，探到真值后连同 frame 一起更新（宽度变了不截断）；文本改成不保留
-        // 强引用到视图回收后——weak 到 superview 判活。
+        // containers) and update the label once.
         if voiceDuration <= 0, let url = resolvedURL {
             Task { @MainActor [weak durLabel] in
                 guard let durLabel, durLabel.superview != nil else { return }
                 if let p = try? AVAudioPlayer(contentsOf: url), p.duration > 0 {
                     durLabel.text = "\(Int(p.duration.rounded()))\""
                     durLabel.sizeToFit()
-                    // Keep the right-padding anchor (12pt from bubble edge).
+                    // Keep the right-padding anchor (10pt from bubble edge).
                     if let bubble = durLabel.superview {
-                        durLabel.frame.origin.x = bubble.bounds.width - durLabel.frame.width - 12.0
+                        durLabel.frame.origin.x = bubble.bounds.width - durLabel.frame.width - 10.0
                     }
                 }
             }
@@ -5238,6 +5331,17 @@ final class AudioAttachment: NSTextAttachment {
         objc_setAssociatedObject(container, &VoiceBubbleAnimationController.associatedKey,
                                  controller, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
 
+        // Transcript view (below the capsule; hidden unless expanded).
+        let transcriptLabel = UILabel()
+        transcriptLabel.tag = Self.transcriptTag
+        transcriptLabel.font = .systemFont(ofSize: 12)
+        transcriptLabel.textColor = textFill.withAlphaComponent(0.75)
+        transcriptLabel.numberOfLines = 0
+        transcriptLabel.isHidden = !transcriptExpanded
+        transcriptLabel.text = transcriptText
+        transcriptLabel.frame = CGRect(x: 0, y: h + Self.transcriptTopGap, width: w, height: transcriptHeight)
+        container.addSubview(transcriptLabel)
+
         // Tap anywhere → toggle play/pause via the global player (the arcs animate
         // while THIS bubble's file is playing). No preview sheet — WX semantics.
         let tap = AudioTapGesture(target: nil, action: nil)
@@ -5246,8 +5350,88 @@ final class AudioAttachment: NSTextAttachment {
         tap.addTarget(tap, action: #selector(AudioTapGesture.handleTap))
         bubble.addGestureRecognizer(tap)
 
+        // Long-press → 转文字 / 更多 menu.
+        let menuHandler = VoiceBubbleMenuHandler(attachment: self)
+        let longPress = UILongPressGestureRecognizer(target: menuHandler, action: #selector(VoiceBubbleMenuHandler.handleLongPress(_:)))
+        objc_setAssociatedObject(bubble, &VoiceBubbleMenuHandler.associatedKey,
+                                 menuHandler, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        bubble.addGestureRecognizer(longPress)
+
         return container
     }
+
+    /// [P1-6] Toggle the inline 转文字 transcript below the capsule, then
+    /// ask the host cell to re-measure.
+    fileprivate func toggleTranscript(from bubbleView: UIView) {
+        guard let container = bubbleView.superview else { return }
+        if transcriptExpanded {
+            transcriptExpanded = false
+        } else {
+            guard let url = resolvedURL,
+                  let text = AIVoiceMessageComposer.transcriptForAudioFile(url),
+                  !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            transcriptText = text
+            let tw = voiceBubbleContentWidth > 0 ? voiceBubbleContentWidth : container.bounds.width
+            transcriptHeight = Self.measureTranscriptHeight(text: text, width: tw)
+            transcriptExpanded = true
+        }
+        layoutTranscript(in: container)
+        var host: UIView? = container.superview
+        while let h = host, !(h is SelectableMarkdownTextView) { host = h.superview }
+        (host as? SelectableMarkdownTextView)?.invalidateCellSizeIfNeeded()
+    }
+
+    /// [P1-6] Show/hide the transcript label and resize the container to match
+    /// attachmentBounds (which the host reads on invalidate).
+    private func layoutTranscript(in container: UIView) {
+        let h = Self.voiceBubbleHeight
+        var f = container.frame
+        f.size.height = h + (transcriptExpanded ? (Self.transcriptTopGap + transcriptHeight) : 0)
+        container.frame = f
+        if let label = container.viewWithTag(Self.transcriptTag) as? UILabel {
+            label.isHidden = !transcriptExpanded
+            label.text = transcriptText
+            let tw = voiceBubbleContentWidth > 0 ? voiceBubbleContentWidth : container.bounds.width
+            label.frame = CGRect(x: 0, y: h + Self.transcriptTopGap, width: tw, height: transcriptHeight)
+        }
+    }
+
+    private static func measureTranscriptHeight(text: String, width: CGFloat) -> CGFloat {
+        let label = UILabel()
+        label.font = .systemFont(ofSize: 12)
+        label.numberOfLines = 0
+        label.text = text
+        return label.sizeThatFits(CGSize(width: max(1, width), height: .greatestFiniteMagnitude)).height
+    }
+
+    /// [P1-6] Long-press menu: 转文字 (when a sidecar transcript exists) /
+    /// 更多 (full preview sheet for seek/rate).
+    fileprivate func presentVoiceBubbleMenu(from sourceView: UIView) {
+        guard let presenter = sourceView.nearestViewController() else { return }
+        let sheet = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
+        let hasTranscript: Bool = {
+            if transcriptExpanded { return true }
+            guard let url = resolvedURL else { return false }
+            return AIVoiceMessageComposer.transcriptForAudioFile(url) != nil
+        }()
+        if hasTranscript {
+            sheet.addAction(UIAlertAction(title: transcriptExpanded ? "收起文字" : "转文字", style: .default) { [weak self] _ in
+                guard let self else { return }
+                self.toggleTranscript(from: sourceView)
+            })
+        }
+        sheet.addAction(UIAlertAction(title: "更多", style: .default) { [weak self] _ in
+            guard let self, let url = self.resolvedURL else { return }
+            AudioTapGesture.presentPreviewSheet(fileURL: url, from: sourceView)
+        })
+        sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+        if let pop = sheet.popoverPresentationController {
+            pop.sourceView = sourceView
+            pop.sourceRect = sourceView.bounds
+        }
+        presenter.present(sheet, animated: true)
+    }
+
 }
 
 /// Drives the WX-style arc animation for one voice bubble. Subscribes to
@@ -5336,7 +5520,14 @@ private final class AudioTapGesture: UITapGestureRecognizer {
             }
             return
         }
-        guard let presenter = self.view?.nearestViewController() else { return }
+        guard let sourceView = self.view else { return }
+        Self.presentPreviewSheet(fileURL: url, from: sourceView)
+    }
+
+    /// [P1-6] Shared preview-sheet presentation — the full player card for
+    /// seek/rate, reachable from the bubble's long-press "更多" menu.
+    static func presentPreviewSheet(fileURL url: URL, from sourceView: UIView) {
+        guard let presenter = sourceView.nearestViewController() else { return }
         // Playback continues seamlessly — global player is shared with preview
         let preview = MinisAudioPreviewView(fileURL: url)
         let hosting = UIHostingController(rootView: preview)
@@ -5345,6 +5536,58 @@ private final class AudioTapGesture: UITapGestureRecognizer {
             sheet.prefersGrabberVisible = false
         }
         presenter.present(hosting, animated: true)
+    }
+}
+
+/// [P1-6] Thin progress bar inside the voice capsule, driven by the global
+/// player's progress publisher. Retained via associated object on the bubble
+/// container (same lifetime pattern as VoiceBubbleAnimationController).
+private final class VoiceBubbleProgressController: NSObject {
+    static var associatedKey: UInt8 = 0
+    private var cancellables = Set<AnyCancellable>()
+    private weak var track: UIView?
+    private weak var fill: UIView?
+    private let fileURL: URL?
+
+    init(track: UIView, fill: UIView, fileURL: URL?) {
+        self.track = track
+        self.fill = fill
+        self.fileURL = fileURL
+        super.init()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let gp = GlobalAudioPlayer.shared
+            Publishers.CombineLatest3(gp.$currentTime, gp.$duration, gp.$activeFileURL)
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] time, duration, activeURL in
+                    guard let self, let track = self.track, let fill = self.fill else { return }
+                    let isActive = activeURL == self.fileURL
+                    let frac: CGFloat = (isActive && duration > 0) ? CGFloat(time / duration) : 0
+                    var f = fill.frame
+                    f.size.width = track.bounds.width * min(max(frac, 0), 1)
+                    fill.frame = f
+                    track.alpha = isActive ? 1.0 : 0.5
+                }
+                .store(in: &self.cancellables)
+        }
+    }
+}
+
+/// [P1-6] Long-press menu handler for the voice bubble. Held via associated
+/// object on the bubble view (the gesture's target); weakly references the
+/// cached attachment, which owns the transcript expansion state.
+private final class VoiceBubbleMenuHandler: NSObject {
+    static var associatedKey: UInt8 = 0
+    weak var attachment: AudioAttachment?
+
+    init(attachment: AudioAttachment) {
+        self.attachment = attachment
+        super.init()
+    }
+
+    @objc func handleLongPress(_ g: UILongPressGestureRecognizer) {
+        guard g.state == .began, let attachment, let view = g.view else { return }
+        attachment.presentVoiceBubbleMenu(from: view)
     }
 }
 
