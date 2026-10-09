@@ -309,7 +309,8 @@ private let minisInlineCodeBackgroundColor = UIColor { traits in
 /// Mirrors the `.minisChat` MarkdownUI theme using UIKit types.
 struct SelectableMarkdownTheme {
     let baseFontSize: CGFloat
-    let codeBlockCornerRadius: CGFloat = 8
+    /// [P2-6] Kelivo-style 16pt radius + 1pt border (was 8, borderless).
+    let codeBlockCornerRadius: CGFloat = 16
     let inlineCodeCornerRadius: CGFloat = 5
 
     init(baseFontSize: CGFloat? = nil) {
@@ -1610,8 +1611,10 @@ final class CodeBlockAttachment: NSTextAttachment {
                 fade.layer.sublayers?.first?.frame = fade.bounds
             }
             if let chevron = container.viewWithTag(chevronTag) as? UIImageView {
-                chevron.image = UIImage(systemName: collapsed ? "chevron.down" : "chevron.up",
-                                        withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .semibold))
+                // [P2-6] Kelivo-style: chevron only visible when collapsed.
+                chevron.isHidden = !collapsed
+                chevron.image = UIImage(systemName: "chevron.right",
+                                        withConfiguration: UIImage.SymbolConfiguration(pointSize: 14, weight: .medium))
             }
             container.frame = CGRect(x: metrics.inset, y: topMargin, width: metrics.contentWidth, height: totalHeight)
         }
@@ -1770,20 +1773,31 @@ final class CodeBlockAttachment: NSTextAttachment {
         container.backgroundColor = theme.codeBlockBackground
         container.layer.cornerRadius = theme.codeBlockCornerRadius
         container.clipsToBounds = true
+        // [P2-6] Kelivo-style 1pt border (outlineVariant equivalent).
+        container.layer.borderWidth = 1.0
+        container.layer.borderColor = UIColor.white.withAlphaComponent(0.08).cgColor
 
-        var topOffset: CGFloat = 12
-        let hasLanguage = language != nil && !language!.isEmpty
+        // [P2-6] Kelivo-style header strip: distinct bg, language label +
+        // collapse chevron on the left (whole strip tappable), download /
+        // copy / preview icon actions on the right. 12h/8v padding.
+        let headerH: CGFloat = 32
+        let headerView = UIView()
+        let isDark = UITraitCollection.current.userInterfaceStyle == .dark
+        headerView.backgroundColor = isDark
+            ? UIColor(white: 1.0, alpha: 0.05)
+            : UIColor(white: 0.0, alpha: 0.05)
+        headerView.frame = CGRect(x: 0, y: 0, width: contentWidth, height: headerH)
+        container.addSubview(headerView)
 
-        // Language label
-        if hasLanguage {
-            let langLabel = UILabel()
-            langLabel.text = language!.lowercased()
-            langLabel.font = .systemFont(ofSize: 11, weight: .medium)
-            langLabel.textColor = .white.withAlphaComponent(0.4)
-            langLabel.frame = CGRect(x: 12, y: 8, width: contentWidth - 60, height: 16)
-            container.addSubview(langLabel)
-            topOffset = 28
-        }
+        var topOffset: CGFloat = headerH
+        // Language label — always shown (Kelivo: fence lang or "代码"/"Code").
+        let displayLang = (language?.isEmpty == false) ? language!.lowercased() : "Code"
+        let langLabel = UILabel()
+        langLabel.text = displayLang
+        langLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        langLabel.textColor = .white.withAlphaComponent(0.55)
+        langLabel.frame = CGRect(x: 12, y: 0, width: 120, height: headerH)
+        headerView.addSubview(langLabel)
 
         // [chat-ui] Collapse bookkeeping (Kelivo-style). Fresh renders start
         // collapsed when long; a streaming first chunk is short, so this
@@ -1882,10 +1896,11 @@ final class CodeBlockAttachment: NSTextAttachment {
         }
 
         // [chat-ui] Header tap → collapse toggle (long blocks only).
+        // [P2-6] Header strip is now 32pt (Kelivo-style); the toggle covers it.
         if collapsible {
             let headerButton = UIButton(type: .custom)
             headerButton.backgroundColor = .clear
-            headerButton.frame = CGRect(x: 0, y: 0, width: contentWidth, height: 28)
+            headerButton.frame = CGRect(x: 0, y: 0, width: contentWidth, height: headerH)
             headerButton.accessibilityLabel = collapsed ? "Expand code block" : "Collapse code block"
             let toggle: () -> Void = { [weak wrapper, weak codeTextView, weak headerButton] in
                 guard let headerButton else { return }
@@ -1902,26 +1917,78 @@ final class CodeBlockAttachment: NSTextAttachment {
             tap.cancelsTouchesInView = false
             headerButton.addGestureRecognizer(tap)
             objc_setAssociatedObject(headerButton, &Self.copyTapHandlerKey, tapHandler, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-            container.addSubview(headerButton)
+            headerView.addSubview(headerButton)
 
+            // [P2-6] Kelivo-style: chevron sits left next to the language
+            // label, visible only when collapsed (applyCollapsedLayout toggles
+            // isHidden). 14pt, matching Kelivo's _CodeBlockCollapseIcon.
             let chevron = UIImageView()
             chevron.tag = Self.chevronTag
             chevron.tintColor = .white.withAlphaComponent(0.4)
             chevron.contentMode = .center
-            let rightButtons: CGFloat = isHTML ? 88 : 44
-            chevron.frame = CGRect(x: contentWidth - rightButtons - 24, y: 6, width: 24, height: 16)
-            container.addSubview(chevron)
+            chevron.frame = CGRect(x: 116, y: 9, width: 14, height: 14)
+            headerView.addSubview(chevron)
             // Image (up/down) is set by applyCollapsedLayout — refresh once more
             // now that the chevron exists.
             Self.applyCollapsedLayout(to: wrapper, collapsed: collapsed, animated: false)
         }
 
-        // Copy button — 44x44 hit area per Apple HIG, icon stays small visually
-        let iconConfig = UIImage.SymbolConfiguration(pointSize: 9, weight: .medium)
+        // [P2-6] Header icon actions: 16pt icons (Kelivo _CodeBlockIconAction),
+        // 32x32 hit areas inside the 32pt header strip.
+        let iconConfig = UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+        let headerBtnSize: CGFloat = 32
+        // Right-edge cursor: preview (HTML only), download, copy — Kelivo order.
+        var rightX = contentWidth
+        func placeHeaderButton(_ b: UIButton) {
+            rightX -= headerBtnSize
+            b.frame = CGRect(x: rightX, y: 0, width: headerBtnSize, height: headerH)
+        }
+
+        // Download button — save code as file (Kelivo Lucide.Download).
+        let downloadButton = UIButton(type: .system)
+        downloadButton.setImage(UIImage(systemName: "square.and.arrow.down", withConfiguration: iconConfig), for: .normal)
+        downloadButton.tintColor = .white.withAlphaComponent(0.5)
+        downloadButton.accessibilityLabel = "Download code"
+        // [P2-6] Placed last so Download ends up leftmost (Kelivo order:
+        // Download, Copy, Eye left-to-right).
+        let dlDebounce = CopyDebounce()
+        let performDownload: () -> Void = { [weak codeTextView, weak downloadButton] in
+            guard Date().timeIntervalSince(dlDebounce.last) > 0.5 else { return }
+            dlDebounce.last = Date()
+            let ext = Self.fileExtension(for: language)
+            let filename = "code_\(Int(Date().timeIntervalSince1970)).\(ext)"
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+            do {
+                try (codeTextView?.text ?? "").write(to: url, atomically: true, encoding: .utf8)
+                // Offer share sheet so the user can save/move the file.
+                let activity = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+                var presenter = downloadButton?.window?.rootViewController
+                while let next = presenter?.presentedViewController { presenter = next }
+                if let pop = activity.popoverPresentationController, let btn = downloadButton {
+                    pop.sourceView = btn
+                    pop.sourceRect = btn.bounds
+                }
+                presenter?.present(activity, animated: true)
+            } catch {
+                downloadButton?.setImage(UIImage(systemName: "xmark", withConfiguration: iconConfig), for: .normal)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    downloadButton?.setImage(UIImage(systemName: "square.and.arrow.down", withConfiguration: iconConfig), for: .normal)
+                }
+            }
+        }
+        downloadButton.addAction(UIAction { _ in performDownload() }, for: .touchUpInside)
+        let dlTapHandler = CodeCopyTapHandler(perform: performDownload)
+        let dlTap = UITapGestureRecognizer(target: dlTapHandler, action: #selector(CodeCopyTapHandler.handleTap))
+        dlTap.cancelsTouchesInView = false
+        downloadButton.addGestureRecognizer(dlTap)
+        objc_setAssociatedObject(downloadButton, &Self.copyTapHandlerKey, dlTapHandler, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+
+        // Copy button
         let copyButton = UIButton(type: .system)
         copyButton.setImage(UIImage(systemName: "doc.on.doc", withConfiguration: iconConfig), for: .normal)
         copyButton.tintColor = .white.withAlphaComponent(0.5)
-        copyButton.frame = CGRect(x: contentWidth - 44, y: 0, width: 44, height: 44)
+        copyButton.accessibilityLabel = "Copy code"
+        placeHeaderButton(copyButton)
         let debounce = CopyDebounce()
         let performCopy: () -> Void = { [weak codeTextView, weak copyButton] in
             // [T-ios17-codeblock-copy-dead] Double-fire guard: on versions
@@ -1966,14 +2033,17 @@ final class CodeBlockAttachment: NSTextAttachment {
         tap.cancelsTouchesInView = false
         copyButton.addGestureRecognizer(tap)
         objc_setAssociatedObject(copyButton, &Self.copyTapHandlerKey, tapHandler, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-        container.addSubview(copyButton)
+        headerView.addSubview(copyButton)
+        // [P2-6] Download placed after Copy → leftmost (Kelivo order).
+        placeHeaderButton(downloadButton)
+        headerView.addSubview(downloadButton)
 
         // [chat-ui] HTML preview button — renders the code in a WKWebView sheet.
         if isHTML {
             let previewButton = UIButton(type: .system)
             previewButton.setImage(UIImage(systemName: "eye", withConfiguration: iconConfig), for: .normal)
             previewButton.tintColor = .white.withAlphaComponent(0.5)
-            previewButton.frame = CGRect(x: contentWidth - 88, y: 0, width: 44, height: 44)
+            placeHeaderButton(previewButton)
             previewButton.accessibilityLabel = "Preview HTML"
             let showPreview: () -> Void = { [weak codeTextView, weak previewButton] in
                 guard let previewButton else { return }
@@ -1989,10 +2059,37 @@ final class CodeBlockAttachment: NSTextAttachment {
             pvTap.cancelsTouchesInView = false
             previewButton.addGestureRecognizer(pvTap)
             objc_setAssociatedObject(previewButton, &Self.copyTapHandlerKey, pvTapHandler, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-            container.addSubview(previewButton)
+            headerView.addSubview(previewButton)
         }
 
         return wrapper
+    }
+
+    /// [P2-6] File extension for the download button (Kelivo maps language →
+    /// extension for `code_<timestamp>.<ext>`).
+    static func fileExtension(for language: String?) -> String {
+        switch (language ?? "").lowercased() {
+        case "swift": return "swift"
+        case "python", "py": return "py"
+        case "javascript", "js": return "js"
+        case "typescript", "ts": return "ts"
+        case "html": return "html"
+        case "css": return "css"
+        case "json": return "json"
+        case "yaml", "yml": return "yml"
+        case "markdown", "md": return "md"
+        case "ruby", "rb": return "rb"
+        case "go": return "go"
+        case "rust", "rs": return "rs"
+        case "java": return "java"
+        case "kotlin", "kt": return "kt"
+        case "c": return "c"
+        case "cpp", "c++": return "cpp"
+        case "shell", "sh", "bash": return "sh"
+        case "sql": return "sql"
+        case "xml": return "xml"
+        default: return "txt"
+        }
     }
 
     /// Update the code text in an existing view created by `makeView(width:)` without recreating.
@@ -5071,6 +5168,17 @@ final class AudioAttachment: NSTextAttachment {
     static let transcriptTopGap: CGFloat = 6
     /// Tag for the transcript label inside the bubble container.
     static let transcriptTag = 9875
+    /// [P1-1] Full line width from the last attachmentBounds call. The 55%
+    /// capsule cap and the transcript width must use the FULL column width —
+    /// makeView receives the already-shrunk boundingRect, so using the passed
+    /// width would create a shrink feedback loop.
+    private var fullLineWidth: CGFloat = 0
+    /// [P1-1] Capsule width: 64pt base + 9pt per 5s of audio, capped at 55%
+    /// of the message column. `lineWidth` must be the FULL column width.
+    static func capsuleWidth(forLineWidth lineWidth: CGFloat, duration: Double) -> CGFloat {
+        let dur: Double = duration > 0 ? duration : 3
+        return min(64.0 + CGFloat(dur / 5.0 * 9.0), lineWidth * 0.55)
+    }
 
     /// [P1-6] 转文字 expansion state (persisted on the cached attachment so
     /// a re-render rebuilds the expanded layout).
@@ -5120,11 +5228,22 @@ final class AudioAttachment: NSTextAttachment {
 
     override func attachmentBounds(for textContainer: NSTextContainer?, proposedLineFragment lineFrag: CGRect, glyphPosition position: CGPoint, characterIndex charIndex: Int) -> CGRect {
         let width = lineFrag.width
-        // [T-ai-voice-messages 09-12] WX-style bubble is a short capsule row.
-        // [P1-6] Grows when the 转文字 transcript is expanded.
-        let h = isVoiceBubble ? Self.voiceBubbleHeight : Self.attachmentHeight
-        let extra = (isVoiceBubble && transcriptExpanded) ? (Self.transcriptTopGap + transcriptHeight) : 0
-        return CGRect(x: 0, y: 0, width: width, height: h + extra)
+        // [P1-1] Voice bubble: shrink-wrap to the capsule width so the outer
+        // AI bubble hugs the capsule instead of ballooning to full column
+        // width. When the 转文字 transcript is expanded it needs the full
+        // column width for readability (P3-2), so only shrink when collapsed.
+        if isVoiceBubble {
+            fullLineWidth = width
+            let h = Self.voiceBubbleHeight
+            if transcriptExpanded {
+                let extra = Self.transcriptTopGap + transcriptHeight
+                return CGRect(x: 0, y: 0, width: width, height: h + extra)
+            }
+            let w = Self.capsuleWidth(forLineWidth: width, duration: voiceDuration)
+            return CGRect(x: 0, y: 0, width: w, height: h)
+        }
+        // [T-ai-voice-messages 09-12] File-player card keeps full width.
+        return CGRect(x: 0, y: 0, width: width, height: Self.attachmentHeight)
     }
 
     func makeView(width: CGFloat) -> UIView {
@@ -5230,13 +5349,19 @@ final class AudioAttachment: NSTextAttachment {
     /// play/pause, thin progress bar, long-press → 转文字 / 更多.
     private func makeVoiceBubbleView(width: CGFloat) -> UIView {
         let h = Self.voiceBubbleHeight
-        // Compact: 64pt base + 9pt per 5s, capped at 55% of column width —
-        // slimmer than the old 44pt chunky player, still duration-scaled.
+        // [P1-1] Use the FULL line width for the 55% cap (stored from
+        // attachmentBounds) — the `width` passed in is the already-shrunk
+        // boundingRect, which would create a shrink feedback loop.
+        let lineWidth = fullLineWidth > 0 ? fullLineWidth : width
         let dur: Double = voiceDuration > 0 ? voiceDuration : 3
-        let w: CGFloat = min(64.0 + CGFloat(dur / 5.0 * 9.0), width * 0.55)
+        let w: CGFloat = Self.capsuleWidth(forLineWidth: lineWidth, duration: dur)
 
-        let containerH = h + (transcriptExpanded ? (Self.transcriptTopGap + transcriptHeight) : 0)
-        let container = UIView(frame: CGRect(x: 0, y: 0, width: width, height: containerH))
+        // [P1-1] Container hugs the capsule when collapsed; goes full width
+        // when the transcript is expanded (transcript needs column width).
+        let isExpanded = transcriptExpanded
+        let containerW = isExpanded ? lineWidth : w
+        let containerH = h + (isExpanded ? (Self.transcriptTopGap + transcriptHeight) : 0)
+        let container = UIView(frame: CGRect(x: 0, y: 0, width: containerW, height: containerH))
         container.backgroundColor = .clear
         container.isUserInteractionEnabled = true
 
@@ -5336,7 +5461,7 @@ final class AudioAttachment: NSTextAttachment {
         transcriptLabel.numberOfLines = 0
         transcriptLabel.isHidden = !transcriptExpanded
         transcriptLabel.text = transcriptText
-        transcriptLabel.frame = CGRect(x: 0, y: h + Self.transcriptTopGap, width: width, height: transcriptHeight)
+        transcriptLabel.frame = CGRect(x: 0, y: h + Self.transcriptTopGap, width: containerW, height: transcriptHeight)
         container.addSubview(transcriptLabel)
 
         // Tap anywhere → toggle play/pause via the global player (the arcs animate
@@ -5368,10 +5493,11 @@ final class AudioAttachment: NSTextAttachment {
                   let text = AIVoiceMessageComposer.transcriptForAudioFile(url),
                   !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             transcriptText = text
-            // [P3-2] Transcript is measured at the message-column width
-            // (container), not the narrow capsule width — short bubbles
-            // would otherwise cram ~5 CJK chars per line.
-            let tw = container.bounds.width
+            // [P3-2] Transcript is measured at the message-column width,
+            // not the narrow capsule width — short bubbles would otherwise
+            // cram ~5 CJK chars per line. [P1-1] Use the stored full line
+            // width (container may currently be capsule-narrow).
+            let tw = fullLineWidth > 0 ? fullLineWidth : container.bounds.width
             transcriptHeight = Self.measureTranscriptHeight(text: text, width: tw)
             transcriptExpanded = true
         }
@@ -5383,17 +5509,28 @@ final class AudioAttachment: NSTextAttachment {
 
     /// [P1-6] Show/hide the transcript label and resize the container to match
     /// attachmentBounds (which the host reads on invalidate).
+    /// [P1-1] Also resizes the container WIDTH: capsule-narrow when collapsed,
+    /// full column when expanded (transcript needs the width).
     private func layoutTranscript(in container: UIView) {
         let h = Self.voiceBubbleHeight
         var f = container.frame
-        f.size.height = h + (transcriptExpanded ? (Self.transcriptTopGap + transcriptHeight) : 0)
+        let lineWidth = fullLineWidth > 0 ? fullLineWidth : f.width
+        if transcriptExpanded {
+            // Re-measure at full column width in case the width changed.
+            if let text = transcriptText, !text.isEmpty {
+                transcriptHeight = Self.measureTranscriptHeight(text: text, width: lineWidth)
+            }
+            f.size.width = lineWidth
+            f.size.height = h + Self.transcriptTopGap + transcriptHeight
+        } else {
+            f.size.width = Self.capsuleWidth(forLineWidth: lineWidth, duration: voiceDuration)
+            f.size.height = h
+        }
         container.frame = f
         if let label = container.viewWithTag(Self.transcriptTag) as? UILabel {
             label.isHidden = !transcriptExpanded
             label.text = transcriptText
-            // [P3-2] Column width, not capsule width (see toggleTranscript).
-            let tw = container.bounds.width
-            label.frame = CGRect(x: 0, y: h + Self.transcriptTopGap, width: tw, height: transcriptHeight)
+            label.frame = CGRect(x: 0, y: h + Self.transcriptTopGap, width: f.width, height: transcriptHeight)
         }
     }
 

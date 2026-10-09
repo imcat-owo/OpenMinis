@@ -977,6 +977,10 @@ struct ThinkingBlockView: View {
     @State private var thinkingUserScrolledAway = false
     @State private var lastThinkingDragAt: Date = .distantPast
     @State private var frozenThinkingContent: String? = nil
+    // [P1-2] Kelivo-style live elapsed timer + shimmer phase while streaming.
+    @State private var thinkingStartTime: Date? = nil
+    @State private var elapsedSeconds: Double = 0
+    @State private var shimmerPhase: Double = 0
 
     /// Bind to block.isThinkingExpanded so state survives cell reuse and triggers cell re-sizing.
     private var isExpanded: Binding<Bool> {
@@ -1005,9 +1009,17 @@ struct ThinkingBlockView: View {
                     .resizable()
                     .frame(width: 14, height: 14)
                     .foregroundStyle(MinisThemeShape.thinkingAccent)
+                // [P1-2] Kelivo ThinkingSheen: shimmer the title while loading.
                 Text(AppLocalized("Deep Thinking"))
                     .font(MinisThemeShape.fontFamily.font(size: MinisThemeShape.thinkingTitleSize, weight: .semibold))
                     .foregroundStyle(MinisThemeShape.thinkingAccent)
+                    .opacity(isStreaming ? 0.55 + 0.45 * shimmerPhase : 1.0)
+                // [P1-2] Kelivo live elapsed timer, ticking while streaming.
+                if isStreaming || elapsedSeconds > 0 {
+                    Text(String(format: "(%.1fs)", elapsedSeconds))
+                        .font(.system(size: 11, weight: .regular, design: .monospaced))
+                        .foregroundStyle(MinisThemeShape.thinkingAccent.opacity(0.6))
+                }
                 if isStreaming {
                     ProgressView()
                         .controlSize(.mini)
@@ -1165,6 +1177,30 @@ struct ThinkingBlockView: View {
                         }
                     }
                 }
+            } else if isStreaming, !block.content.isEmpty {
+                // [P1-2] Kelivo preview state: while streaming and collapsed,
+                // show the live tail in a 100pt window with a bottom fade
+                // instead of hiding completely.
+                let tailCount = 500
+                let previewText: String = {
+                    let c = block.content
+                    guard c.count > tailCount else { return c }
+                    let idx = c.index(c.endIndex, offsetBy: -tailCount)
+                    return String(c[idx...])
+                }()
+                Text(previewText)
+                    .font(MinisThemeShape.fontFamily.font(size: MinisThemeShape.thinkingBodySize))
+                    .foregroundStyle(ChatColors.tertiaryText)
+                    .lineSpacing(3)
+                    .frame(maxWidth: .infinity, maxHeight: 100, alignment: .topLeading)
+                    .mask(
+                        LinearGradient(
+                            colors: [Color.black, Color.black.opacity(0.3), Color.clear],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
             }
         }
         // [T-thinking-stream-jank] Hitch monitor runs while this block is
@@ -1185,6 +1221,27 @@ struct ThinkingBlockView: View {
         .onDisappear {
             ThinkingHitchMonitor.shared.stop(owner: block.id)
         }
+        // [P1-2] Kelivo-style shimmer + elapsed timer while streaming.
+        .onAppear {
+            if isStreaming && thinkingStartTime == nil {
+                thinkingStartTime = Date()
+            }
+        }
+        .onChange(of: isStreaming) { streaming in
+            if streaming {
+                thinkingStartTime = Date()
+                elapsedSeconds = 0
+            }
+        }
+        .onReceive(Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()) { _ in
+            if isStreaming, let start = thinkingStartTime {
+                elapsedSeconds = Date().timeIntervalSince(start)
+                // Shimmer phase: 0→1→0 sine wave for the title opacity.
+                withAnimation(.linear(duration: 0.1)) {
+                    shimmerPhase = 0.5 + 0.5 * sin(Date().timeIntervalSince(start) * 4.0)
+                }
+            }
+        }
         .background {
             ZStack {
                 MinisThemeShape.thinkingFill
@@ -1194,6 +1251,12 @@ struct ThinkingBlockView: View {
                         .scaledToFill()
                         .opacity(MinisThemeShape.thinkingCardOpacity)
                 }
+                // [P1-2] Refined pink: subtle top highlight to lift the flat
+                // fill (she dislikes the current flat pink). Theme color kept.
+                LinearGradient(
+                    colors: [Color.white.opacity(0.06), Color.clear],
+                    startPoint: .top, endPoint: .center
+                )
             }
         }
         .clipShape(MinisThemeShape.thinkingCard)
