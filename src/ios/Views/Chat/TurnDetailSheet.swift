@@ -161,7 +161,8 @@ struct TurnDetailSheet: View {
                     .aspectRatio(contentMode: .fill)
                     .opacity(MinisThemeShape.pack.thinkingCardImageOpacity)
             } else {
-                ChatColors.background
+                // [T-sheet-bg] Theme's thinking card color — never white.
+                MinisThemeShape.pack.thinkingFill(opacity: 1.0)
             }
         }
     }
@@ -328,14 +329,15 @@ struct TurnDetailSheet: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 if block.kind == .thinking {
-                    // Full thinking content.
+                    // Full thinking content — sits directly on the
+                    // thinking image/color with subtle translucency.
                     Text(block.content.isEmpty ? AppLocalized("No thinking content") : block.content)
                         .font(.system(size: 14))
                         .foregroundStyle(ChatColors.primaryText)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(14)
-                        .background(ChatColors.secondaryBg)
+                        .background(ChatColors.primaryText.opacity(0.05))
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                 } else {
                     if let args = block.toolInputArgs, !args.isEmpty {
@@ -371,7 +373,9 @@ struct TurnDetailSheet: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
-        .background(ChatColors.secondaryBg)
+        // [T-sheet-bg] No solid cards — subtle translucency only, content
+        // sits directly on the thinking image/color.
+        .background(ChatColors.primaryText.opacity(0.05))
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
