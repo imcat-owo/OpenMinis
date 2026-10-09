@@ -236,6 +236,7 @@
 		<string>fetch</string>
 		<string>location</string>
 		<string>remote-notification</string>
+		<string>bluetooth-central</string>
 	</array>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
