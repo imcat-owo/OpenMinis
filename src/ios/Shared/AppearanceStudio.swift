@@ -135,7 +135,18 @@ final class AppearanceStudio: ObservableObject {
         } else {
             customColors = [:]
         }
-        loadUserAvatar()   // includes migrate-on-read for legacy inline values
+        // [avatar-file] Migrate-on-read for the user avatar, inlined here:
+        // Swift forbids self calls before all stored properties are
+        // initialized, so init cannot call loadUserAvatar() (which stays
+        // for reloadAfterRestore(), where self is complete).
+        let rawAvatar = UserDefaults.standard.string(forKey: Keys.userAvatar) ?? ""
+        if SoulIconImage.isDataURI(rawAvatar),
+           let path = SoulIconImage.migrateDataURIToFile(rawAvatar, named: "user") {
+            UserDefaults.standard.set(path, forKey: Keys.userAvatar)
+            userAvatar = path
+        } else {
+            userAvatar = rawAvatar
+        }
         // [PIC-6] Custom icons used to live in UserDefaults as one JSON blob
         // of base64 data URIs (23 slots × ~1MB of PNG = a multi-MB plist
         // the system rewrites on every sync). They now live as PNG files
