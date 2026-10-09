@@ -1048,6 +1048,13 @@ struct AIChatView: View {
             }
             MinisOpenURLBroker.shared.consume()
         }
+        // [T-turn-summary-row] Browser tool entries in the turn detail sheet
+        // open minis's native browser preview via this notification.
+        .onReceive(NotificationCenter.default.publisher(for: .openBrowserURLFromDrawer)) { note in
+            if let url = note.object as? URL {
+                withAnimation { safariURL = url }
+            }
+        }
         .sheet(item: $previewHTMLFile) { fileURL in
             MinisHTMLPreviewView(fileURL: fileURL, onExpand: { _ in
                 fullBrowserIsLocal = true

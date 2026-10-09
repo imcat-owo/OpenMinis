@@ -500,6 +500,39 @@ struct ChatMessageRow: View {
 
     // MARK: Assistant Row
 
+    /// [T-turn-summary-row] Row model for the assistant turn: individual
+    /// blocks render as before, but ALL thinking/tool blocks collapse into
+    /// ONE turn summary row at the position of the first thinking/tool block.
+    private enum AssistantRowItem: Identifiable {
+        case block(AssistantBlock)
+        case turnSummary
+        var id: String {
+            switch self {
+            case .block(let b): return b.id.uuidString
+            case .turnSummary: return "turnSummary"
+            }
+        }
+    }
+
+    private var rowItems: [AssistantRowItem] {
+        var items: [AssistantRowItem] = []
+        var summaryEmitted = false
+        for block in message.blocks {
+            if block.kind == .thinking || block.kind.isToolKind {
+                if !summaryEmitted {
+                    items.append(.turnSummary)
+                    summaryEmitted = true
+                }
+            } else {
+                items.append(.block(block))
+            }
+        }
+        return items
+    }
+
+    /// Whether the turn detail bottom sheet is shown (tapped summary row).
+    @State private var turnSheetShown = false
+
     private var assistantRow: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Assistant label
@@ -511,7 +544,9 @@ struct ChatMessageRow: View {
             }
             .padding(.top, 2)
 
-            ForEach(message.blocks) { block in
+            ForEach(rowItems) { item in
+                switch item {
+                case .block(let block):
                 AssistantBlockView(
                     block: block,
                     message: message,
@@ -543,6 +578,11 @@ struct ChatMessageRow: View {
                     highlightedBlockId: $highlightedBlockId,
                     detailBlock: $detailBlock
                 )
+                case .turnSummary:
+                    TurnSummaryRow(message: message) {
+                        turnSheetShown = true
+                    }
+                }
             }
 
             // Typing indicator — "request out, nothing back yet", evaluated per
@@ -653,20 +693,25 @@ struct ChatMessageRow: View {
                     MessageContextMenuPreview(text: fullReplyText)
                 }
         }
-        // [T-nested-ui] Detail = pushed page, not a bottom sheet. Tapping a
-        // thinking/tool row presents a full-screen NavigationStack; the root
-        // is the block's detail page, nested rows push deeper, back pops.
-        .fullScreenCover(item: $detailBlock) { block in
-            NavigationStack {
-                BlockDetailRoot(
-                    block: block,
-                    message: message,
-                    toolSnapshots: toolSnapshots,
-                    browserPool: browserPool,
-                    onBrowserTakeover: onBrowserTakeover,
-                    onTakeoverDone: onTakeoverDone
-                )
+        // [T-turn-summary-row] Turn detail = custom bottom sheet (not a pushed
+        // page). Tap-outside on the dimmed scrim dismisses; the top-left
+        // button morphs X ↔ ‹ for in-sheet navigation. Matches Claude.
+        .overlay {
+            ZStack(alignment: .bottom) {
+                if turnSheetShown {
+                    Color.black.opacity(0.35)
+                        .ignoresSafeArea()
+                        .onTapGesture { turnSheetShown = false }
+                        .transition(.opacity)
+                    TurnDetailSheet(
+                        message: message,
+                        toolSnapshots: toolSnapshots,
+                        onClose: { turnSheetShown = false }
+                    )
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
             }
+            .animation(.spring(response: 0.38, dampingFraction: 0.88), value: turnSheetShown)
         }
     }
 

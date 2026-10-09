@@ -2,44 +2,46 @@ import Foundation
 
 private let logger = AppLogger(category: "AIChatVM")
 
-// MARK: - Block Summary Generation (nested mode)
+// MARK: - Turn Summary Generation (one row per turn)
 //
-// [T-nested-summary] After a turn completes (thinking closed + all tool
-// results in), the collapsed thinking/tool rows show a NATURAL one-sentence
-// summary of what was actually done — e.g. "查了北京明天的天气并存进了记忆",
-// not "使用了2个工具".
+// [T-turn-summary-row] After a turn completes (thinking closed + all tool
+// results in), the chat shows exactly ONE floating summary row for the whole
+// turn — a NATURAL one-sentence summary of what was actually done, e.g.
+// "查了北京明天的天气并存进了记忆", not "使用了2个工具". The full nested
+// timeline (thinking blocks + each tool call) lives inside the bottom sheet.
 //
 // Flow:
 //   1. `generateBlockSummariesIfNeeded()` runs when the agent loop ends
-//      (isProcessing true→false). It finds assistant messages whose
-//      thinking/tool blocks still lack a summary.
-//   2. While the turn is in progress, rows show a working state ("思考中…"
-//      / tool name) — `summary` stays nil.
+//      (isProcessing true→false). It finds assistant messages with
+//      thinking/tool blocks whose `turnSummary` is still nil.
+//   2. While the turn is in progress, the row shows a working state
+//      ("思考中…" / bouncing dots) — `turnSummary` stays nil.
 //   3. A lightweight hidden LLM call (sub-model, thinking off, invisible in
 //      chat) generates ONE sentence in the user's language from the thinking
-//      text + tool records. Only the sentence is stored on `block.summary`.
+//      text + tool records. Only the sentence is stored on
+//      `message.turnSummary`.
 //   4. If generation fails, a metadata fallback assembles "verb + key param"
 //      phrases per tool type — never a bare count.
 
 extension AIChatViewModel {
 
-    /// Call when the agent loop finishes. Generates natural one-sentence
-    /// summaries for thinking blocks of turns that don't have one yet.
+    /// Call when the agent loop finishes. Generates one natural one-sentence
+    /// summary per assistant message (turn) that involved thinking/tools and
+    /// doesn't have one yet.
     func generateBlockSummariesIfNeeded() {
-        // Find thinking blocks lacking summaries in recent assistant messages.
-        // Only the last few messages — older turns were already handled.
-        let candidates: [(message: ChatMessage, block: AssistantBlock)] = messages
+        // Find recent assistant messages with thinking/tool blocks lacking a
+        // turn summary. Only the last few messages — older turns were already
+        // handled.
+        let candidates: [ChatMessage] = messages
             .suffix(5)
-            .filter { $0.role == .assistant }
-            .flatMap { msg in
-                msg.blocks
-                    .filter { $0.kind == .thinking && $0.summary == nil }
-                    .map { (msg, $0) }
+            .filter { $0.role == .assistant && $0.turnSummary == nil }
+            .filter { msg in
+                msg.blocks.contains { $0.kind == .thinking || $0.kind.isToolKind }
             }
         guard !candidates.isEmpty else { return }
 
-        for (message, thinkingBlock) in candidates {
-            // Skip turns still in progress (a tool is still running).
+        for message in candidates {
+            // Skip turns still in progress (a tool is still running/streaming).
             let toolsInTurn = message.blocks.filter { $0.kind.isToolKind }
             let anyRunning = toolsInTurn.contains {
                 if case .running = $0.toolStatus { return true }
@@ -47,10 +49,20 @@ extension AIChatViewModel {
                 return false
             }
             if anyRunning { continue }
+            // Skip while thinking is still streaming (no summary yet, but the
+            // turn isn't done — the row shows the working state).
+            let thinkingStreaming = message.blocks.contains {
+                $0.kind == .thinking && $0.thinkingContentBuffer.isEmpty == false
+                    && $0.content.isEmpty
+            }
+            if thinkingStreaming { continue }
 
             // Snapshot the data the generator needs (blocks are live objects;
             // capture values now so the Task doesn't race the next turn).
-            let thinkingText = thinkingBlock.content
+            let thinkingText = message.blocks
+                .filter { $0.kind == .thinking }
+                .map { $0.content }
+                .joined(separator: "\n")
             let toolRecords: [(name: String, args: String, result: String, status: String)] =
                 toolsInTurn.map { tool in
                     let name = tool.toolDescription
@@ -66,14 +78,20 @@ extension AIChatViewModel {
                     return (name, args, result, status)
                 }
 
-            Task { [weak self, weak thinkingBlock] in
+            Task { [weak self, weak message] in
                 guard let self else { return }
                 let summary = await self.generateTurnSummaryWithEntry(
                     thinkingText: thinkingText,
                     tools: toolRecords
                 ) ?? Self.fallbackTurnSummary(tools: toolRecords)
                 await MainActor.run {
-                    thinkingBlock?.summary = summary
+                    message?.turnSummary = summary
+                    // Backfill the first thinking block's summary too — older
+                    // code paths read `block.summary`.
+                    if let firstThinking = message?.blocks.first(where: { $0.kind == .thinking }),
+                       firstThinking.summary == nil {
+                        firstThinking.summary = summary
+                    }
                 }
             }
         }

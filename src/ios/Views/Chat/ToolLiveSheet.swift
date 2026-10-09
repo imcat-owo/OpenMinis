@@ -265,22 +265,19 @@ struct FloatingToolBar: View {
         }
         // .shadow(color: .black.opacity(0.2), radius: 12, x: 0, y: -4)
         .animation(.easeInOut(duration: 0.15), value: displayedIdx)
-        // [T-nested-ui] Detail = pushed page, not a sheet — same as transcript
-        // rows. The floating bar is a live tool display; tapping it pushes
-        // the tool detail NavigationStack.
-        .fullScreenCover(isPresented: $expanded) {
-            NavigationStack {
-                ToolLiveSheet(
-                    toolBlocks: toolBlocks,
-                    initialIdx: displayedIdx,
-                    toolSnapshots: toolSnapshots,
-                    browserPool: browserPool,
-                    onBrowserTakeover: onBrowserTakeover,
-                    onTakeoverDone: onTakeoverDone
-                )
-                .navigationTitle(AppLocalized("Tool Detail"))
-                .navigationBarTitleDisplayMode(.inline)
-            }
+        // [T-turn-summary-row] Detail = bottom sheet, not a pushed page.
+        // Matches the Claude reference: grabber, swipe to dismiss.
+        .sheet(isPresented: $expanded) {
+            ToolLiveSheet(
+                toolBlocks: toolBlocks,
+                initialIdx: displayedIdx,
+                toolSnapshots: toolSnapshots,
+                browserPool: browserPool,
+                onBrowserTakeover: onBrowserTakeover,
+                onTakeoverDone: onTakeoverDone
+            )
+            .presentationDragIndicator(.visible)
+            .presentationDetents([.medium, .large])
         }
     }
 }

@@ -29,6 +29,11 @@ enum MessageListItem: Hashable {
     /// groupKey is the member block IDs joined by "," (stable while the run
     /// only grows — blocks are append-only).
     case assistantToolGroup(UUID, String)  // (messageId, groupKey)
+    /// [T-turn-summary-row] ONE floating summary row per assistant turn that
+    /// involved thinking/tools. The summary sentence covers the whole turn;
+    /// the full nested timeline lives in the bottom sheet. Replaces the old
+    /// per-block thinking/tool rows and tool-group cards.
+    case assistantTurnSummary(UUID)  // (messageId)
     /// Footer area: typing indicator, error, resume, usage.
     case assistantFooter(UUID)
 
@@ -36,7 +41,7 @@ enum MessageListItem: Hashable {
     var messageId: UUID {
         switch self {
         case .wholeMessage(let id), .assistantHeader(let id),
-             .assistantFooter(let id): return id
+             .assistantFooter(let id), .assistantTurnSummary(let id): return id
         case .assistantBlock(let msgId, _), .assistantToolGroup(let msgId, _): return msgId
         }
     }
@@ -55,13 +60,16 @@ enum MessageListItem: Hashable {
     }
 
     /// [chat-ui] True when this item renders the given block — either directly
-    /// (.assistantBlock) or as a member of a tool group.
+    /// (.assistantBlock), as a member of a tool group, or as part of the
+    /// turn summary row (.assistantTurnSummary covers all thinking/tool
+    /// blocks of the turn).
     func containsBlock(messageId mid: UUID, blockId: UUID) -> Bool {
         switch self {
         case .assistantBlock(let m, let b): return m == mid && b == blockId
         case .assistantToolGroup(let m, let groupKey):
             guard m == mid else { return false }
             return groupKey.split(separator: ",").contains(where: { $0 == blockId.uuidString[...] })
+        case .assistantTurnSummary(let m): return m == mid
         default: return false
         }
     }
@@ -1209,6 +1217,10 @@ final class CellStateBridgeV2: ObservableObject {
     @Published var toolSnapshots: [ToolSnapshotItem] = []
     /// Tool detail sheet — owned by footer, triggered by block cells.
     @Published var detailBlock: AssistantBlock?
+    /// [T-turn-summary-row] Turn detail sheet — triggered by the turn summary
+    /// row (one row per turn). Carries the whole message; the sheet shows the
+    /// full nested timeline.
+    @Published var turnSheetMessage: ChatMessage?
     /// Token usage visibility — toggled by double-tap on block cells, read by footer.
     @Published var showUsage: Bool = false
     @Published var usageContentVisible: Bool = false
