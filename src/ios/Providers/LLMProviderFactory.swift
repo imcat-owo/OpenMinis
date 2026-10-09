@@ -80,10 +80,10 @@ enum LLMProviderFactory {
 
     /// [T-phase1-sampling] Sanitize user-defined custom headers: drop empty keys
     /// and never allow overriding Authorization / Content-Type / User-Agent /
-    /// x-api-key — those are owned by the auth + identity layers of each
+    /// x-api-key / api-key — those are owned by the auth + identity layers of each
     /// provider.
     static func sanitizedCustomHeaders(_ headers: [String: String]) -> [String: String] {
-        let protected: Set<String> = ["authorization", "content-type", "user-agent", "x-api-key"]
+        let protected: Set<String> = ["authorization", "content-type", "user-agent", "x-api-key", "api-key"]
         var out: [String: String] = [:]
         for (key, value) in headers {
             let trimmedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -946,7 +946,7 @@ struct SessionInferenceConfig: Codable, Hashable {
 }
 
 /// User-configurable generation sampling parameters (Kelivo parity:
-/// Temperature / Top P / Max Tokens / presence & frequency penalties).
+/// Temperature / Top P / presence & frequency penalties).
 ///
 /// Every field is optional: nil = "not set" → the provider's own default
 /// applies (and the UI shows "默认"). Stored in two layers —
