@@ -483,7 +483,7 @@
 		E5VMA0002 /* AIChatViewModel+SlashCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5VMA0012 /* AIChatViewModel+SlashCommands.swift */; };
 		E5VMA0003 /* AIChatViewModel+MentionMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5VMA0013 /* AIChatViewModel+MentionMenu.swift */; };
 		E5VMA0004 /* AIChatViewModel+TitleGeneration.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5VMA0014 /* AIChatViewModel+TitleGeneration.swift */; };
-		E5VMA0005 /* AIChatViewModel+BlockSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5VMA0015 /* AIChatViewModel+BlockSummary.swift */; };
+		E5VMA0009 /* AIChatViewModel+BlockSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5VMA0019 /* AIChatViewModel+BlockSummary.swift */; };
 		E5VMA0005 /* AIChatViewModel+MemoryTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5VMA0015 /* AIChatViewModel+MemoryTools.swift */; };
 		E5VMA0006 /* AIChatViewModel+ProviderFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5VMA0016 /* AIChatViewModel+ProviderFactory.swift */; };
 		E5VMA0007 /* AIChatViewModel+ToolDefinitions.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5VMA0017 /* AIChatViewModel+ToolDefinitions.swift */; };
@@ -1223,7 +1223,7 @@
 		E5VMA0012 /* AIChatViewModel+SlashCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatViewModel+SlashCommands.swift"; sourceTree = "<group>"; };
 		E5VMA0013 /* AIChatViewModel+MentionMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatViewModel+MentionMenu.swift"; sourceTree = "<group>"; };
 		E5VMA0014 /* AIChatViewModel+TitleGeneration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatViewModel+TitleGeneration.swift"; sourceTree = "<group>"; };
-		E5VMA0015 /* AIChatViewModel+BlockSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatViewModel+BlockSummary.swift"; sourceTree = "<group>"; };
+		E5VMA0019 /* AIChatViewModel+BlockSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatViewModel+BlockSummary.swift"; sourceTree = "<group>"; };
 		E5VMA0015 /* AIChatViewModel+MemoryTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatViewModel+MemoryTools.swift"; sourceTree = "<group>"; };
 		E5VMA0016 /* AIChatViewModel+ProviderFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatViewModel+ProviderFactory.swift"; sourceTree = "<group>"; };
 		E5VMA0017 /* AIChatViewModel+ToolDefinitions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatViewModel+ToolDefinitions.swift"; sourceTree = "<group>"; };
@@ -2243,7 +2243,7 @@
 				E5VMA0012 /* AIChatViewModel+SlashCommands.swift */,
 				E5VMA0013 /* AIChatViewModel+MentionMenu.swift */,
 				E5VMA0014 /* AIChatViewModel+TitleGeneration.swift */,
-				E5VMA0015 /* AIChatViewModel+BlockSummary.swift */,
+				E5VMA0019 /* AIChatViewModel+BlockSummary.swift */,
 				E5VMA0015 /* AIChatViewModel+MemoryTools.swift */,
 				E5VMA0016 /* AIChatViewModel+ProviderFactory.swift */,
 				E5VMA0017 /* AIChatViewModel+ToolDefinitions.swift */,
@@ -3013,7 +3013,7 @@
 				E5VMA0002 /* AIChatViewModel+SlashCommands.swift in Sources */,
 				E5VMA0003 /* AIChatViewModel+MentionMenu.swift in Sources */,
 				E5VMA0004 /* AIChatViewModel+TitleGeneration.swift in Sources */,
-				E5VMA0005 /* AIChatViewModel+BlockSummary.swift in Sources */,
+				E5VMA0009 /* AIChatViewModel+BlockSummary.swift in Sources */,
 				E5VMA0005 /* AIChatViewModel+MemoryTools.swift in Sources */,
 				E5VMA0006 /* AIChatViewModel+ProviderFactory.swift in Sources */,
 				E5VMA0007 /* AIChatViewModel+ToolDefinitions.swift in Sources */,
