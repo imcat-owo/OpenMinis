@@ -97,6 +97,18 @@ enum TTSProviderBridge {
             // "transcription only" claim predates those models.
             return VoiceProvider(providerId: id, baseURL: base, apiKey: key)
 
+        case .qwenaudio:
+            // [tts-vendors-3 2026-10-09] DashScope WebSocket TTS (Kelivo parity).
+            return QwenAudioVoiceProvider(providerId: id, baseURL: base, apiKey: key)
+
+        case .stepfun:
+            // [tts-vendors-3 2026-10-09] StepFun stepaudio (Kelivo parity).
+            return StepFunVoiceProvider(providerId: id, baseURL: base, apiKey: key)
+
+        case .fishaudio:
+            // [tts-vendors-3 2026-10-09] Fish Audio s2.1 (Kelivo parity).
+            return FishAudioVoiceProvider(providerId: id, baseURL: base, apiKey: key)
+
         default:
             logger.error("TTS bridge: unsupported vendor \(service.kind.rawValue)")
             return nil

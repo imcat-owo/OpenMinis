@@ -264,7 +264,7 @@ struct TTSServiceEditorView: View {
                     throw VoiceProviderError.unsupported("This vendor cannot synthesize speech")
                 }
                 let request = TTSProviderBridge.request(for: draft,
-                                                        text: "你好，这是语音服务的试听。")
+                                                        text: draft.previewSentence)
                 let data = try await provider.synthesize(request)
                 guard !data.isEmpty else {
                     throw VoiceProviderError.noAudioData

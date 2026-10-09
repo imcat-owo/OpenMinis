@@ -1080,6 +1080,11 @@ extension AIChatViewModel {
         case "read_image":
             let d = detail ?? fileName(args["path"] as? String)
             return zh ? "正在读取图片:\(d)" : "Reading image: \(d)"
+        case "send_voice":
+            // [tts-optional-title 2026-10-09] tool_title 可选：模型没传就拿
+            // text 开头当展示摘要，不再强制要求。
+            let d = detail ?? clip(args["text"] as? String, 40) ?? ""
+            return zh ? "正在发送语音:\(d)" : "Sending voice: \(d)"
         default:
             let d = detail ?? name
             return zh ? "正在执行:\(d)" : "Running: \(d)"

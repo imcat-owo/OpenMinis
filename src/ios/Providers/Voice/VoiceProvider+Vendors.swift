@@ -1358,3 +1358,228 @@ final class OpenRouterVoiceProvider: VoiceProvider {
         return wav
     }
 }
+
+// MARK: - Qwen Audio (DashScope WebSocket TTS)
+
+/// [tts-vendors-3 2026-10-09] DashScope's WebSocket TTS (SpeechSynthesizer),
+/// Kelivo parity (network_tts.dart _qwenAudioSpeech). Duplex streaming:
+/// run-task → task-started → continue-task(text) → finish-task → collect the
+/// binary audio frames until task-finished. PCM frames are wrapped in WAV.
+final class QwenAudioVoiceProvider: VoiceProvider {
+
+    override var supportsVoiceInput: Bool { false }
+
+    override func defaultVoiceOutputModel() -> String { "qwen-audio-3.0-tts-flash" }
+    override func defaultVoiceOutputVoice() -> String { "longanhuan_v3.6" }
+
+    override func synthesize(_ request: VoiceOutputRequest) async throws -> Data {
+        // WebSocket endpoint: the user's baseURL when it's a ws(s) URL,
+        // otherwise the DashScope default (optionally workspace-scoped).
+        let workspaceId = request.extra("workspaceId") ?? ""
+        let regionRaw = request.extra("region") ?? "cn-beijing"
+        let region = regionRaw.isEmpty ? "cn-beijing" : regionRaw
+        let base = effectiveBaseURL().trimmingCharacters(in: .whitespacesAndNewlines)
+        let wsURL: String
+        if base.hasPrefix("wss://") || base.hasPrefix("ws://") {
+            wsURL = base
+        } else if !workspaceId.isEmpty {
+            wsURL = "wss://\(workspaceId).\(region).maas.aliyuncs.com/api-ws/v1/inference"
+        } else {
+            wsURL = "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
+        }
+        guard let url = URL(string: wsURL) else {
+            throw VoiceProviderError.parseError("Invalid Qwen Audio WebSocket URL")
+        }
+        var urlRequest = URLRequest(url: url)
+        if let key = apiKey, !key.isEmpty {
+            urlRequest.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        }
+        if !workspaceId.isEmpty {
+            urlRequest.setValue(workspaceId, forHTTPHeaderField: "X-DashScope-WorkSpace")
+        }
+        let session = URLSession(configuration: .default)
+        let ws = session.webSocketTask(with: urlRequest)
+        ws.resume()
+        defer { ws.cancel(with: .normalClosure, reason: nil) }
+
+        let taskId = UUID().uuidString
+        let format = (request.extra("format") ?? "mp3").lowercased()
+        let sampleRate = request.extraInt("sampleRate") ?? 22050
+        let voice = (request.voice?.isEmpty == false) ? request.voice! : defaultVoiceOutputVoice()
+        let model = (request.model?.isEmpty == false) ? request.model! : defaultVoiceOutputModel()
+
+        func sendJSON(_ obj: [String: Any]) async throws {
+            let data = try JSONSerialization.data(withJSONObject: obj)
+            try await ws.send(.string(String(data: data, encoding: .utf8) ?? ""))
+        }
+
+        try await sendJSON([
+            "header": ["action": "run-task", "task_id": taskId, "streaming": "duplex"],
+            "payload": [
+                "task_group": "audio", "task": "tts", "function": "SpeechSynthesizer",
+                "model": model,
+                "parameters": [
+                    "text_type": "PlainText",
+                    "voice": voice,
+                    "format": format,
+                    "sample_rate": sampleRate,
+                ] as [String: Any],
+                "input": [:] as [String: Any],
+            ] as [String: Any],
+        ])
+
+        // Wait for task-started before feeding text.
+        let startDeadline = Date().addingTimeInterval(30)
+        var started = false
+        while !started {
+            if Date() > startDeadline {
+                throw VoiceProviderError.parseError("Qwen Audio TTS: no task-started")
+            }
+            switch try await ws.receive() {
+            case .string(let s):
+                if let (event, msg) = Self.lifecycleEvent(s) {
+                    if event == "task-started" { started = true }
+                    else if event == "task-failed" || event == "error" {
+                        throw VoiceProviderError.parseError("Qwen Audio TTS failed: \(msg)")
+                    }
+                }
+            case .data: break
+            @unknown default: break
+            }
+        }
+
+        try await sendJSON([
+            "header": ["action": "continue-task", "task_id": taskId, "streaming": "duplex"],
+            "payload": ["input": ["text": request.input]],
+        ])
+        try await sendJSON([
+            "header": ["action": "finish-task", "task_id": taskId, "streaming": "duplex"],
+            "payload": ["input": [:] as [String: Any]],
+        ])
+
+        var audio = Data()
+        let finishDeadline = Date().addingTimeInterval(120)
+        while true {
+            if Date() > finishDeadline {
+                throw VoiceProviderError.parseError("Qwen Audio TTS: no task-finished")
+            }
+            switch try await ws.receive() {
+            case .data(let d):
+                audio.append(d)
+            case .string(let s):
+                if let (event, msg) = Self.lifecycleEvent(s) {
+                    if event == "task-finished" {
+                        guard !audio.isEmpty else { throw VoiceProviderError.noAudioData }
+                        return format == "pcm"
+                            ? QwenVoiceProvider.wrapPCMInWAV(audio, sampleRate: sampleRate)
+                            : audio
+                    }
+                    if event == "task-failed" || event == "error" {
+                        throw VoiceProviderError.parseError("Qwen Audio TTS failed: \(msg)")
+                    }
+                }
+            @unknown default: break
+            }
+        }
+    }
+
+    /// Parse a DashScope lifecycle JSON frame: (event, message)?.
+    private static func lifecycleEvent(_ s: String) -> (String, String)? {
+        guard let d = s.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let header = json["header"] as? [String: Any],
+              let event = header["event"] as? String else { return nil }
+        let payload = json["payload"] as? [String: Any]
+        let msg = (header["error_message"] as? String)
+            ?? (header["error_code"] as? String)
+            ?? (payload?["message"] as? String)
+            ?? event
+        return (event, msg)
+    }
+}
+
+// MARK: - StepFun (stepaudio)
+
+/// [tts-vendors-3 2026-10-09] StepFun TTS (stepaudio), Kelivo parity
+/// (network_tts.dart _stepSpeech). OpenAI-shaped POST to {base}/v1/audio/speech
+/// with Bearer auth; StepFun's official fields are snake_case. Returns raw
+/// audio bytes. Long replies are chunked by the caller (AIVoiceMessageComposer).
+final class StepFunVoiceProvider: VoiceProvider {
+
+    override var supportsVoiceInput: Bool { false }
+
+    override func defaultVoiceOutputModel() -> String { "stepaudio-2.5-tts" }
+    override func defaultVoiceOutputVoice() -> String { "cixingnansheng" }
+
+    override func voiceOutputEndpointPath() -> String { "/v1/audio/speech" }
+
+    override func buildVoiceOutputRequest(_ request: VoiceOutputRequest) throws -> URLRequest {
+        let urlStr = composedURLString(path: voiceOutputEndpointPath())
+        guard let url = URL(string: urlStr) else {
+            throw VoiceProviderError.parseError("Invalid URL: \(urlStr)")
+        }
+        let model = (request.model?.isEmpty == false) ? request.model! : defaultVoiceOutputModel()
+        let voice = (request.voice?.isEmpty == false) ? request.voice! : defaultVoiceOutputVoice()
+        var body: [String: Any] = [
+            "model": model,
+            "input": request.input,
+            "voice": voice,
+            "response_format": request.extra("format") ?? "mp3",
+            "speed": request.speed.map { Double($0) } ?? request.extraDouble("speed") ?? 1.0,
+            "volume": request.extraDouble("volume") ?? 1.0,
+            "sample_rate": request.extraInt("sampleRate") ?? 24000,
+        ]
+        // instruction is only valid for stepaudio-2.5-tts; other models error.
+        if model.trimmingCharacters(in: .whitespaces) == "stepaudio-2.5-tts",
+           let instruction = request.extra("instruction") {
+            body["instruction"] = instruction
+        }
+        var urlRequest = URLRequest(url: url)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
+        applyVoiceAuth(&urlRequest)
+        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return urlRequest
+    }
+}
+
+// MARK: - Fish Audio
+
+/// [tts-vendors-3 2026-10-09] Fish Audio TTS (s2.1), Kelivo parity
+/// (network_tts.dart _fishAudioSpeech). POST {base}/v1/tts with Bearer auth
+/// and the model in the `model` header. The service's voice field carries
+/// Fish Audio's reference_id. Returns raw audio bytes.
+final class FishAudioVoiceProvider: VoiceProvider {
+
+    override var supportsVoiceInput: Bool { false }
+
+    override func defaultVoiceOutputModel() -> String { "s2.1-pro" }
+
+    override func voiceOutputEndpointPath() -> String { "/v1/tts" }
+
+    override func buildVoiceOutputRequest(_ request: VoiceOutputRequest) throws -> URLRequest {
+        let urlStr = composedURLString(path: voiceOutputEndpointPath())
+        guard let url = URL(string: urlStr) else {
+            throw VoiceProviderError.parseError("Invalid URL: \(urlStr)")
+        }
+        let model = (request.model?.isEmpty == false) ? request.model! : defaultVoiceOutputModel()
+        let body: [String: Any] = [
+            "text": request.input,
+            "format": request.extra("format") ?? "mp3",
+            "temperature": request.extraDouble("temperature") ?? 0.7,
+            "top_p": request.extraDouble("topP") ?? 0.7,
+            "prosody": ["speed": request.speed.map { Double($0) } ?? request.extraDouble("speed") ?? 1.0],
+            "sample_rate": request.extraInt("sampleRate") ?? 44100,
+            "latency": request.extra("latency") ?? "normal",
+            "reference_id": request.voice ?? "",
+        ]
+        var urlRequest = URLRequest(url: url)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.setValue(model, forHTTPHeaderField: "model")
+        applyVoiceAuth(&urlRequest)
+        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return urlRequest
+    }
+}

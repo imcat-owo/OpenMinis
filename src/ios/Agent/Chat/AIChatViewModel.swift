@@ -2178,9 +2178,18 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
             p += "\n\n" + mcpFragment
         }
         // [tts-paper 2026-10-02] TTS 能力纸条：用户这轮在聊语音/TTS 才塞进
-        // prompt（见 TTSPaper.paperIfRelevant 的宽松触发判定），平时不占。
-        // 内容按当前 TTS 配置现拼；没配 TTS 时纸条为 nil，模型不会知道这功能。
-        if let ttsPaper = TTSPaper.paperIfRelevant(userMessage: Self.lastUserText(in: agentHistory)) {
+        // prompt（见 TTSPaper.paperIfRelevant 的宽松触发判定），做展开详情。
+        // [tts-standing 2026-10-09] 常驻能力声明：只要配了 TTS 服务/分组，
+        // 每轮 prompt 都带一句——模型永久知道自己有声音、想发就发，不靠
+        // 关键词触发，不用等主人开口。这是她定的："他也要知道这个语音的
+        // 存在，不用谁提醒"；"模型想自己发语音了，就像人一样"。
+        // 内容按当前 TTS 配置现拼；没配 TTS 时两者都为 nil，模型不会知道这功能。
+        let voiceConfigured = TTSPaper.hasConfiguredVoice()
+        if let standing = TTSPaper.standingCapability() {
+            p += "\n\n" + standing
+        }
+        if let ttsPaper = TTSPaper.paperIfRelevant(userMessage: Self.lastUserText(in: agentHistory),
+                                                   skipIntro: voiceConfigured) {
             p += "\n\n" + ttsPaper
         }
         // [T-memory-toggle-gates-injection-and-tools-ios] Memory injection

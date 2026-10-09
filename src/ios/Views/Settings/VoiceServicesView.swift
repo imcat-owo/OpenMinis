@@ -283,7 +283,7 @@ struct VoiceServicesView: View {
                 guard let provider = TTSProviderBridge.provider(for: service) else {
                     throw VoiceProviderError.unsupported("This vendor cannot synthesize speech")
                 }
-                let request = TTSProviderBridge.request(for: service, text: "你好，这是\(service.name)的试听。")
+                let request = TTSProviderBridge.request(for: service, text: service.previewSentence)
                 let data = try await provider.synthesize(request)
                 guard !data.isEmpty else { throw VoiceProviderError.noAudioData }
                 // [T-tts-vendor-fix 09-13] Play via the shared TTSPreviewPlayer:

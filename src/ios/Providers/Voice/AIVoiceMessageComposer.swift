@@ -264,13 +264,36 @@ enum AIVoiceMessageComposer {
     ) async throws -> Data {
         let chunks = VoiceOutputPlayer.splitText(text, maxChars: limit)
         guard chunks.count > 1 else { return try await synthWithRetry(text, synth) }
+        // [tts-prefetch 2026-10-09] Pipelined synthesis: up to 2 chunks in
+        // flight at once (mirrors VoiceOutputPlayer.maxPrefetch = 2). async-let
+        // inherits this @MainActor enum's isolation, so synthWithRetry stays
+        // actor-confined and no Sendable dance is needed. Order is preserved;
+        // one chunk failing fails the whole bubble, same as before.
+        // NOTE: true "play chunk 0 while the rest synthesizes" would require
+        // breaking the single-file bubble contract (AVAudioPlayer loads the
+        // whole file at init) — out of scope; the prefetch cuts time-to-audio
+        // roughly in half for multi-chunk replies.
         var pieces: [Data] = []
-        for chunk in chunks {
-            let d = try await synthWithRetry(chunk, synth)
-            guard !d.isEmpty else { throw VoiceProviderError.noAudioData }
-            pieces.append(d)
+        pieces.reserveCapacity(chunks.count)
+        var i = 0
+        while i < chunks.count {
+            if Task.isCancelled { throw CancellationError() }
+            if i + 1 < chunks.count {
+                async let d0 = synthWithRetry(chunks[i], synth)
+                async let d1 = synthWithRetry(chunks[i + 1], synth)
+                let (a, b) = try await (d0, d1)
+                guard !a.isEmpty, !b.isEmpty else { throw VoiceProviderError.noAudioData }
+                pieces.append(a)
+                pieces.append(b)
+                i += 2
+            } else {
+                let d = try await synthWithRetry(chunks[i], synth)
+                guard !d.isEmpty else { throw VoiceProviderError.noAudioData }
+                pieces.append(d)
+                i += 1
+            }
         }
-        logger.info("[AIVoice] long reply synthesized in \(chunks.count) chunks (limit \(limit))")
+        logger.info("[AIVoice] long reply synthesized in \(chunks.count) chunks (limit \(limit), pipelined x2)")
         return VoiceOutputPlayer.concatPieces(pieces)
     }
 

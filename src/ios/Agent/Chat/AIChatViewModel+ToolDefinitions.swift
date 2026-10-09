@@ -240,7 +240,10 @@ extension AIChatViewModel {
             name: "send_voice",
             description: "Send a voice message to the user. Synthesizes the given text with the configured TTS voice and delivers it as a WeChat-style voice bubble in the chat (it auto-plays for the user). Use this when the user asks you to send them a voice message — do NOT synthesize audio yourself with shell commands. Write `text` as natural spoken language in the user's language; it will be read aloud as-is. Returns the bubble duration on success.",
             parameters: [
-                "tool_title": AgentToolParam(type: .string, description: "A concise 5-10 word summary of what you're sending, shown to the user (e.g. 'Send goodnight voice message'). Use the same language as the user."),
+                // [tts-optional-title 2026-10-09] tool_title 改为可选：不传则
+                // 按 text 开头自动生成展示摘要，不再强制要求（Kelivo 的
+                // textToSpeech 只收文本；title 对语音消息没有功能价值）。
+                "tool_title": AgentToolParam(type: .string, description: "Optional: a concise 5-10 word summary of what you're sending, shown to the user (e.g. 'Send goodnight voice message'). Omit it and a summary is generated from the start of `text`. Use the same language as the user."),
                 "text": AgentToolParam(type: .string, description: "The words to speak, in the user's language. Keep it conversational and reasonably short — this is what the user will hear."),
                 // [voice-bubble-tool 2026-10-02] 点名音色/分组（TTS 施工员转交）。
                 // voice = TTS 服务名（服务自带音色配置）；group = TTS 分组名（按成员顺序 fallback）。
@@ -248,7 +251,7 @@ extension AIChatViewModel {
                 "voice": AgentToolParam(type: .string, description: "可选：点名用哪个 TTS 服务的声音（服务名，见 TTS 能力纸条里列的）。不传就用默认 TTS 分组。"),
                 "group": AgentToolParam(type: .string, description: "可选：点名用哪个 TTS 分组（分组名，见 TTS 能力纸条里列的），按分组成员顺序自动 fallback。不传就用默认分组。voice 和 group 同时传时，以 group 为准。"),
             ],
-            required: ["tool_title", "text"],
+            required: ["text"],
             propertyOrdering: ["tool_title", "text", "voice", "group"]
         ))
 

@@ -39,6 +39,11 @@ enum TTSServiceKind: String, CaseIterable, Codable, Identifiable {
     case xunfei
     case mimo
     case openrouter
+    // [tts-vendors-3 2026-10-09] Kelivo parity: DashScope WebSocket TTS,
+    // StepFun stepaudio, Fish Audio s2.1.
+    case qwenaudio
+    case stepfun
+    case fishaudio
 
     var id: String { rawValue }
 
@@ -57,6 +62,9 @@ enum TTSServiceKind: String, CaseIterable, Codable, Identifiable {
         case .xunfei:      return "iFlytek"
         case .mimo:        return "Xiaomi MiMo"
         case .openrouter:  return "OpenRouter"
+        case .qwenaudio:  return "Qwen Audio"
+        case .stepfun:    return "StepFun"
+        case .fishaudio:  return "Fish Audio"
         }
     }
 
@@ -76,6 +84,9 @@ enum TTSServiceKind: String, CaseIterable, Codable, Identifiable {
         case .xunfei:     return "mic.fill"
         case .mimo:       return "cpu"
         case .openrouter: return "arrow.triangle.branch"
+        case .qwenaudio:  return "antenna.radiowaves.left.and.right"
+        case .stepfun:    return "figure.walk"
+        case .fishaudio:  return "fish.fill"
         }
     }
 
@@ -95,6 +106,9 @@ enum TTSServiceKind: String, CaseIterable, Codable, Identifiable {
         case .xunfei:     return "https://tts-api.xfyun.cn"
         case .mimo:       return "https://api.xiaomimimo.com/v1"
         case .openrouter: return "https://openrouter.ai/api/v1"
+        case .qwenaudio:  return "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
+        case .stepfun:    return "https://api.stepfun.com/v1"
+        case .fishaudio:  return "https://api.fish.audio"
         }
     }
 
@@ -118,6 +132,9 @@ enum TTSServiceKind: String, CaseIterable, Codable, Identifiable {
         case .xunfei:     return "xiaoyan"
         case .mimo:       return "mimo-v2.5-tts"
         case .openrouter: return "openai/gpt-4o-mini-tts"
+        case .qwenaudio:  return "qwen-audio-3.0-tts-flash"
+        case .stepfun:    return "stepaudio-2.5-tts"
+        case .fishaudio:  return "s2.1-pro"
         }
     }
 
@@ -137,6 +154,9 @@ enum TTSServiceKind: String, CaseIterable, Codable, Identifiable {
         case .xunfei:     return "xiaoyan"
         case .mimo:       return "mimo_default"
         case .openrouter: return "alloy"
+        case .qwenaudio:  return "longanhuan_v3.6"
+        case .stepfun:    return "cixingnansheng"
+        case .fishaudio:  return ""
         }
     }
 
@@ -234,6 +254,34 @@ extension TTSServiceKind {
             return [
                 TTSKnob(key: "instruction", title: "Instruction", placeholder: "Style hint (optional)", defaultValue: ""),
             ]
+        case .qwenaudio:
+            // [tts-vendors-3 2026-10-09] DashScope WebSocket TTS options (kelivo parity).
+            return [
+                TTSKnob(key: "workspaceId", title: "Workspace ID", placeholder: "Optional — empty uses the default endpoint", defaultValue: ""),
+                TTSKnob(key: "region", title: "Region", placeholder: "cn-beijing", defaultValue: "cn-beijing"),
+                TTSKnob(key: "format", title: "Format", placeholder: "mp3 / wav / pcm", defaultValue: "mp3"),
+                TTSKnob(key: "sampleRate", title: "Sample Rate", placeholder: "8000 – 48000", defaultValue: "22050"),
+            ]
+        case .stepfun:
+            // [tts-vendors-3 2026-10-09] StepFun stepaudio options (kelivo parity).
+            return [
+                TTSKnob(key: "format", title: "Response Format", placeholder: "mp3 / wav / pcm", defaultValue: "mp3"),
+                TTSKnob(key: "speed", title: "Speed", placeholder: "0.5 – 2.0", defaultValue: "1.0"),
+                TTSKnob(key: "volume", title: "Volume", placeholder: "0.1 – 10.0", defaultValue: "1.0"),
+                TTSKnob(key: "sampleRate", title: "Sample Rate", placeholder: "8000 – 44100", defaultValue: "24000"),
+                TTSKnob(key: "instruction", title: "Instruction", placeholder: "Style hint — only for stepaudio-2.5-tts", defaultValue: ""),
+            ]
+        case .fishaudio:
+            // [tts-vendors-3 2026-10-09] Fish Audio options (kelivo parity).
+            // The voice field carries Fish Audio's reference_id.
+            return [
+                TTSKnob(key: "format", title: "Format", placeholder: "mp3 / wav / pcm", defaultValue: "mp3"),
+                TTSKnob(key: "temperature", title: "Temperature", placeholder: "0 – 1", defaultValue: "0.7"),
+                TTSKnob(key: "topP", title: "Top P", placeholder: "0 – 1", defaultValue: "0.7"),
+                TTSKnob(key: "speed", title: "Speed", placeholder: "0.5 – 2.0", defaultValue: "1.0"),
+                TTSKnob(key: "sampleRate", title: "Sample Rate", placeholder: "8000 – 44100", defaultValue: "44100"),
+                TTSKnob(key: "latency", title: "Latency", placeholder: "normal / balanced", defaultValue: "normal"),
+            ]
         // [T-tts-vendor-fix 09-13] gemini speed removed: the Gemini TTS API
         // has no speed parameter (kelivo's Gemini options carry none either).
         case .doubao, .xunfei:
@@ -318,6 +366,21 @@ struct TTSServiceOptions: Identifiable, Codable, Equatable {
         let v = extras[key]?.trimmingCharacters(in: .whitespaces)
         if let v, !v.isEmpty { return v }
         return kind.knobs.first { $0.key == key }?.defaultValue.nonEmpty
+    }
+
+    /// [tts-preview-lang 2026-10-09] Preview sentence for the 试听 button:
+    /// a Chinese line for Chinese voices, an English line otherwise — an
+    /// English voice reading Chinese misleads voice selection.
+    var previewSentence: String {
+        let displayName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let label = displayName.isEmpty ? kind.displayName : displayName
+        let v = voice.lowercased()
+        let cjk = v.range(of: "\\p{Han}", options: .regularExpression) != nil
+        let chineseKinds: [TTSServiceKind] = [.minimax, .qwen, .qwenaudio, .doubao, .xunfei]
+        if v.hasPrefix("zh") || cjk || chineseKinds.contains(kind) {
+            return "你好，这是\(label)的试听。"
+        }
+        return "Hello, this is a preview of the \(label) voice."
     }
 }
 
