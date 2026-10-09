@@ -5561,7 +5561,7 @@ private final class VoiceBubbleProgressController: NSObject {
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] time, duration, activeURL in
                     guard let self, let track = self.track, let fill = self.fill else { return }
-                    let isActive = activeURL == self.fileURL
+                    let isActive = self.fileURL != nil && activeURL == self.fileURL
                     let frac: CGFloat = (isActive && duration > 0) ? CGFloat(time / duration) : 0
                     var f = fill.frame
                     f.size.width = track.bounds.width * min(max(frac, 0), 1)
