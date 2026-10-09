@@ -329,16 +329,13 @@ struct TurnDetailSheet: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 if block.kind == .thinking {
-                    // Full thinking content — sits directly on the
-                    // thinking image/color with subtle translucency.
+                    // Full thinking content — plain text directly on the
+                    // thinking image/color background. No cards.
                     Text(block.content.isEmpty ? AppLocalized("No thinking content") : block.content)
                         .font(.system(size: 14))
                         .foregroundStyle(ChatColors.primaryText)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(14)
-                        .background(ChatColors.primaryText.opacity(0.05))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
                 } else {
                     if let args = block.toolInputArgs, !args.isEmpty {
                         detailCard(title: AppLocalized("Input"), text: args)
@@ -362,6 +359,8 @@ struct TurnDetailSheet: View {
     }
 
     private func detailCard(title: String, text: String) -> some View {
+        // [T-sheet-bg] Plain text only — no cards, no panels, no boxes.
+        // Text sits directly on the sheet's thinking-image background.
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.system(size: 12, weight: .medium))
@@ -372,11 +371,6 @@ struct TurnDetailSheet: View {
                 .textSelection(.enabled)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        // [T-sheet-bg] No solid cards — subtle translucency only, content
-        // sits directly on the thinking image/color.
-        .background(ChatColors.primaryText.opacity(0.05))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     // MARK: - Helpers
