@@ -969,6 +969,17 @@ extension AIChatViewModel {
                 }
                 break
             }
+            // [P2] "AI Voice Replies" 开关管住所有 AI 语音：send_voice 工具也受
+            // 它门控。关 = 彻底没 AI 语音——给模型明确交代，让它如实告诉主人
+            // 去开开关，而不是谎称发了。
+            guard AIVoiceMessageComposer.voiceRepliesEnabled(sessionId: sid) else {
+                toolOutput = "Error: AI voice replies are turned OFF for this session. Do not synthesize anything — tell the user that AI voice is currently off and they can re-enable it in the session's voice settings; do not claim a voice message was sent."
+                toolSuccess = false
+                if msgIdx < messages.count, blockIdx < messages[msgIdx].blocks.count {
+                    messages[msgIdx].blocks[blockIdx].content = toolOutput
+                }
+                break
+            }
             // [voice-bubble-tool 2026-10-02] voice/group 点名（TTS 施工员转交）：
             // 空字符串当没传；点名走严格语义（找不到/都挂了就报错，不悄悄换声音）。
             let voiceParam: String? = {

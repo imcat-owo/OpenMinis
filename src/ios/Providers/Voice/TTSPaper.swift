@@ -20,11 +20,14 @@ import Foundation
 
 enum TTSPaper {
 
-    /// 只要有一个启用的 TTS 服务或任一 TTS 分组，就认为"有声音可用"。
+    /// 有没有可用的语音：至少一个启用的服务，或默认分组里有可用候选。
+    /// 注意：光有分组不算——分组存在但成员全被停用/删光时，跟"没配"一样
+    /// （跟 paperText 里的"默认 TTS 分组「X」里没有可用的服务"判定一致，
+    /// 常驻声明和详细纸条永远不互相矛盾）。
     static func hasConfiguredVoice() -> Bool {
         let serviceStore = TTSServiceStore.shared
         if serviceStore.services.contains(where: { $0.enabled }) { return true }
-        return !TTSGroupStore.shared.groups.isEmpty
+        return !TTSGroupStore.shared.defaultGroupCandidates().isEmpty
     }
 
     /// 常驻能力声明：短、一句。配了 TTS 就每轮进 prompt，让模型永久知道
@@ -36,7 +39,8 @@ enum TTSPaper {
         let groupStore = TTSGroupStore.shared
         var desc = ""
         if let defId = groupStore.defaultGroupId,
-           let g = groupStore.group(id: defId) {
+           let g = groupStore.group(id: defId),
+           !groupStore.defaultGroupCandidates().isEmpty {
             desc = "默认 TTS 分组「\(g.name)」"
         } else if let s = serviceStore.selectedService(), s.enabled {
             desc = "TTS 服务「\(s.name)」（音色 \(s.voice)）"

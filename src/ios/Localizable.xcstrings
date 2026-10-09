@@ -104598,7 +104598,67 @@
         }
       }
     }
-  }
+  },
+    "Temperature" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "温度"
+          }
+        }
+      }
+    },
+    "Top P" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Top P"
+          }
+        }
+      }
+    },
+    "Presence Penalty" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "存在惩罚"
+          }
+        }
+      }
+    },
+    "Frequency Penalty" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "频率惩罚"
+          }
+        }
+      }
+    },
+    "Default sampling parameters for every model under this provider. A model can override each of these in its own details. Off = provider default." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此渠道下所有模型的默认采样参数，每个模型可在自己的详情页单独覆盖。关闭 = 使用渠道默认值。"
+          }
+        }
+      }
+    },
+    "Extra HTTP headers sent with every request to this provider (e.g. X-Gateway-Token for relays). Authorization, Content-Type and User-Agent can never be overridden." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每次向此渠道发请求时附带的额外 HTTP 请求头（例如中转网关的 X-Gateway-Token）。Authorization、Content-Type 和 User-Agent 永远不可覆盖。"
+          }
+        }
+      }
+    }
   },
   "version" : "1.0"
 }

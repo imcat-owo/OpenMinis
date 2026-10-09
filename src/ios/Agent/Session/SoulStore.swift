@@ -155,7 +155,11 @@ enum SoulIconImage {
         } catch {
             return .failure(.unreadable)
         }
-        return .success("avatars/\(name).png")
+        // Fixed filename = overwrite in place: drop the cached image so the
+        // new avatar renders instead of the stale one (P1-1).
+        let ref = "avatars/\(name).png"
+        invalidateCache(for: ref)
+        return .success(ref)
     }
 
     /// One-time migration: decode a legacy inline data URI and persist it
@@ -171,7 +175,11 @@ enum SoulIconImage {
         } catch {
             return nil
         }
-        return "avatars/\(name).png"
+        // Same fixed-path overwrite as store(_:named:) — invalidate the
+        // cache so the migrated avatar renders instead of a stale hit.
+        let ref = "avatars/\(name).png"
+        invalidateCache(for: ref)
+        return ref
     }
 
     /// Decode a stored avatar reference back to an image. Accepts a path
@@ -180,13 +188,19 @@ enum SoulIconImage {
     /// itself happens at the load sites, not here). Returns nil for a
     /// non-image value (including a legacy emoji) or anything malformed,
     /// so callers fall back to the default presentation.
+    ///
+    /// Cache note: avatars live at FIXED filenames and are overwritten in
+    /// place, so replacing an avatar keeps the same reference string —
+    /// writers MUST call `invalidateCache(for:)` after a successful write
+    /// (see `store(_:named:)` and `migrateDataURIToFile`), otherwise the
+    /// stale image keeps being served.
     static func decode(_ value: String) -> UIImage? {
         // [PIC-1] Decoded-image cache: every chat bubble header, settings
         // preview and icon picker row decodes the same reference on each
-        // render. Cache per value (keyed by the process-stable hash; a new
-        // avatar is a new value, so replacing the icon can never serve the
-        // old image).
-        let key = "soulavatar:\(value.hashValue)" as NSString
+        // render. Cache per value hash (NOTE: Swift String.hashValue is
+        // per-process random-seeded, NOT stable across launches — the key
+        // is only valid inside this process, which is all the cache needs).
+        let key = cacheKey(for: value)
         if let hit = avatarCache.object(forKey: key) { return hit }
         var image: UIImage?
         if let url = fileURL(forReference: value),
@@ -198,6 +212,16 @@ enum SoulIconImage {
         }
         if let image { avatarCache.setObject(image, forKey: key) }
         return image
+    }
+
+    /// Drop the cached image for a stored reference. Call after overwriting
+    /// the file at a fixed path so the next `decode` re-reads from disk.
+    static func invalidateCache(for value: String) {
+        avatarCache.removeObject(forKey: cacheKey(for: value))
+    }
+
+    private static func cacheKey(for value: String) -> NSString {
+        "soulavatar:\(value.hashValue)" as NSString
     }
 
     private static let avatarCache: NSCache<NSString, UIImage> = {
@@ -1109,12 +1133,27 @@ enum SoulStore {
         }
         try? fm.createDirectory(at: url.deletingLastPathComponent(),
                                 withIntermediateDirectories: true)
-        try? markdown.data(using: .utf8)?.write(to: url, options: .atomic)
+        // [avatar-file] migrate-on-read, same rule as the local load path:
+        // a legacy inline data URI becomes a file reference before the
+        // remote content lands on disk and in the cache.
+        var remoteFile = SoulMDParser.parse(markdown)
+        var textToWrite = markdown
+        if SoulIconImage.isDataURI(remoteFile.metadata.icon) {
+            let name = SoulIconImage.storedName(prefix: "soul", id: PersonaStore.defaultPersonaID)
+            if let path = SoulIconImage.migrateDataURIToFile(remoteFile.metadata.icon, named: name) {
+                remoteFile.metadata.icon = path
+                textToWrite = SoulMDParser.serialize(remoteFile)
+            } else {
+                AppLogger(category: "Soul").error(
+                    "remote soul icon migration failed; keeping in-memory value")
+            }
+        }
+        try? textToWrite.data(using: .utf8)?.write(to: url, options: .atomic)
         // Stamp the file's mtime to match the remote updatedAt so the
         // local mtime comparison stays meaningful across round-trips.
         try? fm.setAttributes([.modificationDate: remoteUpdatedAt],
                               ofItemAtPath: url.path)
-        if let parsed = SoulMDParser.parse(markdown).metadata as SoulMetadata? {
+        if let parsed = remoteFile.metadata as SoulMetadata? {
             cachedMetadata = parsed
         }
         NotificationCenter.default.post(name: .soulMdChanged, object: nil)

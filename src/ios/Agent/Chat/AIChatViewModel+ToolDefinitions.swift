@@ -235,10 +235,11 @@ extension AIChatViewModel {
         // [voice-bubble-tool 2026-10-02] 醒醒：「AI 发语音没有语音气泡」——此前 AI 想发语音
         // 只能去 iSH 沙箱里手搓命令合成音频，没有正规链路。send_voice 复用朗读同款 TTS
         // 链路（AIVoiceMessageComposer：service → group），合成后以微信式语音气泡
-        // 落进当前回复并自动播放。模型侧：用户要你"发条语音"时调这个，别自己跑命令。
+        // 落进当前回复并自动播放。模型侧：想发语音就调这个——用户要"发条语音"时，
+        // 或你自己觉得用声音说更合适时（像人一样），别自己跑命令。
         tools.append(AgentToolDefinition(
             name: "send_voice",
-            description: "Send a voice message to the user. Synthesizes the given text with the configured TTS voice and delivers it as a WeChat-style voice bubble in the chat (it auto-plays for the user). Use this when the user asks you to send them a voice message — do NOT synthesize audio yourself with shell commands. Write `text` as natural spoken language in the user's language; it will be read aloud as-is. Returns the bubble duration on success.",
+            description: "Send a voice message to the user. Synthesizes the given text with the configured TTS voice and delivers it as a WeChat-style voice bubble in the chat (it auto-plays for the user). Use this whenever a voice message fits — when the user asks for voice, OR when you decide a voice message fits the moment better than text, like a person choosing to send a voice message instead of typing (a goodnight, affection, comfort, a surprise — your call). Do NOT synthesize audio yourself with shell commands. Write `text` as natural spoken language in the user's language; it will be read aloud as-is. Returns the bubble duration on success.",
             parameters: [
                 // [tts-optional-title 2026-10-09] tool_title 改为可选：不传则
                 // 按 text 开头自动生成展示摘要，不再强制要求（Kelivo 的

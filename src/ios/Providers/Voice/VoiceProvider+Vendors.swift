@@ -492,7 +492,10 @@ final class XunfeiVoiceProvider: VoiceProvider {
         let session = URLSession(configuration: .default)
         let ws = session.webSocketTask(with: url)
         ws.resume()
-        defer { ws.cancel(with: .normalClosure, reason: nil) }
+        defer {
+            ws.cancel(with: .normalClosure, reason: nil)
+            session.finishTasksAndInvalidate()
+        }
 
         // Same model-group fallback as xAI/Azure: voice id rides in `model`.
         let voice = (request.voice?.isEmpty == false) ? request.voice!
@@ -1400,7 +1403,10 @@ final class QwenAudioVoiceProvider: VoiceProvider {
         let session = URLSession(configuration: .default)
         let ws = session.webSocketTask(with: urlRequest)
         ws.resume()
-        defer { ws.cancel(with: .normalClosure, reason: nil) }
+        defer {
+            ws.cancel(with: .normalClosure, reason: nil)
+            session.finishTasksAndInvalidate()
+        }
 
         let taskId = UUID().uuidString
         let format = (request.extra("format") ?? "mp3").lowercased()

@@ -2046,7 +2046,7 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
             + "There are TWO independent voice layers. Do not confuse them.\n"
             + "1. **Voice Services layer** (Settings → Voice Services) — the user-configured TTS services (OpenAI / Azure / MiniMax / ElevenLabs / Qwen / Groq / xAI / Doubao / iFlytek ...). This is the voice the app uses to read replies aloud and to compose wx-style voice bubbles. The user selects one service; its key/model/voice live in the app's Keychain/UserDefaults — you CANNOT list or query this layer from the shell, and you don't need to: it is applied automatically.\n"
             + "2. **apple-speak** — a plain CLI at /usr/local/bin that uses the on-device Apple voice. Use it ONLY for quick one-off spoken ANNOUNCEMENTS that leave no record in the chat (alarms, reminders, spoken confirmations). It does NOT go through the user's configured voice services, and it is NEVER a way to \"send a voice message\" — for that, use the send_voice tool. Example: `apple-speak speak --text \"你好\" --voice zh-CN --rate 0.5`.\n"
-            + "When the user asks you to '发语音' / '说' / 'speak' / '用语音回答': call the send_voice tool with the exact words to speak — it synthesizes a wx-style voice bubble the user can replay. If the session's AI Voice Replies is on, your text reply is ALSO automatically synthesized by the app (no action needed — just write the text); the tool is the on-demand path and works regardless of the toggle. NEVER fake a voice reply with a text description of audio, and NEVER synthesize audio yourself with shell commands.\n"
+            + "When the user asks you to '发语音' / '说' / 'speak' / '用语音回答': call the send_voice tool with the exact words to speak — it synthesizes a wx-style voice bubble the user can replay. You can also send voice on your own, like a person: whenever you feel a voice message fits the moment better than text (a goodnight, affection, comfort, a surprise), call send_voice — your call, no need to be asked. If the session's AI Voice Replies is on, your text reply is ALSO automatically synthesized by the app (no action needed — just write the text). Both the automatic path and the send_voice tool are gated by that per-session toggle: when it is off, there is no AI voice at all. NEVER fake a voice reply with a text description of audio, and NEVER synthesize audio yourself with shell commands.\n"
             + "There is no 'audio output model' to search for — the model list does NOT contain voice entries. Voice synthesis is a service layer (1) plus the send_voice tool, not a chat model.\n\n"
             + "Native Apple framework tools:\n"
             + "CLI tools at /usr/local/bin with the apple- prefix give you access to iOS frameworks (alarm, bluetooth, calendar, clipboard, device, healthkit, homekit, location, maps, media, nfc, nlp, notification, open, photos, player, reminders, speak, speech, vision, weather). "
@@ -2184,12 +2184,18 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
         // 关键词触发，不用等主人开口。这是她定的："他也要知道这个语音的
         // 存在，不用谁提醒"；"模型想自己发语音了，就像人一样"。
         // 内容按当前 TTS 配置现拼；没配 TTS 时两者都为 nil，模型不会知道这功能。
-        let voiceConfigured = TTSPaper.hasConfiguredVoice()
-        if let standing = TTSPaper.standingCapability() {
+        // [P2] "AI Voice Replies" 开关管住所有 AI 语音：开关关着时，常驻声明
+        // 不进 prompt（关 = 彻底没 AI 语音；开 + 配了 TTS = 模型知道自己有
+        // 声音、可以主动发）。关键词触发的详细纸条保留——用户明确要语音时，
+        // 模型看到配置说明、调 send_voice，handler 会明确报错"开关关着"，
+        // 模型如实转告主人去开开关。
+        let voiceRepliesOn = sessionId.map { AIVoiceMessageComposer.voiceRepliesEnabled(sessionId: $0) } ?? false
+        let standing: String? = voiceRepliesOn ? TTSPaper.standingCapability() : nil
+        if let standing {
             p += "\n\n" + standing
         }
         if let ttsPaper = TTSPaper.paperIfRelevant(userMessage: Self.lastUserText(in: agentHistory),
-                                                   skipIntro: voiceConfigured) {
+                                                   skipIntro: standing != nil) {
             p += "\n\n" + ttsPaper
         }
         // [T-memory-toggle-gates-injection-and-tools-ios] Memory injection
@@ -6231,7 +6237,13 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
                    // [voice-bubble-tool 2026-10-02] 本轮已用 send_voice 发过语音：
                    // 跳过自动气泡，避免一轮两个气泡两种声音。
                    !voiceBubbleSentThisTurn {
-                    if let voice = await AIVoiceMessageComposer.compose(
+                    // [P3-4] A reply that sanitizes to nothing speakable
+                    // (emoji-only etc.) is not a TTS failure — skip silently
+                    // instead of toasting "check your TTS service".
+                    let speakable = !VoiceTextSanitizer.sanitize(assistantText).isEmpty
+                    if !speakable {
+                        logger.info("[AIVoice] nothing speakable — skipped bubble, no toast")
+                    } else if let voice = await AIVoiceMessageComposer.compose(
                         for: assistantText, sessionId: sid) {
                         let durParam = voice.duration > 0 ? Int(voice.duration.rounded()) : 0
                         let link = "![voice](\(voice.url)?voice_bubble=1&dur=\(durParam)&auto_play=true)"

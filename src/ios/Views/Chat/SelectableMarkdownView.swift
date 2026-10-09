@@ -5077,8 +5077,6 @@ final class AudioAttachment: NSTextAttachment {
     var transcriptExpanded = false
     fileprivate(set) var transcriptText: String?
     fileprivate(set) var transcriptHeight: CGFloat = 0
-    /// Capsule content width from the last makeVoiceBubbleView (transcript layout).
-    fileprivate var voiceBubbleContentWidth: CGFloat = 0
 
     init(source: String, theme: SelectableMarkdownTheme) {
         self.source = source
@@ -5236,7 +5234,6 @@ final class AudioAttachment: NSTextAttachment {
         // slimmer than the old 44pt chunky player, still duration-scaled.
         let dur: Double = voiceDuration > 0 ? voiceDuration : 3
         let w: CGFloat = min(64.0 + CGFloat(dur / 5.0 * 9.0), width * 0.55)
-        voiceBubbleContentWidth = w
 
         let containerH = h + (transcriptExpanded ? (Self.transcriptTopGap + transcriptHeight) : 0)
         let container = UIView(frame: CGRect(x: 0, y: 0, width: width, height: containerH))
@@ -5339,7 +5336,7 @@ final class AudioAttachment: NSTextAttachment {
         transcriptLabel.numberOfLines = 0
         transcriptLabel.isHidden = !transcriptExpanded
         transcriptLabel.text = transcriptText
-        transcriptLabel.frame = CGRect(x: 0, y: h + Self.transcriptTopGap, width: w, height: transcriptHeight)
+        transcriptLabel.frame = CGRect(x: 0, y: h + Self.transcriptTopGap, width: width, height: transcriptHeight)
         container.addSubview(transcriptLabel)
 
         // Tap anywhere → toggle play/pause via the global player (the arcs animate
@@ -5371,7 +5368,10 @@ final class AudioAttachment: NSTextAttachment {
                   let text = AIVoiceMessageComposer.transcriptForAudioFile(url),
                   !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             transcriptText = text
-            let tw = voiceBubbleContentWidth > 0 ? voiceBubbleContentWidth : container.bounds.width
+            // [P3-2] Transcript is measured at the message-column width
+            // (container), not the narrow capsule width — short bubbles
+            // would otherwise cram ~5 CJK chars per line.
+            let tw = container.bounds.width
             transcriptHeight = Self.measureTranscriptHeight(text: text, width: tw)
             transcriptExpanded = true
         }
@@ -5391,7 +5391,8 @@ final class AudioAttachment: NSTextAttachment {
         if let label = container.viewWithTag(Self.transcriptTag) as? UILabel {
             label.isHidden = !transcriptExpanded
             label.text = transcriptText
-            let tw = voiceBubbleContentWidth > 0 ? voiceBubbleContentWidth : container.bounds.width
+            // [P3-2] Column width, not capsule width (see toggleTranscript).
+            let tw = container.bounds.width
             label.frame = CGRect(x: 0, y: h + Self.transcriptTopGap, width: tw, height: transcriptHeight)
         }
     }
@@ -5415,16 +5416,16 @@ final class AudioAttachment: NSTextAttachment {
             return AIVoiceMessageComposer.transcriptForAudioFile(url) != nil
         }()
         if hasTranscript {
-            sheet.addAction(UIAlertAction(title: transcriptExpanded ? "收起文字" : "转文字", style: .default) { [weak self] _ in
+            sheet.addAction(UIAlertAction(title: AppLocalized(transcriptExpanded ? "收起文字" : "转文字"), style: .default) { [weak self] _ in
                 guard let self else { return }
                 self.toggleTranscript(from: sourceView)
             })
         }
-        sheet.addAction(UIAlertAction(title: "更多", style: .default) { [weak self] _ in
+        sheet.addAction(UIAlertAction(title: AppLocalized("更多"), style: .default) { [weak self] _ in
             guard let self, let url = self.resolvedURL else { return }
             AudioTapGesture.presentPreviewSheet(fileURL: url, from: sourceView)
         })
-        sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+        sheet.addAction(UIAlertAction(title: AppLocalized("取消"), style: .cancel))
         if let pop = sheet.popoverPresentationController {
             pop.sourceView = sourceView
             pop.sourceRect = sourceView.bounds
