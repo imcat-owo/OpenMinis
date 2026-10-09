@@ -3,6 +3,51 @@ import Combine
 
 // MARK: - Assistant Block View (individual block — isolated invalidation)
 
+/// [T-nested-ui] Uniform inline height for ALL nested blocks — thinking
+/// drawers, thinking summary rows, and tool summary rows. Fixed so the chat
+/// never reflows as content streams; overflow scrolls inside the drawer.
+/// The chat itself never floods.
+extension AssistantBlockView {
+    static let nestedInlineHeight: CGFloat = 100
+}
+
+/// [T-nested-ui] Drawer background: the user's customizable thinking-card
+/// image (Settings → Appearance → thinking card), aspect-fill, clipped to
+/// the drawer's rounded shape, at the user's chosen opacity. Falls back to
+/// the theme surface token when no custom image is set. Applied to inline
+/// drawers AND pushed detail pages — the image follows the content.
+///
+/// [T-theme-no-hardcode] Corner radius comes from the theme pack
+/// (`thinkingRadius` via `radius(.thinking)`); the fallback fill is the
+/// theme surface token. Nothing is hardcoded.
+struct NestedDrawerBackground: ViewModifier {
+    var cornerRadius: CGFloat? = nil
+
+    func body(content: Content) -> some View {
+        let radius = cornerRadius ?? MinisThemeShape.pack.radius(.thinking)
+        content
+            .background {
+                if let uiImage = MinisThemeShape.pack.thinkingCardImage() {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .opacity(MinisThemeShape.pack.thinkingCardImageOpacity)
+                } else {
+                    ChatColors.secondaryBg
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: radius))
+    }
+}
+
+extension View {
+    /// [T-nested-ui] Applies the thinking-card background (custom image or
+    /// theme fallback) clipped to the theme's thinking corner radius.
+    func nestedDrawerBackground(cornerRadius: CGFloat? = nil) -> some View {
+        modifier(NestedDrawerBackground(cornerRadius: cornerRadius))
+    }
+}
+
 struct AssistantBlockView: View {
     @ObservedObject var block: AssistantBlock
     @ObservedObject var message: ChatMessage
@@ -85,9 +130,21 @@ struct AssistantBlockView: View {
                 }
             }
         case .thinking:
+            // [T-nested-ui] Nested mode: pure thinking (no tools after this
+            // block) shows the fixed-height content drawer; once tools are
+            // called, thinking collapses to a summary row (tap pushes the
+            // detail page). hasToolsAfter is computed from the message's
+            // block order — the single source of truth for the transition.
+            let idx = message.blocks.firstIndex(where: { $0.id == block.id })
+            let hasToolsAfter: Bool = {
+                guard let idx else { return false }
+                return message.blocks[(idx + 1)...].contains { $0.kind.isToolKind }
+            }()
             ThinkingBlockView(
                 block: block,
-                isStreaming: isActiveMessage && message.blocks.last?.id == block.id
+                isStreaming: isActiveMessage && message.blocks.last?.id == block.id,
+                hasToolsAfter: hasToolsAfter,
+                onOpenDetail: { detailBlock = block }
             )
             .padding(.vertical, 2)
         case .shellTool, .fileReadTool, .fileWriteTool, .fileEditTool,
@@ -470,92 +527,61 @@ struct ToolCapsuleView: View {
         return false
     }
 
-    private var isActive: Bool {
-        switch block.toolStatus {
-        case .streaming, .running: return true
-        default: return false
-        }
-    }
-
     var body: some View {
         HStack {
-            HStack(spacing: 8) {
-                // Status indicator / icon
-                statusOrIcon
+            // [T-nested-ui] Minimal tool row at the uniform inline height.
+            // Tapping pushes the detail page (nested mode, not a sheet).
+            Button {
+                detailBlock = block
+            } label: {
+                HStack(spacing: 8) {
+                    // Tool-type icon, gray like Claude.
+                    statusOrIcon
 
-                // Description text with bouncing dots during streaming
-                HStack(spacing: 0) {
-                    Text(displayText)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(ChatColors.primaryText)
-                        .lineLimit(1)
-                    if isStreaming {
-                        ForEach(0..<3, id: \.self) { i in
-                            Text(".")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(ChatColors.primaryText)
-                                .offset(y: dotsActive ? -2 : 1)
-                                .animation(
-                                    .easeInOut(duration: 0.35)
-                                        .repeatForever(autoreverses: true)
-                                        .delay(Double(i) * 0.12),
-                                    value: dotsActive
-                                )
+                    // Description text with bouncing dots during streaming
+                    // [T-theme-no-hardcode] Font size from the theme pack.
+                    HStack(spacing: 0) {
+                        Text(displayText)
+                            .font(.system(size: MinisThemeShape.thinkingTitleSize, weight: .regular))
+                            .foregroundStyle(ChatColors.secondaryText)
+                            .lineLimit(1)
+                        if isStreaming {
+                            ForEach(0..<3, id: \.self) { i in
+                                Text(".")
+                                    .font(.system(size: MinisThemeShape.thinkingTitleSize, weight: .regular))
+                                    .foregroundStyle(ChatColors.secondaryText)
+                                    .offset(y: dotsActive ? -2 : 1)
+                                    .animation(
+                                        .easeInOut(duration: 0.35)
+                                            .repeatForever(autoreverses: true)
+                                            .delay(Double(i) * 0.12),
+                                        value: dotsActive
+                                    )
+                            }
                         }
                     }
-                }
-                .lineLimit(1)
+                    .lineLimit(1)
 
-                // Execution duration (shown after completion). The HH:mm:ss
-                // start time is surfaced inside the detail view's bottom bar
-                // (ToolLiveSheet.bottomBar) instead of here — the inline
-                // pill list stays clean.
-                if let dur = durationText {
-                    Text(dur)
-                        .font(.system(size: 11, weight: .regular, design: .monospaced))
+                    // Execution duration (shown after completion).
+                    // [T-theme-no-hardcode] Font size from the theme pack.
+                    if let dur = durationText {
+                        Text(dur)
+                            .font(.system(size: MinisThemeShape.thinkingBodySize, weight: .regular, design: .monospaced))
+                            .foregroundStyle(ChatColors.tertiaryText)
+                    }
+
+                    Spacer(minLength: 4)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(ChatColors.tertiaryText)
                 }
-
-                // Stop button for running commands
-                if case .running = block.toolStatus {
-                    Button {
-                        onStop?()
-                    } label: {
-                        // Visual: 10×10 red square unchanged. Hit area enlarged to
-                        // 24×24 via an expanded contentShape, while the negative
-                        // padding pins the *layout* footprint back to 18×18 so the
-                        // capsule width/height is identical to before.
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(ChatColors.destructive)
-                            .frame(width: 10, height: 10)
-                            .frame(width: 24, height: 24)
-                            .contentShape(Rectangle())
-                            .padding(-3)
-                    }
-                    .buttonStyle(.plain)
-                }
+                .padding(.horizontal, 12)
+                .frame(height: AssistantBlockView.nestedInlineHeight)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 12)
-            .frame(height: 36)
-            .background(ChatColors.toolBg)
-            .clipShape(Capsule())
-            .overlay(
-                Group {
-                    if isActive {
-                        ShimmerOverlay()
-                            .clipShape(Capsule())
-                            .allowsHitTesting(false)
-                    }
-                }
-            )
-            .overlay(
-                Capsule()
-                    .stroke(ChatColors.toolBorder, lineWidth: 0.5)
-            )
-            .contentShape(Capsule())
-            .onTapGesture {
-                detailBlock = block
-            }
+            .buttonStyle(.plain)
+            .nestedDrawerBackground()
             .contextMenu {
                 // [T-ios-msg-contextmenu-recursion-crash] Gate the eager menu
                 // tree behind an Equatable key so this tool cell's body churn
@@ -616,6 +642,21 @@ struct ToolCapsuleView: View {
                     }
                 }
                 .equatable()
+            }
+            // Stop button for running commands — sibling of the row Button so
+            // tapping it doesn't open the detail sheet.
+            if case .running = block.toolStatus {
+                Button {
+                    onStop?()
+                } label: {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(ChatColors.destructive)
+                        .frame(width: 10, height: 10)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                        .padding(-3)
+                }
+                .buttonStyle(.plain)
             }
             // [T-tool-bg-suspended-hint] Yellow ⓘ just outside the capsule's
             // trailing edge when this tool was likely suspended by the OS in the
@@ -693,18 +734,10 @@ struct ToolCapsuleView: View {
 
     @ViewBuilder
     private var statusOrIcon: some View {
+        // [claude-style] Gray tool-type icon, ~16pt — no status coloring.
         Image(systemName: icon)
-            .font(.system(size: 13))
-            .foregroundStyle(iconColor)
-    }
-
-    private var iconColor: Color {
-        switch block.toolStatus {
-        case .success: return ChatColors.success
-        case .failed: return ChatColors.destructive
-        case .cancelled: return ChatColors.secondaryText
-        default: return accentColor
-        }
+            .font(.system(size: 16))
+            .foregroundStyle(ChatColors.secondaryText)
     }
 
     /// Formatted execution duration (e.g. "1.2s", "45s", "2m 10s").
@@ -760,7 +793,6 @@ struct ToolCallGroupCard: View {
     var browserPool: BrowserTabPool?
     var toolSnapshots: [ToolSnapshotItem] = []
     @Binding var detailBlock: AssistantBlock?
-    @ObservedObject private var appearanceStudio = AppearanceStudio.shared
 
     private var isExpanded: Bool { ToolGroupExpansion.isExpanded(stateKey: stateKey) }
 
@@ -775,7 +807,8 @@ struct ToolCallGroupCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        // [claude-style] No card chrome — just the minimal header + plain rows.
+        VStack(alignment: .leading, spacing: 2) {
             Button {
                 ToolGroupExpansion.toggle(stateKey: stateKey)
                 NotificationCenter.default.post(name: .toolGroupToggled, object: stateKey)
@@ -817,14 +850,6 @@ struct ToolCallGroupCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(6)
-        .background(ChatColors.secondaryBg)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(ChatColors.toolBorder, lineWidth: 0.5)
-        )
-        .id(appearanceStudio.themePackRevision)
     }
 }
 
@@ -967,261 +992,55 @@ final class ThinkingHitchMonitor {
     func stop(owner: UUID) {}
 }
 
+// MARK: - Thinking Block View (nested mode)
+
+/// [T-nested-ui] Thinking block in nested mode. Two states, both at the
+/// uniform inline height — the chat never reflows:
+///
+/// - Pure thinking (no tools called yet): a fixed-height drawer showing the
+///   thinking content in an internally-scrollable area. The chat doesn't
+///   flood no matter how long the thinking gets.
+/// - Thinking with tools after it: collapses to a summary row (icon +
+///   one-line summary + chevron). Tap pushes the detail page.
+///
+/// All colors come from theme tokens (ChatColors → AppearanceStudio,
+/// scope: .chat). No hardcoded colors, no emoji, no card chrome.
 struct ThinkingBlockView: View {
     @ObservedObject var block: AssistantBlock
     @ObservedObject private var appearanceStudio = AppearanceStudio.shared
     let isStreaming: Bool
+    /// True when tool blocks come after this thinking block in the message.
+    /// Drives the drawer → summary-row collapse.
+    let hasToolsAfter: Bool
+    /// Opens the detail page (parent pushes via NavigationStack).
+    var onOpenDetail: (() -> Void)?
 
-    // [T-thinking-scroll-followback GH#125] Per-view follow state. Reset on
-    // cell reuse / re-entry is fine — a fresh view simply follows again.
-    @State private var thinkingUserScrolledAway = false
-    @State private var lastThinkingDragAt: Date = .distantPast
-    @State private var frozenThinkingContent: String? = nil
-    // [P1-2] Kelivo-style live elapsed timer + shimmer phase while streaming.
     @State private var thinkingStartTime: Date? = nil
     @State private var elapsedSeconds: Double = 0
-    @State private var shimmerPhase: Double = 0
+    @State private var dotsActive = false
 
-    /// Bind to block.isThinkingExpanded so state survives cell reuse and triggers cell re-sizing.
-    private var isExpanded: Binding<Bool> {
-        Binding(
-            get: { block.isThinkingExpanded },
-            set: { block.isThinkingExpanded = $0 }
-        )
-    }
-
-    init(block: AssistantBlock, isStreaming: Bool) {
-        self.block = block
-        self.isStreaming = isStreaming
-        // Auto-expand-on-stream is handled in `.onAppear` (gated by block.id)
-        // rather than from `init`. Mutating @Published from a SwiftUI view
-        // initializer fires for every cell-reuse pass and was reaching the
-        // wrong block when the cell was being recycled between an earlier
-        // (frozen) thinking block and the currently-streaming one — manifesting
-        // as "tap an old thinking block, see the streaming block's content."
+    /// The one-liner for the summary row: the LLM-generated natural summary
+    /// once the turn completes, a working state while streaming, and a
+    /// static label as the last resort.
+    private var summaryLine: String {
+        if let s = block.summary, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return s
+        }
+        if isStreaming {
+            return AppLocalized("Thinking…")
+        }
+        return AppLocalized("Deep Thinking")
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Header
-            HStack(spacing: 6) {
-                Image("ThinkingIcon")
-                    .resizable()
-                    .frame(width: 14, height: 14)
-                    .foregroundStyle(MinisThemeShape.thinkingAccent)
-                // [P1-2] Kelivo ThinkingSheen: shimmer the title while loading.
-                Text(AppLocalized("Deep Thinking"))
-                    .font(MinisThemeShape.fontFamily.font(size: MinisThemeShape.thinkingTitleSize, weight: .semibold))
-                    .foregroundStyle(MinisThemeShape.thinkingAccent)
-                    .opacity(isStreaming ? 0.55 + 0.45 * shimmerPhase : 1.0)
-                // [P1-2] Kelivo live elapsed timer, ticking while streaming.
-                if isStreaming || elapsedSeconds > 0 {
-                    Text(String(format: "(%.1fs)", elapsedSeconds))
-                        .font(.system(size: 11, weight: .regular, design: .monospaced))
-                        .foregroundStyle(MinisThemeShape.thinkingAccent.opacity(0.6))
-                }
-                if isStreaming {
-                    ProgressView()
-                        .controlSize(.mini)
-                        .tint(MinisThemeShape.thinkingAccent)
-                }
-                if block.content.count > 0 || block.thinkingContentBuffer.count > 0 {
-                    let charCount = max(block.content.count, block.thinkingContentBuffer.count)
-                    Text(charCount > 1000 ? "\(charCount / 1000)K" : "\(charCount)")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundStyle(MinisThemeShape.thinkingAccent.opacity(0.6))
-                }
-                Spacer()
-                Image(systemName: isExpanded.wrappedValue ? "chevron.up" : "chevron.down")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(MinisThemeShape.thinkingAccent.opacity(0.5))
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                // Mark before flipping so any concurrent stream-end collapse
-                // observer in this view sees `thinkingUserToggled = true`
-                // and bails out instead of stomping the user's choice.
-                // The collection view's cached height is invalidated by the
-                // `onChange(of: isThinkingExpanded)` observer below — single
-                // source of truth so the auto-collapse path stays in sync.
-                AppLogger(category: "ThinkingCollapse").info("[ThinkingCollapse] tap block=\(block.id.uuidString.prefix(8)) wasExpanded=\(isExpanded.wrappedValue) streaming=\(isStreaming) contentLen=\(block.content.count)")
-                block.thinkingUserToggled = true
-                if !isExpanded.wrappedValue {
-                    block.flushThinkingBuffer()
-                }
-                isExpanded.wrappedValue.toggle()
-            }
-
-            // Content — only visible when expanded, windowed to the tail
-            // to prevent UI freeze on very long thinking (T-thinking-render-perf-ios).
-            if isExpanded.wrappedValue, !block.content.isEmpty {
-                // [T-thinking-stream-window] While STREAMING, shrink the tail
-                // window 8000 → 2000: every flush re-lays-out the whole Text
-                // on the main thread, and an 8K plain-text relayout per flush
-                // is the reported "5K starts to lag, 10K unusable" jank (the
-                // hitch cost scales with the WINDOW, not the total). Reading
-                // the live tail only needs the recent context; the full 8K
-                // window comes back the moment streaming ends.
-                let windowSize = isStreaming ? 2000 : 8000
-                let total = block.content.count
-                let isTruncated = total > windowSize
-                let displayContent: String = frozenThinkingContent ?? {
-                    // [T-thinkperf-release-displaylink] The slice timing and
-                    // body-eval counter that used to wrap this closure are gone.
-                    // It runs on EVERY body evaluation of an expanded thinking
-                    // block, so it paid two CFAbsoluteTimeGetCurrent calls per
-                    // eval to feed a counter only ThinkPerf's own log lines read.
-                    // The question it existed to answer — do body re-evals track
-                    // per-token contentUpdateSeq rather than the flush? — was
-                    // answered (they did) and fixed.
-                    guard isTruncated else { return block.content }
-                    let startIdx = block.content.index(block.content.endIndex, offsetBy: -windowSize)
-                    let cleanStart = block.content[startIdx...].firstIndex(of: "\n")
-                        .map { block.content.index(after: $0) } ?? startIdx
-                    return String(block.content[cleanStart...])
-                }()
-
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 0) {
-                            if isTruncated {
-                                Text("Showing last \(displayContent.count / 1000)K of \(total / 1000)K characters", comment: "Thinking window truncation hint")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.secondary)
-                                    .padding(.horizontal, 12)
-                                    .padding(.bottom, 4)
-                            }
-                            // [T-thinking-stream-jank] textSelection(.enabled)
-                            // makes SwiftUI Text substantially more expensive
-                            // per layout; selecting text that is actively
-                            // moving is useless anyway — enable it only once
-                            // streaming finished.
-                            let thinkingText = Text(displayContent)
-                                .font(MinisThemeShape.fontFamily.font(size: MinisThemeShape.thinkingBodySize))
-                                .foregroundStyle(ChatColors.tertiaryText)
-                                .lineSpacing(3)
-                            Group {
-                                if isStreaming {
-                                    thinkingText
-                                } else {
-                                    thinkingText.textSelection(.enabled)
-                                }
-                            }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 12)
-                                .padding(.bottom, 10)
-                                .id("thinkingBottom")
-                        }
-                    }
-                    .frame(maxHeight: 300)
-                    // [T-thinking-scroll-followback GH#125] User-intent gate,
-                    // Android parity (ChatAssistantMessageUI.kt): mark
-                    // scrolled-away ONLY when a real finger drag moved the view
-                    // off the bottom — programmatic scrollTo offsets must not
-                    // set it, or follow would permanently disarm. Deployment
-                    // target is iOS 16 (no onScrollPhaseChange), so "real drag"
-                    // = a simultaneous DragGesture seen within the last 350ms.
-                    // A downward drag inside the box means "show me earlier
-                    // text" — that IS the scrolled-away intent, and unlike a
-                    // geometry probe it cannot be spoofed by our own
-                    // programmatic scrollTo (which fires no gesture). An
-                    // upward drag (heading back toward the tail) re-arms
-                    // following, as does the stream ending.
-                    .simultaneousGesture(
-                        DragGesture(minimumDistance: 6)
-                            .onEnded { value in
-                                lastThinkingDragAt = Date()
-                                if value.translation.height > 12 {
-                                    if !thinkingUserScrolledAway {
-                                        thinkingUserScrolledAway = true
-                                        frozenThinkingContent = displayContent
-                                        AppLogger(category: "ThinkPerf").info("[ThinkPerf] user scrolled away (dy=\(Int(value.translation.height))) — follow paused, content frozen at \(displayContent.count) chars")
-                                    }
-                                } else if value.translation.height < -12, thinkingUserScrolledAway {
-                                    thinkingUserScrolledAway = false
-                                    frozenThinkingContent = nil
-                                    AppLogger(category: "ThinkPerf").info("[ThinkPerf] user scrolled back (dy=\(Int(value.translation.height))) — following resumed")
-                                }
-                            }
-                    )
-                    // [T-thinking-stream-jank] Follow the tail at FLUSH pace
-                    // (content updates every 0.3s), not per token. The old
-                    // trigger was the per-delta contentUpdateSeq — with it
-                    // @Published, an expanded block re-ran body + an animated
-                    // scrollTo for every delta (~60-105/s measured); the flush
-                    // pace is ~3-4/s for the same visual result.
-                    .onChange(of: block.content.count) { len in
-                        guard isStreaming, !thinkingUserScrolledAway else { return }
-                        // [T-thinkperf-release-displaylink] Removed: this fired on
-                        // every content flush of a streaming thinking block, and
-                        // building the interpolated string cost more than the log
-                        // call. The two scroll-gesture lines above stay — they
-                        // fire once per user drag, not per flush.
-                        // Animated follow only for short content — animating a
-                        // long text's scroll re-lays-out every frame of the
-                        // 0.15s animation; a jump is one layout.
-                        if len > 3000 {
-                            proxy.scrollTo("thinkingBottom", anchor: .bottom)
-                        } else {
-                            withAnimation(.linear(duration: 0.15)) {
-                                proxy.scrollTo("thinkingBottom", anchor: .bottom)
-                            }
-                        }
-                    }
-                    .onChange(of: isStreaming) { streaming in
-                        if !streaming {
-                            thinkingUserScrolledAway = false
-                            frozenThinkingContent = nil
-                        }
-                    }
-                }
-            } else if isStreaming, !block.content.isEmpty {
-                // [P1-2] Kelivo preview state: while streaming and collapsed,
-                // show the live tail in a 100pt window with a bottom fade
-                // instead of hiding completely.
-                let tailCount = 500
-                let previewText: String = {
-                    let c = block.content
-                    guard c.count > tailCount else { return c }
-                    let idx = c.index(c.endIndex, offsetBy: -tailCount)
-                    return String(c[idx...])
-                }()
-                Text(previewText)
-                    .font(MinisThemeShape.fontFamily.font(size: MinisThemeShape.thinkingBodySize))
-                    .foregroundStyle(ChatColors.tertiaryText)
-                    .lineSpacing(3)
-                    .frame(maxWidth: .infinity, maxHeight: 100, alignment: .topLeading)
-                    .mask(
-                        LinearGradient(
-                            colors: [Color.black, Color.black.opacity(0.3), Color.clear],
-                            startPoint: .top, endPoint: .bottom
-                        )
-                    )
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-            }
-        }
-        // [T-thinking-stream-jank] Hitch monitor runs while this block is
-        // EXPANDED — streaming or static. The refined report says the jank is
-        // tied to the expanded state itself (collapse instantly recovers), so
-        // the monitor must also capture expanded-static interactions (list
-        // scrolling, new messages arriving) to compare against collapsed.
-        .task(id: isExpanded.wrappedValue) {
-            if isExpanded.wrappedValue {
-                ThinkingHitchMonitor.shared.contentLenProvider = { [weak block] in
-                    block?.thinkingContentBuffer.count ?? -1
-                }
-                ThinkingHitchMonitor.shared.start(owner: block.id)
+        Group {
+            if hasToolsAfter {
+                thinkingSummaryRow
             } else {
-                ThinkingHitchMonitor.shared.stop(owner: block.id)
+                thinkingDrawer
             }
         }
-        .onDisappear {
-            ThinkingHitchMonitor.shared.stop(owner: block.id)
-        }
-        // [P1-2] Kelivo-style shimmer + elapsed timer while streaming.
+        .id(appearanceStudio.themePackRevision)
         .onAppear {
             if isStreaming && thinkingStartTime == nil {
                 thinkingStartTime = Date()
@@ -1233,100 +1052,131 @@ struct ThinkingBlockView: View {
                 elapsedSeconds = 0
             }
         }
-        .onReceive(Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()) { _ in
+        .onReceive(Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()) { _ in
             if isStreaming, let start = thinkingStartTime {
                 elapsedSeconds = Date().timeIntervalSince(start)
-                // Shimmer phase: 0→1→0 sine wave for the title opacity.
-                withAnimation(.linear(duration: 0.1)) {
-                    shimmerPhase = 0.5 + 0.5 * sin(Date().timeIntervalSince(start) * 4.0)
-                }
             }
-        }
-        .background {
-            ZStack {
-                MinisThemeShape.thinkingFill
-                if let image = appearanceStudio.thinkingCardImage() {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .opacity(MinisThemeShape.thinkingCardOpacity)
-                }
-                // [P1-2] Refined pink: subtle top highlight to lift the flat
-                // fill (she dislikes the current flat pink). Theme color kept.
-                LinearGradient(
-                    colors: [Color.white.opacity(0.06), Color.clear],
-                    startPoint: .top, endPoint: .center
-                )
-            }
-        }
-        .clipShape(MinisThemeShape.thinkingCard)
-        .overlay(
-            MinisThemeShape.thinkingCard.stroke(MinisThemeShape.thinkingStroke, lineWidth: 0.5)
-        )
-        .id(appearanceStudio.themePackRevision)
-        .task(id: block.id) {
-            // One-shot per-block auto-expand. Runs when this cell first hosts
-            // a given thinking block (block.id is stable across content
-            // updates) and only flips state if the user hasn't taken control.
-            // [T-thinking-auto-expand-toggle] Gated on the Appearance setting
-            // (default ON = historical behavior). When the user turned it off,
-            // new streaming thinking blocks stay collapsed; a manual tap still
-            // expands them (and sets thinkingUserToggled, so nothing here
-            // fights the user either way).
-            let autoExpand = (UserDefaults.standard.object(forKey: "chat.autoExpandThinking") as? Bool) ?? true
-            if autoExpand, isStreaming, !block.thinkingUserToggled, !block.isThinkingExpanded {
-                block.isThinkingExpanded = true
-            }
-        }
-        .onChange(of: isStreaming) { streaming in
-            // Auto-collapse when streaming for THIS block ends, but only if
-            // the user hasn't manually toggled it. Without the user-touched
-            // gate, the streaming-end transition stomped a tap the user did
-            // on an earlier thinking block while a later one was still live.
-            if !streaming, !block.thinkingUserToggled {
-                AppLogger(category: "ThinkingCollapse").info("[ThinkingCollapse] auto-collapse block=\(block.id.uuidString.prefix(8)) streaming→false userToggled=false contentLen=\(block.content.count)")
-                block.isThinkingExpanded = false
-                // [T-ios-thinking-autocollapse-no-post] Post the invalidation
-                // HERE rather than relying on the `.onChange(of:)` below.
-                //
-                // Field evidence (2026-08-13 device log): `auto-collapse` fired
-                // 6 times while `[ThinkingCollapse] post` fired 0 times. The
-                // observer never ran, because this write happens inside another
-                // `onChange` handler in the same view update — SwiftUI compares
-                // `isThinkingExpanded` before and after that update as a whole,
-                // and the write is not observed as a transition. A manual tap is
-                // its own update, which is why tapping to collapse always worked
-                // and only the stream-end auto-collapse left a gap.
-                //
-                // Without the post, `SelfSizingCell`'s width-keyed dedup keeps
-                // answering with the EXPANDED height (the cache the
-                // `.thinkingBlockToggled` receiver exists to clear), so the pill
-                // draws collapsed inside a frame still sized for the expanded
-                // body — the blank strip under the first thinking block.
-                //
-                // Posting from both places is safe: the receiver only clears
-                // caches and reconfigures, and a duplicate notification
-                // re-measures to the same height.
-                NotificationCenter.default.post(name: .thinkingBlockToggled,
-                                                object: block.id)
-            } else if !streaming {
-                AppLogger(category: "ThinkingCollapse").info("[ThinkingCollapse] stream-end-skip block=\(block.id.uuidString.prefix(8)) userToggled=\(block.thinkingUserToggled) currentlyExpanded=\(block.isThinkingExpanded)")
-            }
-        }
-        .onChange(of: block.isThinkingExpanded) { newValue in
-            // Single source of truth for cell-height invalidation: fires
-            // for BOTH manual taps and the stream-end auto-collapse path
-            // above. Previously only the tap gesture posted this, so when
-            // a long thinking block auto-collapsed at stream end, the
-            // UICollectionView kept the expanded cell height (~300pt) and
-            // rendered a tall empty gap below the pill — see 2026-05-17
-            // screenshot bug.
-            AppLogger(category: "ThinkingCollapse").info("[ThinkingCollapse] post block=\(block.id.uuidString.prefix(8)) expanded=\(newValue) userToggled=\(block.thinkingUserToggled) streaming=\(isStreaming)")
-            NotificationCenter.default.post(name: .thinkingBlockToggled,
-                                            object: block.id)
         }
     }
+
+    // MARK: - Summary row (collapsed)
+
+    /// [claude-style] Minimal row: icon + one-line summary + chevron.
+    /// Tapping pushes the thinking detail page.
+    /// [T-theme-no-hardcode] Font sizes from the theme pack (thinkingTitleSize).
+    private var thinkingSummaryRow: some View {
+        Button {
+            onOpenDetail?()
+        } label: {
+            HStack(spacing: 8) {
+                Image("ThinkingIcon")
+                    .resizable()
+                    .frame(width: 16, height: 16)
+                    .foregroundStyle(ChatColors.secondaryText)
+                Text(summaryLine)
+                    .font(.system(size: MinisThemeShape.thinkingTitleSize, weight: .regular))
+                    .foregroundStyle(ChatColors.secondaryText)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                if isStreaming {
+                    // Bouncing dots while the turn is still working.
+                    HStack(spacing: 0) {
+                        ForEach(0..<3, id: \.self) { i in
+                            Text(".")
+                                .font(.system(size: MinisThemeShape.thinkingTitleSize, weight: .regular))
+                                .foregroundStyle(ChatColors.secondaryText)
+                                .offset(y: dotsActive ? -2 : 1)
+                                .animation(
+                                    .easeInOut(duration: 0.35)
+                                        .repeatForever(autoreverses: true)
+                                        .delay(Double(i) * 0.12),
+                                    value: dotsActive
+                                )
+                        }
+                    }
+                    .onAppear { dotsActive = true }
+                    .onDisappear { dotsActive = false }
+                } else if !isStreaming, block.summary == nil {
+                    // Static label gets the elapsed time once done.
+                    Text(elapsedLabel)
+                        .font(.system(size: MinisThemeShape.thinkingBodySize, weight: .regular, design: .monospaced))
+                        .foregroundStyle(ChatColors.tertiaryText)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(ChatColors.tertiaryText)
+            }
+            .padding(.horizontal, 12)
+            .frame(height: AssistantBlockView.nestedInlineHeight)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .nestedDrawerBackground()
+        .accessibilityLabel(Text(summaryLine))
+    }
+
+    // MARK: - Drawer (pure thinking)
+
+    /// Fixed-height drawer with the thinking content in an internal
+    /// ScrollView. Follows the tail while streaming.
+    /// [T-theme-no-hardcode] Font sizes from the theme pack.
+    private var thinkingDrawer: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header — compact, icon + label + elapsed.
+            HStack(spacing: 6) {
+                Image("ThinkingIcon")
+                    .resizable()
+                    .frame(width: 14, height: 14)
+                    .foregroundStyle(ChatColors.secondaryText)
+                Text(AppLocalized("Deep Thinking"))
+                    .font(.system(size: MinisThemeShape.thinkingTitleSize, weight: .regular))
+                    .foregroundStyle(ChatColors.secondaryText)
+                if isStreaming || elapsedSeconds > 0 {
+                    Text(elapsedLabel)
+                        .font(.system(size: MinisThemeShape.thinkingBodySize, weight: .regular, design: .monospaced))
+                        .foregroundStyle(ChatColors.tertiaryText)
+                }
+                if isStreaming {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(ChatColors.secondaryText)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 4)
+
+            // Content — internally scrollable, chat never floods.
+            ScrollViewReader { proxy in
+                ScrollView {
+                    Text(block.content.isEmpty ? block.thinkingContentBuffer : block.content)
+                        .font(.system(size: MinisThemeShape.thinkingBodySize))
+                        .foregroundStyle(ChatColors.tertiaryText)
+                        .lineSpacing(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 8)
+                        .id("thinkingTail")
+                }
+                .onChange(of: block.content.count) { _ in
+                    guard isStreaming else { return }
+                    proxy.scrollTo("thinkingTail", anchor: .bottom)
+                }
+            }
+        }
+        .frame(height: AssistantBlockView.nestedInlineHeight)
+        .nestedDrawerBackground()
+    }
+
+    private var elapsedLabel: String {
+        let secs = Int(elapsedSeconds)
+        if secs < 60 { return "\(secs)s" }
+        return "\(secs / 60)m\(secs % 60)s"
+    }
 }
+
 
 // MARK: - Typing Indicator
 

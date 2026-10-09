@@ -4016,37 +4016,17 @@ extension CollectionViewMessageListV3 {
                     }
                     return Self.estimateTextBlockHeight(block.content, width: width, scale: scale, lineHeight: lineHeight)
                 case .thinking:
-                    // Header (icon 14pt or label 13pt) + vPad 10·2 + capsule border ≈ 36pt,
-                    // + 4pt block-wrapper vertical padding = 40 (same calibration as tool
-                    // capsules, [T-ios-decel-inv-estimate-calibration]).
-                    // When expanded, content area adds up to 300pt of inner text + 10pt bottom pad.
-                    let headerH: CGFloat = 40
-                    guard block.isThinkingExpanded, !block.content.isEmpty else {
-                        return headerH
-                    }
-                    let innerWidth = max(width - 24, 100)         // 12pt horizontal pad each side
-                    let innerLineHeight: CGFloat = 13 * 1.4 + 3   // .lineSpacing(3) on 13pt font
-                    let lines = block.content.split(separator: "\n", omittingEmptySubsequences: false)
-                    var textH: CGFloat = 0
-                    let cpl = max(1, innerWidth / 7)              // ~7pt per CJK/wide glyph at 13pt
-                    for line in lines {
-                        let wrapped = max(1, ceil(CGFloat(line.count) / cpl))
-                        textH += wrapped * innerLineHeight
-                    }
-                    let contentH = min(textH + 10, 300)            // ScrollView capped at 300pt
-                    let total = headerH + contentH
-                    return total
-                // [T-ios-decel-inv-estimate-calibration] Tool capsules measure exactly
-                // 36pt: ToolCapsuleView has NO vertical padding (unlike .text/.thinking,
-                // which add .padding(.vertical, 2) → +4). The debug.scrollMetrics ring
-                // proved the split: with 40 here, every real tool capsule corrected
-                // 40→36 (-4) mid-decel; the +4 growths that motivated 40 were actually
-                // collapsed THINKING blocks (handled above with headerH = 40).
-                case .readImageTool: return 36
+                    // [T-nested-ui] Nested mode: thinking blocks are ALWAYS the
+                    // uniform inline height (100pt) — drawer or summary row,
+                    // never expanded inline. +4pt for the block-wrapper
+                    // vertical padding (.padding(.vertical, 2)).
+                    return 104
+                // [T-nested-ui] Tool rows are the uniform inline height (100pt).
+                case .readImageTool: return 100
                 case .info:
                     let lineCount = max(1, block.content.components(separatedBy: "\n").count)
                     return CGFloat(20 + lineCount * 16)
-                default: return 36  // Tool capsules (execute, browser, etc.): no wrapper pad
+                default: return 100  // Tool rows: uniform nested height
                 }
             case .assistantToolGroup(_, let groupKey):
                 // [chat-ui] Header (~44) + visible capsules (36pt + 6 spacing).

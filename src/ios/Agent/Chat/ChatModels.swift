@@ -334,6 +334,14 @@ final class AssistantBlock: Identifiable, ObservableObject {
     /// `isThinkingExpanded` alone so a tap on an earlier (frozen) block can't
     /// be silently undone by a streaming sibling's recomposition.
     @Published var thinkingUserToggled: Bool = false
+    /// [T-nested-summary] Natural one-sentence summary of what this
+    /// thinking/tool block accomplished (e.g. "查了北京明天的天气并存进了记忆").
+    /// Nil while the turn is in progress — the row shows a working state
+    /// ("思考中…" / tool name) instead. Set by the hidden summary generator
+    /// after the turn completes; falls back to a metadata-assembled phrase if
+    /// generation fails. Displayed on the collapsed summary row; tap pushes
+    /// the detail page.
+    @Published var summary: String? = nil
 
     init(kind: AssistantBlockKind, content: String, toolStatus: ToolBlockStatus? = nil, toolUseId: String? = nil) {
         self.kind = kind

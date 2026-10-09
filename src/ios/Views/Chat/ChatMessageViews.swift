@@ -653,12 +653,20 @@ struct ChatMessageRow: View {
                     MessageContextMenuPreview(text: fullReplyText)
                 }
         }
-        .sheet(item: $detailBlock) { block in
-            ToolLiveSheet(toolBlocks: message.blocks.filter { $0.toolStatus != nil },
-                          initialIdx: message.blocks.filter({ $0.toolStatus != nil }).firstIndex(where: { $0.id == block.id }) ?? 0,
-                          toolSnapshots: toolSnapshots, browserPool: browserPool,
-                          onBrowserTakeover: onBrowserTakeover,
-                          onTakeoverDone: onTakeoverDone)
+        // [T-nested-ui] Detail = pushed page, not a bottom sheet. Tapping a
+        // thinking/tool row presents a full-screen NavigationStack; the root
+        // is the block's detail page, nested rows push deeper, back pops.
+        .fullScreenCover(item: $detailBlock) { block in
+            NavigationStack {
+                BlockDetailRoot(
+                    block: block,
+                    message: message,
+                    toolSnapshots: toolSnapshots,
+                    browserPool: browserPool,
+                    onBrowserTakeover: onBrowserTakeover,
+                    onTakeoverDone: onTakeoverDone
+                )
+            }
         }
     }
 
