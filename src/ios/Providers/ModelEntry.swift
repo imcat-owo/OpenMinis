@@ -152,7 +152,7 @@ struct ModelEntry: Identifiable, Codable, Hashable {
             provider: baseModel.provider,
             modalityOverride: overrides.modalityOverride ?? baseModel.modalityOverride,
             contextWindow: overrides.contextWindow ?? baseModel.contextWindow,
-            maxOutputTokens: overrides.sampling?.maxTokens ?? overrides.maxOutputTokens ?? baseModel.maxOutputTokens,
+            maxOutputTokens: overrides.maxOutputTokens ?? baseModel.maxOutputTokens,
             supportsReasoning: overrides.supportsReasoning ?? baseModel.supportsReasoning,
             interleavedReasoningField: baseModel.interleavedReasoningField,
             reasoningEffortValues: baseModel.reasoningEffortValues,

@@ -958,9 +958,6 @@ struct SamplingConfig: Codable, Hashable, Sendable {
     var temperature: Double?
     /// 0…1. nil = provider default.
     var topP: Double?
-    /// Max output tokens. nil = fall back to `ModelOverrides.maxOutputTokens`
-    /// (the existing per-model override), then the API-reported value.
-    var maxTokens: Int?
     /// -2…2. nil = provider default. (OpenAI-family only; other providers ignore.)
     var presencePenalty: Double?
     /// -2…2. nil = provider default. (OpenAI-family only; other providers ignore.)
@@ -969,13 +966,11 @@ struct SamplingConfig: Codable, Hashable, Sendable {
     init(
         temperature: Double? = nil,
         topP: Double? = nil,
-        maxTokens: Int? = nil,
         presencePenalty: Double? = nil,
         frequencyPenalty: Double? = nil
     ) {
         self.temperature = temperature
         self.topP = topP
-        self.maxTokens = maxTokens
         self.presencePenalty = presencePenalty
         self.frequencyPenalty = frequencyPenalty
     }
@@ -984,7 +979,6 @@ struct SamplingConfig: Codable, Hashable, Sendable {
     var isEmpty: Bool {
         temperature == nil
             && topP == nil
-            && maxTokens == nil
             && presencePenalty == nil
             && frequencyPenalty == nil
     }
@@ -994,7 +988,6 @@ struct SamplingConfig: Codable, Hashable, Sendable {
         SamplingConfig(
             temperature: model?.temperature ?? instance?.temperature,
             topP: model?.topP ?? instance?.topP,
-            maxTokens: model?.maxTokens ?? instance?.maxTokens,
             presencePenalty: model?.presencePenalty ?? instance?.presencePenalty,
             frequencyPenalty: model?.frequencyPenalty ?? instance?.frequencyPenalty
         )

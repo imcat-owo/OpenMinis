@@ -86,10 +86,10 @@ extension AIChatViewModel {
                 guard let key = ProviderKeychainHelper.loadAPIKey(instanceId: instance.id) else {
                     throw LLMProviderError.noCredentials
                 }
-                return AnthropicProvider(apiKey: key, model: entry.model, basePath: customBase, appendV1Suffix: appendV1, customUserAgent: ua)
+                return AnthropicProvider(apiKey: key, model: entry.model, basePath: customBase, appendV1Suffix: appendV1, customUserAgent: ua, customHeaders: LLMProviderFactory.sanitizedCustomHeaders(instance.customHeaders))
             case .oauth:
                 if let manualToken = ProviderKeychainHelper.loadOAuthString(instanceId: instance.id, account: "manual-oauth-token") {
-                    return AnthropicProvider(manualToken: manualToken, model: entry.model, basePath: customBase, appendV1Suffix: appendV1, customUserAgent: ua)
+                    return AnthropicProvider(manualToken: manualToken, model: entry.model, basePath: customBase, appendV1Suffix: appendV1, customUserAgent: ua, customHeaders: LLMProviderFactory.sanitizedCustomHeaders(instance.customHeaders))
                 }
                 let iid = instance.id
                 return AnthropicProvider(
@@ -105,10 +105,14 @@ extension AIChatViewModel {
                 guard let key = ProviderKeychainHelper.loadAPIKey(instanceId: instance.id) else {
                     throw LLMProviderError.noCredentials
                 }
-                return GeminiProvider(apiKey: key, model: entry.model, customBasePath: customBase)
+                let geminiProvider = GeminiProvider(apiKey: key, model: entry.model, customBasePath: customBase)
+                geminiProvider.customHeaders = LLMProviderFactory.sanitizedCustomHeaders(instance.customHeaders)
+                return geminiProvider
             case .oauth:
                 if let manualToken = ProviderKeychainHelper.loadOAuthString(instanceId: instance.id, account: "manual-oauth-token") {
-                    return GeminiProvider(apiKey: manualToken, model: entry.model, customBasePath: customBase)
+                    let geminiProvider = GeminiProvider(apiKey: manualToken, model: entry.model, customBasePath: customBase)
+                    geminiProvider.customHeaders = LLMProviderFactory.sanitizedCustomHeaders(instance.customHeaders)
+                    return geminiProvider
                 }
                 let iid = instance.id
                 let provider = GeminiProvider(
@@ -117,6 +121,7 @@ extension AIChatViewModel {
                     customBasePath: customBase
                 )
                 provider.gcpProjectID = GeminiOAuthManager.shared.gcpProjectID(instanceId: iid)
+                provider.customHeaders = LLMProviderFactory.sanitizedCustomHeaders(instance.customHeaders)
                 return provider
             }
         case .openAI:
@@ -130,12 +135,12 @@ extension AIChatViewModel {
                 }
                 let provider = OpenAIProvider(apiKey: key, model: entry.model, customBaseURL: customBase, appendV1Suffix: appendV1)
                 if isMistral { provider.useOpenRouterCompat = true; provider.isMistral = true }
-                return LLMProviderFactory.applyCustomUserAgent(provider, instance: instance)
+                return LLMProviderFactory.applyCustomHeaders(LLMProviderFactory.applyCustomUserAgent(provider, instance: instance), instance: instance)
             case .oauth:
                 if let manualToken = ProviderKeychainHelper.loadOAuthString(instanceId: instance.id, account: "manual-oauth-token") {
                     let provider = OpenAIProvider(apiKey: manualToken, model: entry.model, customBaseURL: customBase, appendV1Suffix: appendV1)
                     if isMistral { provider.useOpenRouterCompat = true; provider.isMistral = true }
-                    return LLMProviderFactory.applyCustomUserAgent(provider, instance: instance)
+                    return LLMProviderFactory.applyCustomHeaders(LLMProviderFactory.applyCustomUserAgent(provider, instance: instance), instance: instance)
                 }
                 let iid = instance.id
                 let provider = OpenAIProvider(
