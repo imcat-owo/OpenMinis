@@ -97,7 +97,9 @@ struct TurnDetailSheet: View {
                         onTakeoverDone: onTakeoverDone,
                         onBack: {
                             withAnimation(.easeInOut(duration: 0.18)) {
-                                navStack.removeLast()
+                                if !navStack.isEmpty {
+                                    navStack.removeLast()
+                                }
                             }
                         }
                     )
