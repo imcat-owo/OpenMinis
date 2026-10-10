@@ -673,14 +673,11 @@ struct ChatMessageRow: View {
                           onTakeoverDone: onTakeoverDone)
         }
         .sheet(item: $turnSheetMessage) { msg in
-            // Commit A placeholder — replaced by TurnDetailSheet in commit C.
-            Text(msg.turnSummary ?? TurnSummarySegments.fallbackSummary(
-                for: msg.blocks.filter { $0.kind == .thinking || $0.kind.isToolKind }
-            ))
-            .font(MinisThemeShape.fontFamily.font(size: FontSettings.shared.scaledMessage(14)))
-            .foregroundStyle(ChatColors.secondaryText)
-            .padding(20)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            TurnDetailSheet(
+                message: msg,
+                browserPool: browserPool,
+                onExpandBrowser: nil
+            )
             .presentationDetents([.fraction(2/3), .large])
             .presentationDragIndicator(.visible)
         }
