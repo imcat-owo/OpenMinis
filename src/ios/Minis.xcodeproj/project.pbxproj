@@ -694,21 +694,21 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		E5SAS0011 /* SubAgentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SubAgentStore.swift"; sourceTree = "<group>"; };
-		E5SAD0011 /* SubAgentDefinition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SubAgentDefinition.swift"; sourceTree = "<group>"; };
-		E5TSV0011 /* ToolsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ToolsSettingsView.swift"; sourceTree = "<group>"; };
-		E5ACB0011 /* AgentCallback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AgentCallback.swift"; sourceTree = "<group>"; };
-		E5ACB0012 /* AgentCallbackCellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AgentCallbackCellView.swift"; sourceTree = "<group>"; };
-		E5AJR0011 /* AgentJobRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AgentJobRegistry.swift"; sourceTree = "<group>"; };
-		E5AJR0012 /* HelperRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HelperRunner.swift"; sourceTree = "<group>"; };
-		E5AJR0013 /* ModelTierResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ModelTierResolver.swift"; sourceTree = "<group>"; };
-		E5AMI0011 /* HelperModelIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HelperModelIdentity.swift"; sourceTree = "<group>"; };
-		E5PPR0011 /* AIChatViewModel+ProgrammaticPrompt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatViewModel+ProgrammaticPrompt.swift"; sourceTree = "<group>"; };
-		E5SCH0011 /* ScheduledJobRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ScheduledJobRunner.swift"; sourceTree = "<group>"; };
-		E5SCH0012 /* ScheduledOffload.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "ScheduledOffload.m"; sourceTree = "<group>"; };
-		E5SCH0013 /* ScheduledOffloadBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ScheduledOffloadBridge.swift"; sourceTree = "<group>"; };
-		E5SRS0011 /* SessionRefreshScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SessionRefreshScheduler.swift"; sourceTree = "<group>"; };
-		E5PCV0011 /* PersonaContactsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PersonaContactsView.swift"; sourceTree = "<group>"; };
+		E5SAS0011 /* SubAgentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SubAgentStore.swift; path = Providers/SubAgentStore.swift; sourceTree = SOURCE_ROOT; };
+		E5SAD0011 /* SubAgentDefinition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SubAgentDefinition.swift; path = Providers/SubAgentDefinition.swift; sourceTree = SOURCE_ROOT; };
+		E5TSV0011 /* ToolsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ToolsSettingsView.swift; path = Views/Settings/ToolsSettingsView.swift; sourceTree = SOURCE_ROOT; };
+		E5ACB0011 /* AgentCallback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AgentCallback.swift; path = Agent/Jobs/AgentCallback.swift; sourceTree = SOURCE_ROOT; };
+		E5ACB0012 /* AgentCallbackCellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AgentCallbackCellView.swift; path = Views/Chat/AgentCallbackCellView.swift; sourceTree = SOURCE_ROOT; };
+		E5AJR0011 /* AgentJobRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AgentJobRegistry.swift; path = Agent/Jobs/AgentJobRegistry.swift; sourceTree = SOURCE_ROOT; };
+		E5AJR0012 /* HelperRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = HelperRunner.swift; path = Agent/Jobs/HelperRunner.swift; sourceTree = SOURCE_ROOT; };
+		E5AJR0013 /* ModelTierResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ModelTierResolver.swift; path = Agent/Jobs/ModelTierResolver.swift; sourceTree = SOURCE_ROOT; };
+		E5AMI0011 /* HelperModelIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = HelperModelIdentity.swift; path = Agent/Jobs/HelperModelIdentity.swift; sourceTree = SOURCE_ROOT; };
+		E5PPR0011 /* AIChatViewModel+ProgrammaticPrompt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AIChatViewModel+ProgrammaticPrompt.swift; path = Agent/Chat/AIChatViewModel+ProgrammaticPrompt.swift; sourceTree = SOURCE_ROOT; };
+		E5SCH0011 /* ScheduledJobRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ScheduledJobRunner.swift; path = Agent/Jobs/ScheduledJobRunner.swift; sourceTree = SOURCE_ROOT; };
+		E5SCH0012 /* ScheduledOffload.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = ScheduledOffload.m; path = NativeOffloads/ScheduledOffload.m; sourceTree = SOURCE_ROOT; };
+		E5SCH0013 /* ScheduledOffloadBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ScheduledOffloadBridge.swift; path = NativeOffloads/ScheduledOffloadBridge.swift; sourceTree = SOURCE_ROOT; };
+		E5SRS0011 /* SessionRefreshScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionRefreshScheduler.swift; path = Views/SessionRefreshScheduler.swift; sourceTree = SOURCE_ROOT; };
+		E5PCV0011 /* PersonaContactsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PersonaContactsView.swift; path = Views/Chat/PersonaContactsView.swift; sourceTree = SOURCE_ROOT; };
 		0ED149397BEA7E0408C92688 /* GroupVoiceModelsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GroupVoiceModelsView.swift; sourceTree = "<group>"; };
 		0F5379380323FA8C6477708C /* GroupSlotPicker.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GroupSlotPicker.swift; sourceTree = "<group>"; };
 		16FF3462D09402F14B610CD6 /* VoiceWaveformView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VoiceWaveformView.swift; sourceTree = "<group>"; };
