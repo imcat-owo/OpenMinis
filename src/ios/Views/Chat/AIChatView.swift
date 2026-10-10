@@ -2795,7 +2795,11 @@ struct AIChatView: View {
                 },
                 maxContentWidth: maxContentWidth ?? 0,
                 floatingBarHeight: floatingBarHeight,
-                inputBarHeight: inputBarHeight
+                inputBarHeight: inputBarHeight,
+                onExpandBrowser: { url in
+                    fullBrowserIsLocal = false
+                    fullBrowserURL = url
+                }
             )
             // Empty/loading overlay for tap-to-dismiss-keyboard.
             // Placed BEFORE the directory timeline in the ZStack so the

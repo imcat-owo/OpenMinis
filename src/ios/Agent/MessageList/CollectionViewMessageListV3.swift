@@ -55,6 +55,8 @@ struct CollectionViewMessageListV3: UIViewControllerRepresentable {
     var onRevertCompact: (() -> Void)?
     var onForceSync: (() -> Void)?
     var onScreenshotImage: ((UIImage) -> Void)?
+    /// Expand a browser preview to the full browser (from the turn drawer).
+    var onExpandBrowser: ((URL) -> Void)?
     var maxContentWidth: CGFloat
     var floatingBarHeight: CGFloat
     var inputBarHeight: CGFloat
@@ -97,6 +99,7 @@ struct CollectionViewMessageListV3: UIViewControllerRepresentable {
         coord.onRevertCompact = onRevertCompact
         coord.onForceSync = onForceSync
         coord.onScreenshotImage = onScreenshotImage
+        coord.onExpandBrowser = onExpandBrowser
         coord.maxContentWidth = maxContentWidth
 
         // Bottom inset base = input bar + tool bar overlay height + breathing room.
@@ -745,6 +748,7 @@ extension CollectionViewMessageListV3 {
         var onRevertCompact: (() -> Void)?
         var onForceSync: (() -> Void)?
         var onScreenshotImage: ((UIImage) -> Void)?
+        var onExpandBrowser: ((URL) -> Void)?
         var maxContentWidth: CGFloat = 0
         var lastInputFocused: Bool = false
 
@@ -1520,7 +1524,9 @@ extension CollectionViewMessageListV3 {
                     guard let self, mid == message.id else { return }
                     self.turnSheetPresenter.sheetData = TurnSheetPresenter.SheetData(
                         id: message.id,
-                        message: message
+                        message: message,
+                        browserPool: bridge.browserPool,
+                        onExpandBrowser: self.onExpandBrowser
                     )
                     self.turnSheetPresenter.onDismiss = { [weak bridge] in
                         bridge?.turnSheetMessageId = nil
@@ -5678,6 +5684,8 @@ private final class TurnSheetPresenter: ObservableObject {
     struct SheetData: Identifiable {
         let id: UUID
         let message: ChatMessage
+        let browserPool: BrowserTabPool?
+        let onExpandBrowser: ((URL) -> Void)?
     }
 
     @Published var sheetData: SheetData?
@@ -5723,11 +5731,13 @@ private struct SheetOverlayView: View {
                 }
             }
             .sheet(item: $turnPresenter.sheetData) { data in
-                // Commit A placeholder: shows the turn summary text. Replaced
-                // by TurnDetailSheet (timeline + detail pages) in commit C.
-                TurnSummaryPlaceholderSheet(message: data.message)
-                    .presentationDetents([.fraction(2/3), .large])
-                    .presentationDragIndicator(.visible)
+                TurnDetailSheet(
+                    message: data.message,
+                    browserPool: data.browserPool,
+                    onExpandBrowser: data.onExpandBrowser
+                )
+                .presentationDetents([.fraction(2/3), .large])
+                .presentationDragIndicator(.visible)
             }
             .onChange(of: turnPresenter.sheetData?.id) { newVal in
                 if newVal == nil {
@@ -5746,33 +5756,3 @@ private struct SheetOverlayView: View {
     }
 }
 
-/// Commit A placeholder for the turn drawer sheet. Shows the summary text
-/// only. Deleted when TurnDetailSheet lands in commit C.
-private struct TurnSummaryPlaceholderSheet: View {
-    @ObservedObject var message: ChatMessage
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(message.turnSummary ?? TurnSummarySegments.fallbackSummary(
-                for: message.blocks.filter { $0.kind == .thinking || $0.kind.isToolKind }
-            ))
-            .font(MinisThemeShape.fontFamily.font(size: FontSettings.shared.scaledMessage(14)))
-            .foregroundStyle(ChatColors.secondaryText)
-            Spacer()
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(
-            ZStack {
-                MinisThemeShape.thinkingFill
-                if let image = AppearanceStudio.shared.thinkingCardImage() {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .opacity(MinisThemeShape.thinkingCardOpacity)
-                }
-            }
-            .ignoresSafeArea()
-        )
-    }
-}
