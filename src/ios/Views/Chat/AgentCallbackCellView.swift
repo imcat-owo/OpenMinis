@@ -300,15 +300,8 @@ struct AgentCallbackCellView: View {
                     Label(AppLocalized("Copy result"), systemImage: "doc.on.doc")
                 }
             }
+            .padding(.vertical, 4)
+            .accessibilityIdentifier("agentCallback")
         }
-    }
-        }
-        // [T-agent-callback-card-width] Horizontal inset deliberately NOT applied
-        // here — see `AgentCallbackCellView.horizontalInset` and the call site in
-        // ChatMessageViews. Applying it inside the 900pt content cap made the
-        // card 868pt while the delegate-tool card beside it, whose cell pads
-        // outside the cap, measured the full 900.
-        .padding(.vertical, 4)
-        .accessibilityIdentifier("agentCallback")
     }
 }
