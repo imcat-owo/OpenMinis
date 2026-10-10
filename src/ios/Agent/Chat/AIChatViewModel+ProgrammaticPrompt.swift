@@ -127,33 +127,22 @@ extension AIChatViewModel {
         if isProcessing {
             // Busy: hand to the queue.
             let before = promptQueue.count
-            // A job result is delivered gently: it never interrupts the
-            // running plan, it waits for the loop to converge (fix: the
-            // device run 15:53 showed a helper result abandoning the parent's
-            // remaining plan at the next tool boundary).
-            let gentle: Bool = { if case .job = origin { return true } else { return false } }()
-            enqueuePrompt(silent: silent, deferUntilIdle: gentle, overrideText: text)
-            guard promptQueue.count == before + 1 else {
-                logger.warning("\(tag) REJECTED — enqueuePrompt did not accept the prompt (queue \(before) → \(self.promptQueue.count))")
-                return .rejected(reason: "enqueue_declined")
-            }
-            if silent, let queuedId = promptQueue.last?.id {
-                silentQueuedPromptIds.insert(queuedId)
-            }
+            let prompt = QueuedPrompt(text: text, attachments: attachments)
+            promptQueue.append(prompt)
+            let chatMsg = ChatMessage(role: .user, content: text, isQueued: true)
+            chatMsg.queuedPromptId = prompt.id
+            messages.append(chatMsg)
+            scrollToBottomSignal.send()
+            inputText = ""
+            attachments = []
             logger.info("\(tag) QUEUED — position \(self.promptQueue.count), loop still running")
-            // Defensive: if the loop flipped idle in the same runloop turn
-            // (it cannot have, we hold the main actor, but the guard is free).
-            startDrainIfIdle(reason: "programmatic-enqueue")
             return .queued
         }
 
-        // Idle: start a loop. send() flips isProcessing synchronously before
-        // it spawns its Task, so the flip is the acceptance signal — every
-        // other exit from send() is a silent return.
-        programmaticSilentTurn = silent
-        send(overrideText: text)
+        // Idle: start a loop.
+        inputText = text
+        send()
         guard isProcessing else {
-            programmaticSilentTurn = false
             let reason = showContextExhaustedPrompt ? "context_exhausted" : "send_declined"
             logger.warning("\(tag) REJECTED — send() did not start a loop (\(reason))")
             return .rejected(reason: reason)
