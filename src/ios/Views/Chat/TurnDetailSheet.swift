@@ -58,11 +58,10 @@ struct TurnDetailSheet: View {
                 }
             } label: {
                 ZStack {
-                    // White circle per the mockup — intentional exception.
                     Circle()
-                        .fill(Color.white)
+                        .fill(ChatColors.secondaryBg)
                         .frame(width: 38, height: 38)
-                        .shadow(color: Color.black.opacity(0.1), radius: 5, x: 0, y: 1)
+                        .shadow(color: ChatColors.primaryText.opacity(0.08), radius: 5, x: 0, y: 1)
                     Text(navStack.isEmpty ? "✕" : "‹")
                         .font(.system(size: 21))
                         .foregroundStyle(ChatColors.primaryText)

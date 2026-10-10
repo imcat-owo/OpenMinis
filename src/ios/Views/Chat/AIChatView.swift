@@ -2793,13 +2793,13 @@ struct AIChatView: View {
                 onScreenshotImage: { image in
                     screenshotPreview = ChatScreenshotPreview(image: image)
                 },
-                maxContentWidth: maxContentWidth ?? 0,
-                floatingBarHeight: floatingBarHeight,
-                inputBarHeight: inputBarHeight,
                 onExpandBrowser: { url in
                     fullBrowserIsLocal = false
                     fullBrowserURL = url
-                }
+                },
+                maxContentWidth: maxContentWidth ?? 0,
+                floatingBarHeight: floatingBarHeight,
+                inputBarHeight: inputBarHeight
             )
             // Empty/loading overlay for tap-to-dismiss-keyboard.
             // Placed BEFORE the directory timeline in the ZStack so the
