@@ -181,7 +181,7 @@ enum ScheduledJobRunner {
         case .childOfCurrent(let parentSid, _):
             let (parentVM, parentFresh) = ViewModelCache.shared.getOrCreate(for: parentSid)
             if parentFresh { await parentVM.loadSession() }
-            let modelId = parentVM.resolveCurrentEntry().model.id
+            let modelId = parentVM.resolveCurrentEntry()?.model.id ?? "default"
             let title = job.label ?? job.title
             let session = await ChatStore.shared.createSession(modelId: modelId,
                                                                title: AgentJobRegistry.childSessionTitle(title),

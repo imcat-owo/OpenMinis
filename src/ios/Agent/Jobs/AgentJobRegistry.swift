@@ -992,22 +992,7 @@ final class AgentJobRegistry: ObservableObject {
         queued += AgentJobRegistry.shared.queuedCount(parent: parentSessionId)
 
         var interrupted = 0
-        if let vm = ViewModelCache.shared.get(for: parentSessionId) {
-            for msg in vm.messages {
-                for b in msg.blocks {
-                    guard case .delegateTool = b.kind else { continue }
-                    // A block still holding a "running" payload while no job
-                    // backs it is one the app lost.
-                    guard let obj = AIChatViewModel.parseDelegateResult(b.content),
-                          (obj["status"] as? String) == "running",
-                          let child = obj["child_session_id"] as? String else { continue }
-                    let alive = AgentJobRegistry.shared.jobs.values.contains {
-                        $0.runSessionId == child && ($0.state == .running || $0.state == .pending)
-                    }
-                    if !alive { interrupted += 1 }
-                }
-            }
-        }
+        // Interrupted check (not applicable without delegation blocks)
 
         var parts: [String] = []
         if running > 0 { parts.append("\(running) still running") }
