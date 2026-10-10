@@ -6708,6 +6708,10 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
             }
         }
 
+        // [drawer-rewrite] Generate the one-line turn summary for the summary
+        // row. Async; always writes message.turnSummary (AI text or fallback).
+        generateTurnSummary(for: messages[msgIdx])
+
     }
 
     /// Builds the final NSAttributedString for a completed text block and stores it
