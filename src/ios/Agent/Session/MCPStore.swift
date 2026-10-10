@@ -682,25 +682,21 @@ final class MCPStore: ObservableObject {
             if ca != cb { return ca > cb }
             return a.id.localizedCaseInsensitiveCompare(b.id) == .orderedAscending
         }.prefix(Self.maxMetadataCount)
-        let maxNoteLength = 200   // same cap as SkillStore.skillPromptFragment
+        let maxNoteLength = 80
 
-        var lines = "Available MCP Servers (use minis-mcp-cli to discover and call):\n"
+        var lines = "Available MCP Servers (tools: minis-mcp-cli tools <server> | call <server> <tool>):\n"
         for s in selected {
             var note = s.note ?? ""
             if note.count > maxNoteLength {
                 note = String(note.prefix(maxNoteLength)) + "…"
             }
             if note.isEmpty {
-                lines += "- \(s.id)\n"
+                lines += "- `\(s.id)`\n"
             } else {
-                lines += "- \(s.id): \(note)\n"
+                lines += "- `\(s.id)`: \(note)\n"
             }
         }
-        lines += "\nTo use: run `minis-mcp-cli tools <server>` to see available tools,\n"
-        lines += "then `minis-mcp-cli call <server> <tool> [args]` to invoke."
-        // Agent-facing guidance on the runtime env placeholder; English-only,
-        // not localized (this is prompt text, never shown in the UI).
-        lines += "\nWhen adding or modifying an MCP server config (via minis-mcp-cli add / the UI), use $$VARNAME in env/headers/url values as a placeholder resolved at runtime from the system/App environment variables — do not hardcode secrets; reference an existing App environment variable as $$NAME."
+        lines += "Config placeholders: use $$VARNAME for runtime env references in minis-mcp-cli."
         return lines
     }
 

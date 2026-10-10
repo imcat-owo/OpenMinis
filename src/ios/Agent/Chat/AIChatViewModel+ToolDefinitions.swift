@@ -264,3 +264,251 @@ extension AIChatViewModel {
     }
 
 }
+
+// MARK: - Capabilities Catalog & Vector Router Hook (Progressive Disclosure)
+
+/// Categorized capability in the progressive disclosure directory.
+public struct CatalogItem: Identifiable, Sendable {
+    public let id: String
+    public let name: String
+    public let category: CatalogCategory
+    public let synopsis: String      // Concise trigger condition & purpose
+    public let quickSyntax: String    // Fast usage example
+    public let docRef: String        // Where to query full documentation
+
+    public init(id: String, name: String, category: CatalogCategory, synopsis: String, quickSyntax: String, docRef: String) {
+        self.id = id
+        self.name = name
+        self.category = category
+        self.synopsis = synopsis
+        self.quickSyntax = quickSyntax
+        self.docRef = docRef
+    }
+}
+
+public enum CatalogCategory: String, CaseIterable, Sendable {
+    case system = "System & Shell"
+    case apple = "Apple Native Frameworks"
+    case webMedia = "Web & Communication"
+    case memoryExtensions = "Memory & Extensions"
+}
+
+/// [T-vector-router-hook] Extension point for dedicated embedding / vector router model.
+/// When configured, the router dynamically selects relevant tools based on user prompt.
+public protocol VectorCatalogRouterProtocol: AnyObject, Sendable {
+    func route(query: String, availableItems: [CatalogItem]) async throws -> [CatalogItem]
+}
+
+public final class ToolCatalogRouter: @unchecked Sendable {
+    public static let shared = ToolCatalogRouter()
+
+    /// Plug-and-play hook for vector / embedding routing model.
+    public var vectorRouter: (any VectorCatalogRouterProtocol)?
+
+    public func defaultCatalogItems() -> [CatalogItem] {
+        [
+            // System & Shell
+            CatalogItem(
+                id: "shell_execute",
+                name: "shell_execute",
+                category: .system,
+                synopsis: "Execute commands/scripts in isolated Linux iSH shell (Alpine aarch64).",
+                quickSyntax: "tool call: shell_execute(command: \"...\")",
+                docRef: "Tool schema (timeout default 900s, delay for polling)"
+            ),
+            CatalogItem(
+                id: "file_ops",
+                name: "file_read / file_write / file_edit",
+                category: .system,
+                synopsis: "Direct Linux filesystem manipulation (faster/atomic).",
+                quickSyntax: "tool calls: file_read, file_write (split large content), file_edit",
+                docRef: "Tool schemas"
+            ),
+            CatalogItem(
+                id: "minis-config",
+                name: "minis-config",
+                category: .system,
+                synopsis: "Read or change app settings (providers, models, groups, envvars).",
+                quickSyntax: "minis-config get <key> | set <key> <val>",
+                docRef: "minis-config --help | minis-config topic-help <topic>"
+            ),
+            CatalogItem(
+                id: "minis-scheduled",
+                name: "minis-scheduled",
+                category: .system,
+                synopsis: "Schedule delayed or recurring prompt executions.",
+                quickSyntax: "minis-scheduled create --prompt \"...\" --after 10m",
+                docRef: "minis-scheduled --help"
+            ),
+            CatalogItem(
+                id: "minis-sessions-cli",
+                name: "minis-sessions-cli",
+                category: .system,
+                synopsis: "Manage and inspect past conversation sessions.",
+                quickSyntax: "minis-sessions-cli list | messages --id <sid>",
+                docRef: "minis-sessions-cli --help"
+            ),
+            CatalogItem(
+                id: "minis-model-use",
+                name: "minis-model-use",
+                category: .system,
+                synopsis: "Single-shot invocation of pre-configured secondary models.",
+                quickSyntax: "minis-model-use run --model <id> --input <json>",
+                docRef: "minis-model-use --help"
+            ),
+            CatalogItem(
+                id: "open_terminal",
+                name: "Interactive Terminal",
+                category: .system,
+                synopsis: "Interactive terminal for stdin tasks (passwords, ssh, htop).",
+                quickSyntax: "[Open Terminal](minis-clone://open_terminal?init_command=...)",
+                docRef: "Markdown link with percent-encoded init_command"
+            ),
+
+            // Apple Native Frameworks
+            CatalogItem(
+                id: "apple-vision",
+                name: "apple-vision",
+                category: .apple,
+                synopsis: "Image analysis (OCR, barcodes, faces, crop, diff, measure).",
+                quickSyntax: "apple-vision ocr/classify/diff/measure <img...>",
+                docRef: "apple-vision --help"
+            ),
+            CatalogItem(
+                id: "apple-healthkit",
+                name: "apple-healthkit",
+                category: .apple,
+                synopsis: "Query or record Apple Health data (vitals, sleep, workouts).",
+                quickSyntax: "apple-healthkit batch --types <t1,t2> --days N",
+                docRef: "apple-healthkit --help | apple-healthkit types"
+            ),
+            CatalogItem(
+                id: "apple-homekit",
+                name: "apple-homekit",
+                category: .apple,
+                synopsis: "Control HomeKit smart home accessories and scenes.",
+                quickSyntax: "apple-homekit list | set --name ... --characteristic ... --value ...",
+                docRef: "apple-homekit --help"
+            ),
+            CatalogItem(
+                id: "apple-maps",
+                name: "apple-maps",
+                category: .apple,
+                synopsis: "POI search, route navigation, and travel ETA.",
+                quickSyntax: "apple-maps search --query ... | route | eta",
+                docRef: "apple-maps --help"
+            ),
+            CatalogItem(
+                id: "apple-player",
+                name: "apple-player",
+                category: .apple,
+                synopsis: "Media playback control for audio and video files.",
+                quickSyntax: "apple-player play <file> | pause | resume | stop",
+                docRef: "apple-player --help"
+            ),
+            CatalogItem(
+                id: "apple-alarm",
+                name: "apple-alarm",
+                category: .apple,
+                synopsis: "Manage iOS system alarms and countdown timers.",
+                quickSyntax: "apple-alarm list | set --time HH:mm",
+                docRef: "apple-alarm --help (view at minis-clone://views/alarm)"
+            ),
+            CatalogItem(
+                id: "apple-open",
+                name: "apple-open",
+                category: .apple,
+                synopsis: "Open system URI schemes via iOS system handler (tel:, maps://, settings:).",
+                quickSyntax: "apple-open <url>",
+                docRef: "apple-open --help"
+            ),
+            CatalogItem(
+                id: "apple-speak",
+                name: "apple-speak",
+                category: .apple,
+                synopsis: "Quick one-off spoken announcements (does not record in chat).",
+                quickSyntax: "apple-speak speak --text \"...\" --voice zh-CN",
+                docRef: "apple-speak --help"
+            ),
+
+            // Web & Communication
+            CatalogItem(
+                id: "browser_use",
+                name: "browser_use",
+                category: .webMedia,
+                synopsis: "WebKit browser automation (navigate, screenshot, click, type, scroll, cookies).",
+                quickSyntax: "tool call: browser_use(action: \"navigate\", url: \"...\")",
+                docRef: "Tool schema | minis-browser-use --help"
+            ),
+            CatalogItem(
+                id: "send_voice",
+                name: "send_voice",
+                category: .webMedia,
+                synopsis: "Send WeChat-style voice message bubbles via configured TTS service.",
+                quickSyntax: "tool call: send_voice(text: \"...\")",
+                docRef: "Tool schema (voice bubble in chat)"
+            ),
+            CatalogItem(
+                id: "web_search",
+                name: "web_search",
+                category: .webMedia,
+                synopsis: "Search live web information (news, facts, documentation).",
+                quickSyntax: "tool call: web_search(query: \"...\")",
+                docRef: "Tool schema (cite sources with [cite:id])"
+            ),
+            CatalogItem(
+                id: "minis-open",
+                name: "minis-open",
+                category: .webMedia,
+                synopsis: "In-app preview for web URLs or files in /var/minis/ without leaving chat.",
+                quickSyntax: "minis-open <url-or-path>",
+                docRef: "minis-open --help"
+            ),
+
+            // Memory & Extensions
+            CatalogItem(
+                id: "memory_tools",
+                name: "memory_write / memory_get",
+                category: .memoryExtensions,
+                synopsis: "Persistent memory logging (YYYY-MM-DD.md) and keyword recall.",
+                quickSyntax: "tool calls: memory_write(content: \"...\"), memory_get(keywords: \"...\")",
+                docRef: "Tool schema"
+            ),
+            CatalogItem(
+                id: "skills_catalog",
+                name: "Skills",
+                category: .memoryExtensions,
+                synopsis: "Reusable instruction playbooks at /var/minis/skills/<id>/SKILL.md.",
+                quickSyntax: "Read /var/minis/skills/<id>/SKILL.md before executing",
+                docRef: "List /var/minis/skills/ to discover"
+            ),
+            CatalogItem(
+                id: "mcp_catalog",
+                name: "MCP Servers",
+                category: .memoryExtensions,
+                synopsis: "External MCP server ecosystem for specialized tools.",
+                quickSyntax: "minis-mcp-cli tools <server> | call <server> <tool>",
+                docRef: "minis-mcp-cli list | minis-mcp-cli --help"
+            )
+        ]
+    }
+
+    /// Renders the catalog as a compact, structured Markdown index.
+    public func renderCatalogFragment(items: [CatalogItem]? = nil) -> String {
+        let activeItems = items ?? defaultCatalogItems()
+        var out = "## Capabilities & Tools Catalog (Progressive Disclosure Index)\n"
+        out += "All tools and CLIs support `--help` for full flags and syntax. Query details only when needed.\n\n"
+
+        for cat in CatalogCategory.allCases {
+            let catItems = activeItems.filter { $0.category == cat }
+            guard !catItems.isEmpty else { continue }
+            out += "### \(cat.rawValue)\n"
+            for item in catItems {
+                out += "- `\(item.name)`: \(item.synopsis) [Usage: `\(item.quickSyntax)`] (Spec: \(item.docRef))\n"
+            }
+            out += "\n"
+        }
+        return out.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+

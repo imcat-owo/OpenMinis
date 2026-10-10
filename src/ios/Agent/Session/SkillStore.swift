@@ -1503,33 +1503,22 @@ thinking 填/描/强调不必手写。贴包后跟 `colorsLight.accent` / 聊天
         #endif
 
         // Cap each description to avoid bloating the system prompt.
-        let maxDescLength = 200
+        let maxDescLength = 80
 
-        var xml = "<available_skills>\n"
+        var fragment = "Skills Directory (instructions at /var/minis/skills/<id>/SKILL.md, read before use):\n"
         for skill in selected {
-            let escapedName = skill.name.xmlEscaped
             var desc = skill.description
             if desc.count > maxDescLength {
                 desc = String(desc.prefix(maxDescLength)) + "…"
             }
-            let escapedDesc = desc.xmlEscaped
-            xml += "  <skill>\n"
-            xml += "    <name>\(escapedName)</name>\n"
-            xml += "    <description>\(escapedDesc)</description>\n"
-            xml += "    <path>/var/minis/skills/\(skill.id)/SKILL.md</path>\n"
-            xml += "  </skill>\n"
+            fragment += "- `\(skill.name)`: \(desc) (/var/minis/skills/\(skill.id)/SKILL.md)\n"
         }
-        xml += "</available_skills>"
-
-        var fragment = "Skills:\n"
-        fragment += "Reusable instruction sets stored at /var/minis/skills/<name>/SKILL.md. Read the SKILL.md file to load full instructions before using a skill.\n\n"
-        fragment += xml
 
         if hasMore {
             let omitted = enabled.filter { s in !selected.contains(where: { $0.id == s.id }) }
             let maxUndisclosed = 100 - selected.count
             let undisclosedNames = omitted.prefix(maxUndisclosed).map(\.name).joined(separator: ", ")
-            fragment += "\n\n\(omitted.count) more skills not shown above: \(undisclosedNames). List /var/minis/skills/ or grep to search all."
+            fragment += "\n\(omitted.count) more skills: \(undisclosedNames). List /var/minis/skills/ to search all."
         }
 
         return fragment
