@@ -279,8 +279,18 @@ struct ChatMessageRow: View {
     var body: some View {
         switch message.role {
         case .user:
-            userRow
-                .opacity(message.isCompactedHistory ? 0.5 : 1.0)
+            if let callback = message.agentCallback {
+                if callback.kind == .scheduled {
+                    // 醒醒专属隐身模式：定时任务在视觉上完全静默，不弹任何卡片，自然回访
+                    EmptyView()
+                } else {
+                    AgentCallbackCellView(callback: callback, sessionId: nil)
+                        .opacity(message.isCompactedHistory ? 0.5 : 1.0)
+                }
+            } else {
+                userRow
+                    .opacity(message.isCompactedHistory ? 0.5 : 1.0)
+            }
         case .assistant:
             assistantRow
                 .opacity(message.isCompactedHistory ? 0.5 : 1.0)

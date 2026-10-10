@@ -65,6 +65,7 @@
 #import "ConfigOffload.h"
 #import "ThemeOffload.h"
 #import "BrowserUseOffload.h"
+#import "ScheduledOffload.h"
 #import "DebugOffload.h"
 
 NSNotificationName const ISHProcessExitedNotification = @"ISHProcessExited";
@@ -666,6 +667,7 @@ static void handle_process_exit(struct task *task, int code) {
     maps_offload_register();
     nlp_offload_register();
     alarm_offload_register();
+    scheduled_offload_register();
     media_offload_register();
     speak_offload_register();
     speech_offload_register();

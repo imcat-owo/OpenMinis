@@ -106,6 +106,15 @@ final class ChatMessage: Identifiable, ObservableObject {
         self.isQueued = isQueued
     }
 
+    /// [T-p3-agent-callback-cell] A user-role message that is really an
+    /// agent reporting back (`<agent_callback …>`); rendered as a callback
+    /// cell, not a user bubble. Parsed on demand — the prefix test rejects
+    /// ordinary messages in O(1).
+    var agentCallback: AgentCallback? {
+        guard role == .user, AgentCallback.isCallbackText(content) else { return nil }
+        return AgentCallback.parse(content)
+    }
+
     /// [T-bridge-message-ui-leak] True when this UI message is the internal
     /// role-alternation bridge (#579) that must never render as a chat bubble.
     /// The bridge is filtered out of the DB-reload path (loadSession), but a

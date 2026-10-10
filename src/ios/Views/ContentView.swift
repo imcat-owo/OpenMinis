@@ -2766,14 +2766,10 @@ struct ContentView: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             inlineSearchBar
         }
-        // ［persona］人设切换行：点一下弹出人设列表。
-        .safeAreaInset(edge: .top, spacing: 0) {
-            PersonaSwitcherRow(store: PersonaStore.shared) {
-                showPersonaSheet = true
-            }
-        }
         .sheet(isPresented: $showPersonaSheet) {
-            PersonaListSheet(store: PersonaStore.shared)
+            PersonaContactsView { _ in
+                openSession(Self.makeNewSessionId())
+            }
         }
         // Hardware ⌘F → focus search, available while the session list is on
         // screen (iPad/Mac keyboards). A zero-opacity button carries the
@@ -3475,9 +3471,6 @@ struct ContentView: View {
     ///    chat canvas behind it).
     private var homeBottomBar: some View {
         HStack(spacing: 0) {
-            // [T-home-top-search][v3 醒醒 09-10] Search lives in the
-            // permanent top strip; terminal moved into Settings → Tools.
-            // Bar = 新对话 / 设置 / 闹钟(有闹钟才出现).
             homeBottomTab(
                 icon: {
                     Image(systemName: {
@@ -3491,14 +3484,19 @@ struct ContentView: View {
                 openSession(Self.makeNewSessionId())
             }
             homeBottomTab(
+                icon: { Image(systemName: "person.2.fill") },
+                label: "Contacts",
+                size: 22, weight: .medium
+            ) {
+                showPersonaSheet = true
+            }
+            homeBottomTab(
                 icon: { Image(systemName: "gearshape") },
                 label: "Settings",
                 size: 22, weight: .medium
             ) {
                 showSettingsPage = true
             }
-            // [T-play-hub 09-12] 醒醒 4: 玩法入口 — one more slot on the home
-            // bottom bar. Each entry inside is a little AI-shared world.
             homeBottomTab(
                 icon: { Image(systemName: "sparkles") },
                 label: "Play",
@@ -3516,11 +3514,7 @@ struct ContentView: View {
                 }
             }
         }
-        // [T-home-bottom-bar-height][09-10 醒醒] LOCKED visual height (44pt,
-        // QQ-style) — the background picture can no longer change how tall the
-        // bar reads; the ZStack is clipped to the frame, never sized by it.
-        .frame(height: 44)
-        .clipped()
+        .frame(height: 48)
         .contentShape(Rectangle())
         .background(homeBottomBarBackground)
     }
@@ -3554,20 +3548,19 @@ struct ContentView: View {
         .buttonStyle(.plain)
     }
 
-    /// [T-home-bottom-bar-skin] #2 醒醒: 默认完全透明（无底色）；只有放了壁纸才出图。
-    /// 壁纸 scaledToFit + clipped 不撑满遮挡内容；图延伸到 home indicator（贴底，#8）。
+    /// 默认完全透明贴底穿透全局壁纸，绝不产生白边；有独立壁纸时则全屏覆盖安全区。
     @ViewBuilder private var homeBottomBarBackground: some View {
         let studio = AppearanceStudio.shared
         if let wp = studio.wallpaper(for: .bottomBar) {
             Image(uiImage: wp)
                 .resizable()
-                .scaledToFit()
+                .scaledToFill()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipped()
                 .overlay(studio.color(.canvas, scope: .bottomBar).opacity(studio.wallpaperShade))
                 .ignoresSafeArea(edges: .bottom)
         } else {
             Color.clear
+                .ignoresSafeArea(edges: .bottom)
         }
     }
 
@@ -7427,15 +7420,6 @@ private struct SettingsSheet: View {
                             Text("Browser")
                         } icon: {
                             QuietAppIcon(id: QuietIconSlot.browser.id, systemName: QuietIconSlot.browser.systemName)
-                        }
-                    }
-                    NavigationLink {
-                        SoulSettingsView()
-                    } label: {
-                        Label {
-                            Text("Soul")
-                        } icon: {
-                            QuietAppIcon(id: QuietIconSlot.soul.id, systemName: QuietIconSlot.soul.systemName)
                         }
                     }
                     NavigationLink {

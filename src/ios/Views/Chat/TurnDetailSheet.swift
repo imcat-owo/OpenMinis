@@ -314,26 +314,19 @@ struct TurnDetailSheet: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(MinisThemeShape.thinkingAccent.opacity(0.08))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(MinisThemeShape.thinkingAccent.opacity(0.2), lineWidth: 0.5)
-        )
+        .contentShape(Rectangle())
     }
 
     private func toolPillRow(for block: AssistantBlock) -> some View {
         HStack(spacing: 8) {
             toolIcon(for: block.kind)
                 .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(toolColor(for: block))
+                .foregroundStyle(MinisThemeShape.thinkingAccent)
                 .frame(width: 18, alignment: .center)
 
             Text(timelineTitle(for: block))
                 .font(MinisThemeShape.fontFamily.font(size: FontSettings.shared.scaledMessage(13.5), weight: .medium))
-                .foregroundStyle(ChatColors.primaryText)
+                .foregroundStyle(MinisThemeShape.thinkingAccent)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -341,23 +334,16 @@ struct TurnDetailSheet: View {
             if let dur = block.toolDuration {
                 Text(MinisStepTimestampFormatter.duration(seconds: dur, stillRunning: false))
                     .font(.system(size: 11.5, weight: .regular, design: .monospaced))
-                    .foregroundStyle(ChatColors.tertiaryText)
+                    .foregroundStyle(MinisThemeShape.thinkingAccent.opacity(0.7))
             }
 
             Image(systemName: "chevron.right")
                 .font(.system(size: 11, weight: .regular))
-                .foregroundStyle(ChatColors.secondaryText.opacity(0.6))
+                .foregroundStyle(MinisThemeShape.thinkingAccent.opacity(0.5))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(ChatColors.toolBg)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(ChatColors.toolBorder, lineWidth: 0.5)
-        )
+        .contentShape(Rectangle())
     }
 
     private func timelineTitle(for block: AssistantBlock) -> String {

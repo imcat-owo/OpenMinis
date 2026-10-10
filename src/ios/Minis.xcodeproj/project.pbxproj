@@ -7,6 +7,21 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		E5SAS0001 /* SubAgentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5SAS0011 /* SubAgentStore.swift */; };
+		E5SAD0001 /* SubAgentDefinition.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5SAD0011 /* SubAgentDefinition.swift */; };
+		E5TSV0001 /* ToolsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5TSV0011 /* ToolsSettingsView.swift */; };
+		E5ACB0001 /* AgentCallback.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5ACB0011 /* AgentCallback.swift */; };
+		E5ACB0002 /* AgentCallbackCellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5ACB0012 /* AgentCallbackCellView.swift */; };
+		E5AJR0001 /* AgentJobRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5AJR0011 /* AgentJobRegistry.swift */; };
+		E5AJR0002 /* HelperRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5AJR0012 /* HelperRunner.swift */; };
+		E5AJR0003 /* ModelTierResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5AJR0013 /* ModelTierResolver.swift */; };
+		E5AMI0001 /* HelperModelIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5AMI0011 /* HelperModelIdentity.swift */; };
+		E5PPR0001 /* AIChatViewModel+ProgrammaticPrompt.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5PPR0011 /* AIChatViewModel+ProgrammaticPrompt.swift */; };
+		E5SCH0001 /* ScheduledJobRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5SCH0011 /* ScheduledJobRunner.swift */; };
+		E5SCH0002 /* ScheduledOffload.m in Sources */ = {isa = PBXBuildFile; fileRef = E5SCH0012 /* ScheduledOffload.m */; };
+		E5SCH0003 /* ScheduledOffloadBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5SCH0013 /* ScheduledOffloadBridge.swift */; };
+		E5SRS0001 /* SessionRefreshScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5SRS0011 /* SessionRefreshScheduler.swift */; };
+		E5PCV0001 /* PersonaContactsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5PCV0011 /* PersonaContactsView.swift */; };
 		21FED4B7BB6F6D9476C9992E /* VoiceProvider+System.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88993FC8E3F0199C6638F664 /* VoiceProvider+System.swift */; };
 		241D530017827D7F0EB604DE /* VoiceProviderFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2941B643B8A2F048A2B154E /* VoiceProviderFactory.swift */; };
 		2A4FD49F872431D703328384 /* VoiceOutputPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 424510790AF3FB2452D3CCE3 /* VoiceOutputPlayer.swift */; };
@@ -679,6 +694,21 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		E5SAS0011 /* SubAgentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SubAgentStore.swift"; sourceTree = "<group>"; };
+		E5SAD0011 /* SubAgentDefinition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SubAgentDefinition.swift"; sourceTree = "<group>"; };
+		E5TSV0011 /* ToolsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ToolsSettingsView.swift"; sourceTree = "<group>"; };
+		E5ACB0011 /* AgentCallback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AgentCallback.swift"; sourceTree = "<group>"; };
+		E5ACB0012 /* AgentCallbackCellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AgentCallbackCellView.swift"; sourceTree = "<group>"; };
+		E5AJR0011 /* AgentJobRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AgentJobRegistry.swift"; sourceTree = "<group>"; };
+		E5AJR0012 /* HelperRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HelperRunner.swift"; sourceTree = "<group>"; };
+		E5AJR0013 /* ModelTierResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ModelTierResolver.swift"; sourceTree = "<group>"; };
+		E5AMI0011 /* HelperModelIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HelperModelIdentity.swift"; sourceTree = "<group>"; };
+		E5PPR0011 /* AIChatViewModel+ProgrammaticPrompt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatViewModel+ProgrammaticPrompt.swift"; sourceTree = "<group>"; };
+		E5SCH0011 /* ScheduledJobRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ScheduledJobRunner.swift"; sourceTree = "<group>"; };
+		E5SCH0012 /* ScheduledOffload.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "ScheduledOffload.m"; sourceTree = "<group>"; };
+		E5SCH0013 /* ScheduledOffloadBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ScheduledOffloadBridge.swift"; sourceTree = "<group>"; };
+		E5SRS0011 /* SessionRefreshScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SessionRefreshScheduler.swift"; sourceTree = "<group>"; };
+		E5PCV0011 /* PersonaContactsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PersonaContactsView.swift"; sourceTree = "<group>"; };
 		0ED149397BEA7E0408C92688 /* GroupVoiceModelsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GroupVoiceModelsView.swift; sourceTree = "<group>"; };
 		0F5379380323FA8C6477708C /* GroupSlotPicker.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GroupSlotPicker.swift; sourceTree = "<group>"; };
 		16FF3462D09402F14B610CD6 /* VoiceWaveformView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VoiceWaveformView.swift; sourceTree = "<group>"; };
@@ -2442,6 +2472,22 @@
 				E5N0000152F3B941A00049557 /* SessionMemoryView.swift */,
 				E5PERSONA102 /* PersonaSwitcherRow.swift */,
 				E5PERSONA103 /* PersonaListSheet.swift */,
+				E5SAS0011 /* SubAgentStore.swift */,
+				E5SAD0011 /* SubAgentDefinition.swift */,
+				E5TSV0011 /* ToolsSettingsView.swift */,
+				E5ACB0011 /* AgentCallback.swift */,
+				E5ACB0012 /* AgentCallbackCellView.swift */,
+				E5AJR0011 /* AgentJobRegistry.swift */,
+				E5AJR0012 /* HelperRunner.swift */,
+				E5AJR0013 /* ModelTierResolver.swift */,
+				E5AMI0011 /* HelperModelIdentity.swift */,
+				E5PPR0011 /* AIChatViewModel+ProgrammaticPrompt.swift */,
+				E5SCH0011 /* ScheduledJobRunner.swift */,
+				E5SCH0012 /* ScheduledOffload.m */,
+				E5SCH0013 /* ScheduledOffloadBridge.swift */,
+				E5SRS0011 /* SessionRefreshScheduler.swift */,
+				E5PCV0011 /* PersonaContactsView.swift */,
+
 				E5PERSONA104 /* PersonaSettingsView.swift */,
 				E5N0000122F3B941A00049557 /* SessionSkillsView.swift */,
 				F1T00010 /* ToolLiveSheet.swift */,
@@ -2892,6 +2938,25 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E5SAS0001 /* SubAgentStore.swift in Sources */,
+
+				E5SAD0001 /* SubAgentDefinition.swift in Sources */,
+
+				E5TSV0001 /* ToolsSettingsView.swift in Sources */,
+
+				E5ACB0001 /* AgentCallback.swift in Sources */,
+				E5ACB0002 /* AgentCallbackCellView.swift in Sources */,
+				E5AJR0001 /* AgentJobRegistry.swift in Sources */,
+				E5AJR0002 /* HelperRunner.swift in Sources */,
+				E5AJR0003 /* ModelTierResolver.swift in Sources */,
+				E5AMI0001 /* HelperModelIdentity.swift in Sources */,
+				E5PPR0001 /* AIChatViewModel+ProgrammaticPrompt.swift in Sources */,
+				E5SCH0001 /* ScheduledJobRunner.swift in Sources */,
+				E5SCH0002 /* ScheduledOffload.m in Sources */,
+				E5SCH0003 /* ScheduledOffloadBridge.swift in Sources */,
+				E5SRS0001 /* SessionRefreshScheduler.swift in Sources */,
+				E5PCV0001 /* PersonaContactsView.swift in Sources */,
+
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
