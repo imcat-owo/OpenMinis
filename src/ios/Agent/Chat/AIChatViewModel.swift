@@ -1944,7 +1944,7 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
             + "NEVER end a turn with a promise of future action: once your turn ends, NOTHING runs until the user's next message. "
             + "If polling to completion is genuinely not worth blocking the turn, close honestly instead.\n\n"
             + "Current time (approximate): \(approximateTimeString) (\(TimeZone.current.identifier)). "
-            + "Device languages: \((UserDefaults.standard.object(forKey: \"AppleLanguages\") as? [String] ?? Locale.preferredLanguages).joined(separator: \", \")).\n\n"
+            + "Device languages: \((UserDefaults.standard.object(forKey: "AppleLanguages") as? [String] ?? Locale.preferredLanguages).joined(separator: ", ")).\n\n"
             + "Shared directory /var/minis/ (bidirectional read/write between shell and app):\n"
             + "  /var/minis/attachments/ — Media files (display inline: ![desc](minis-clone://attachments/filename))\n"
             + "  /var/minis/workspace/   — Working files (link: [name](minis-clone://workspace/filename))\n"
