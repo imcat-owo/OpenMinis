@@ -1040,6 +1040,9 @@ extension CollectionViewMessageListV3 {
                 case .assistantToolGroup:
                     // [chat-ui] Tool-group folding card reuses the block cell class.
                     return cv.dequeueConfiguredReusableCell(using: blockReg, for: indexPath, item: item)
+                case .assistantTurnSummary:
+                    // [T-turn-summary-row] Turn summary row reuses the block cell class.
+                    return cv.dequeueConfiguredReusableCell(using: blockReg, for: indexPath, item: item)
                 case .assistantFooter:
                     return cv.dequeueConfiguredReusableCell(using: footerReg, for: indexPath, item: item)
                 }
@@ -1051,9 +1054,19 @@ extension CollectionViewMessageListV3 {
                 let host = UIHostingController(rootView: overlay)
                 host.view.backgroundColor = .clear
                 host.view.isUserInteractionEnabled = true
-                host.view.frame = .zero
+                // [T-turn-summary-row] Fill the parent so the custom bottom
+                // sheet scrim can cover the screen and catch tap-outside.
+                // Hit-testing is gated in SwiftUI (allowsHitTesting) so touches
+                // pass through to the chat when no sheet is shown.
+                host.view.translatesAutoresizingMaskIntoConstraints = false
                 vc.addChild(host)
                 vc.view.addSubview(host.view)
+                NSLayoutConstraint.activate([
+                    host.view.topAnchor.constraint(equalTo: vc.view.topAnchor),
+                    host.view.bottomAnchor.constraint(equalTo: vc.view.bottomAnchor),
+                    host.view.leadingAnchor.constraint(equalTo: vc.view.leadingAnchor),
+                    host.view.trailingAnchor.constraint(equalTo: vc.view.trailingAnchor),
+                ])
                 host.didMove(toParent: vc)
                 sheetOverlayHost = host
 
@@ -1304,6 +1317,26 @@ extension CollectionViewMessageListV3 {
                 cell.applyContentConfiguration(config)
                 cell.accessibilityIdentifier = "assistantToolGroupBlock"
 
+            case .assistantTurnSummary(let msgId):
+                // [T-turn-summary-row] ONE floating summary row per turn.
+                guard let msgIdx = messageIndex[msgId], msgIdx < messages.count else { return }
+                let message = messages[msgIdx]
+                let bridge = getOrCreateBridge(for: message, in: messages)
+                cell.backgroundColor = .clear
+                let config = UIHostingConfiguration {
+                    TurnSummaryRow(message: message) {
+                        bridge.turnSheetMessage = message
+                    }
+                    .frame(maxWidth: width > 0 ? width : nil, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .opacity(message.isCompactedHistory ? 0.5 : 1.0)
+                    .transaction { $0.disablesAnimations = true }
+                    .environmentObject(vm)
+                }.minSize(width: 0, height: 0).margins(.all, 0)
+                cell.applyContentConfiguration(config)
+                cell.accessibilityIdentifier = "assistantTurnSummaryRow"
+
             case .assistantFooter(let msgId):
                 guard let msgIdx = messageIndex[msgId], msgIdx < messages.count else { return }
                 let message = messages[msgIdx]
@@ -1443,7 +1476,7 @@ extension CollectionViewMessageListV3 {
         }
 
         /// Subscriptions for bridge detailBlock → sheet presenter forwarding.
-        private var bridgeSheetSubs: [UUID: AnyCancellable] = [:]
+        private var bridgeSheetSubs: [String: AnyCancellable] = [:]
 
         private func getOrCreateBridge(for message: ChatMessage, in messages: [ChatMessage]) -> CellStateBridgeV2 {
             if let existing = cellBridges[message.id] { return existing }
@@ -1451,7 +1484,7 @@ extension CollectionViewMessageListV3 {
             cellBridges[message.id] = bridge
             updateBridge(bridge, message: message, in: messages, isInitialBridgeSetup: true)
             // Forward detailBlock changes to the VC-level sheet presenter
-            bridgeSheetSubs[message.id] = bridge.$detailBlock
+            bridgeSheetSubs["\(message.id)-detail"] = bridge.$detailBlock
                 .dropFirst()
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] block in
@@ -1469,6 +1502,17 @@ extension CollectionViewMessageListV3 {
                         )
                     }
                     // Dismiss is handled by sheetPresenter.onDismiss (set in attach)
+                }
+            // [T-turn-summary-row] Forward turn summary row taps to the
+            // turn detail sheet presenter.
+            bridgeSheetSubs["\(message.id)-turn"] = bridge.$turnSheetMessage
+                .dropFirst()
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] msg in
+                    guard let self else { return }
+                    if let msg {
+                        self.sheetPresenter.turnMessage = msg
+                    }
                 }
             return bridge
         }
@@ -2812,7 +2856,10 @@ extension CollectionViewMessageListV3 {
             // Clean up bridges
             let currentIds = Set(messages.map(\.id))
             let removedIds = Set(cellBridges.keys).subtracting(currentIds)
-            for id in removedIds { bridgeSheetSubs.removeValue(forKey: id) }
+            for id in removedIds {
+                bridgeSheetSubs.removeValue(forKey: "\(id)-detail")
+                bridgeSheetSubs.removeValue(forKey: "\(id)-turn")
+            }
             cellBridges = cellBridges.filter { currentIds.contains($0.key) }
             lastFooterShapeByMessage = lastFooterShapeByMessage.filter { currentIds.contains($0.key) }
             // [T-action-bar-layout-drift 09-12] Same liveness filter as the
@@ -2845,24 +2892,20 @@ extension CollectionViewMessageListV3 {
                     }
                 case .assistant:
                     newItems.append(.assistantHeader(message.id))
-                    // [chat-ui] Group consecutive tool-call blocks (>2) into one
-                    // folding card item; shorter runs stay as individual cells.
+                    // [T-turn-summary-row] ONE summary row per turn: all
+                    // thinking/tool blocks collapse into a single floating
+                    // row at the position of the first thinking/tool block.
+                    // Text and info blocks still render individually.
                     var bi = message.blocks.startIndex
+                    var turnSummaryEmitted = false
                     while bi < message.blocks.endIndex {
-                        if message.blocks[bi].kind.isToolKind {
-                            var runEnd = bi
-                            while runEnd < message.blocks.endIndex,
-                                  message.blocks[runEnd].kind.isToolKind {
-                                runEnd = message.blocks.index(after: runEnd)
+                        let kind = message.blocks[bi].kind
+                        if kind == .thinking || kind.isToolKind {
+                            if !turnSummaryEmitted {
+                                newItems.append(.assistantTurnSummary(message.id))
+                                turnSummaryEmitted = true
                             }
-                            let run = Array(message.blocks[bi..<runEnd])
-                            if run.count > 2 {
-                                let groupKey = run.map { $0.id.uuidString }.joined(separator: ",")
-                                newItems.append(.assistantToolGroup(message.id, groupKey))
-                            } else {
-                                for b in run { newItems.append(.assistantBlock(message.id, b.id)) }
-                            }
-                            bi = runEnd
+                            bi = message.blocks.index(after: bi)
                         } else {
                             newItems.append(.assistantBlock(message.id, message.blocks[bi].id))
                             bi = message.blocks.index(after: bi)
@@ -3188,6 +3231,10 @@ extension CollectionViewMessageListV3 {
 
                     case .assistantToolGroup:
                         // [chat-ui] Folding card — same estimator as estimateItemHeight.
+                        layout.setEstimatedHeight(Self.estimateItemHeight(item, messages: messages, width: cvWidth), at: i)
+
+                    case .assistantTurnSummary:
+                        // [T-turn-summary-row] Single floating row — same estimator.
                         layout.setEstimatedHeight(Self.estimateItemHeight(item, messages: messages, width: cvWidth), at: i)
 
                     case .wholeMessage(let msgId):
@@ -3934,6 +3981,9 @@ extension CollectionViewMessageListV3 {
                 // state key folds the expansion in so a toggle re-memoizes.
                 let state = item.toolGroupStateKey.flatMap { ToolGroupExpansion.isExpanded(stateKey: $0) } ?? false
                 return "g:\(mid.uuidString):\(groupKey):\(state ? "x" : "c")"
+            case .assistantTurnSummary(let mid):
+                // [T-turn-summary-row] Fixed height row.
+                return "t:\(mid.uuidString)"
             }
         }
 
@@ -4055,6 +4105,9 @@ extension CollectionViewMessageListV3 {
                 let expanded = item.toolGroupStateKey.map { ToolGroupExpansion.isExpanded(stateKey: $0) } ?? false
                 let visible = expanded ? memberCount : min(2, memberCount)
                 return 44 + CGFloat(visible) * 42
+            case .assistantTurnSummary:
+                // [T-turn-summary-row] Single floating row, fixed height.
+                return TurnSummaryRow.rowHeight
             case .assistantFooter:
                 return 4
             }
@@ -4199,6 +4252,7 @@ extension CollectionViewMessageListV3 {
             switch item {
             case .assistantBlock(let mid, _): return mid == messageId
             case .assistantToolGroup(let mid, _): return mid == messageId
+            case .assistantTurnSummary(let mid): return mid == messageId
             case .assistantFooter(let mid): return mid == messageId
             case .wholeMessage, .assistantHeader: return false
             }
@@ -5597,6 +5651,10 @@ private final class ToolSheetPresenter: ObservableObject {
     }
 
     @Published var sheetData: SheetData?
+    /// [T-turn-summary-row] Turn detail sheet — one row per turn. Set when
+    /// the turn summary row is tapped; the sheet shows the full nested
+    /// timeline for the message.
+    @Published var turnMessage: ChatMessage?
     var onDismiss: (() -> Void)?
 }
 
@@ -5620,31 +5678,60 @@ private struct SheetOverlayView: View {
     @ObservedObject var compactPresenter: CompactSummaryPresenter
 
     var body: some View {
-        Color.clear
-            .frame(width: 0, height: 0)
-            .sheet(item: $toolPresenter.sheetData) { data in
-                ToolLiveSheet(
-                    toolBlocks: data.toolBlocks,
-                    initialIdx: data.toolBlocks.firstIndex(where: { $0.id == data.block.id }) ?? 0,
-                    toolSnapshots: data.toolSnapshots,
-                    browserPool: data.browserPool,
-                    onBrowserTakeover: data.onBrowserTakeover,
-                    onTakeoverDone: data.onTakeoverDone
+        ZStack(alignment: .bottom) {
+            // [T-turn-summary-row] Custom turn detail overlay. The scrim
+            // catches tap-outside to dismiss the whole sheet.
+            if let message = toolPresenter.turnMessage {
+                Color.black.opacity(0.35)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        toolPresenter.turnMessage = nil
+                    }
+                    .transition(.opacity)
+                TurnDetailSheet(
+                    message: message,
+                    toolSnapshots: [],
+                    onClose: { toolPresenter.turnMessage = nil }
                 )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            .onChange(of: toolPresenter.sheetData?.id) { newVal in
-                if newVal == nil {
-                    toolPresenter.onDismiss?()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Pass touches through to the chat when no turn sheet is shown.
+        // (The .sheet modifiers below present at window level regardless.)
+        .allowsHitTesting(toolPresenter.turnMessage != nil)
+        .animation(.spring(response: 0.38, dampingFraction: 0.88), value: toolPresenter.turnMessage?.id)
+        .background {
+            Color.clear
+                .sheet(item: $toolPresenter.sheetData) { data in
+                    ToolLiveSheet(
+                        toolBlocks: data.toolBlocks,
+                        initialIdx: data.toolBlocks.firstIndex(where: { $0.id == data.block.id }) ?? 0,
+                        toolSnapshots: data.toolSnapshots,
+                        browserPool: data.browserPool,
+                        onBrowserTakeover: data.onBrowserTakeover,
+                        onTakeoverDone: data.onTakeoverDone
+                    )
                 }
+                .onChange(of: toolPresenter.sheetData?.id) { newVal in
+                    if newVal == nil {
+                        toolPresenter.onDismiss?()
+                    }
+                }
+                .sheet(isPresented: Binding(
+                    get: { compactPresenter.summary != nil },
+                    set: { if !$0 { compactPresenter.summary = nil } }
+                )) {
+                    CompactSummarySheet(
+                        summary: compactPresenter.summary ?? "",
+                        onRevert: compactPresenter.onRevert
+                    )
+                }
+        }
+        .onChange(of: toolPresenter.turnMessage?.id) { newVal in
+            if newVal == nil {
+                toolPresenter.onDismiss?()
             }
-            .sheet(isPresented: Binding(
-                get: { compactPresenter.summary != nil },
-                set: { if !$0 { compactPresenter.summary = nil } }
-            )) {
-                CompactSummarySheet(
-                    summary: compactPresenter.summary ?? "",
-                    onRevert: compactPresenter.onRevert
-                )
-            }
+        }
     }
 }

@@ -696,6 +696,11 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
                 if #available(iOS 17.0, *) {
                     SkillFilesystemNotifier.shared.drainIfDirty(reason: "agent turn finished")
                 }
+                // [T-turn-summary-row] Turn finished: generate the natural
+                // one-sentence summaries for thinking/tool rows. The hidden
+                // LLM call runs off the main thread; rows flip from their
+                // working state to the summary sentence when it lands.
+                generateBlockSummariesIfNeeded()
             }
         }
     }
