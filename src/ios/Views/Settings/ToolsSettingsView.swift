@@ -109,7 +109,7 @@ enum AgentToolSwitch: String, CaseIterable {
         guard d.object(forKey: AgentToolSwitch.agents.key) == nil else { return }
         if let master = d.object(forKey: legacyMasterKey) as? Bool {
             d.set(master, forKey: AgentToolSwitch.agents.key)
-        } else if let helpers = d.object(forKey: HelperSettingsView.legacyEnabledKey) as? Bool, !helpers {
+        } else if let helpers = d.object(forKey: "subagents.enabled") as? Bool, !helpers {
             d.set(false, forKey: AgentToolSwitch.agents.key)
         }
     }

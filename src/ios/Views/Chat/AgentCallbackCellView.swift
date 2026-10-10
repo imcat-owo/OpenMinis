@@ -103,7 +103,7 @@ extension AgentCallback {
             default: return .failed(message: AgentCallback.localizedStatus(finishedStatus))
             }
         }()
-        let block = AssistantBlock(kind: .delegateTool(title: title), content: json, toolStatus: toolStatus)
+        let block = AssistantBlock(kind: .info, content: json, toolStatus: toolStatus)
         block.toolSummary = title
         block.helperChildSessionId = childSessionId
         if let s = elapsedSeconds { block.toolDuration = TimeInterval(s) }

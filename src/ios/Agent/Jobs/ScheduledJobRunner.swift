@@ -146,7 +146,7 @@ enum ScheduledJobRunner {
             let (vm, _) = ViewModelCache.shared.getOrCreate(for: session.id)
             await vm.loadSession()
             vm.sessionSource = sourceTag
-            let outcome = vm.submitProgrammaticPrompt(text, origin: .job(jobId: job.id), silent: true)
+            let outcome = vm.submitProgrammaticPrompt(text, origin: ProgrammaticPromptOrigin.job(jobId: job.id), silent: true)
             logger.info("[Sched] FIRE \(job.logLabel) → new session \(session.id.prefix(8)) outcome=\(String(describing: outcome))")
             if case .rejected = outcome { registry.recordFire(job.id, sessionId: session.id, ok: false) }
             else { registry.recordFire(job.id, sessionId: session.id, ok: true) }
@@ -161,7 +161,7 @@ enum ScheduledJobRunner {
             let (vm, fresh) = ViewModelCache.shared.getOrCreate(for: sid)
             if fresh || vm.messages.isEmpty { await vm.loadSession() }
             applyThinkingLevel(job, sessionId: sid, entry: vm.resolveCurrentEntry())
-            let outcome = vm.submitProgrammaticPrompt(text, origin: .job(jobId: job.id), silent: true)
+            let outcome = vm.submitProgrammaticPrompt(text, origin: ProgrammaticPromptOrigin.job(jobId: job.id), silent: true)
             logger.info("[Sched] FIRE \(job.logLabel) → follow-up \(sid.prefix(8)) outcome=\(String(describing: outcome))")
             if case .rejected = outcome { registry.recordFire(job.id, sessionId: sid, ok: false) }
             else { registry.recordFire(job.id, sessionId: sid, ok: true) }
@@ -181,7 +181,7 @@ enum ScheduledJobRunner {
         case .childOfCurrent(let parentSid, _):
             let (parentVM, parentFresh) = ViewModelCache.shared.getOrCreate(for: parentSid)
             if parentFresh { await parentVM.loadSession() }
-            let modelId = parentVM.model?.id ?? "default"
+            let modelId = parentVM.resolveCurrentEntry().model.id
             let title = job.label ?? job.title
             let session = await ChatStore.shared.createSession(modelId: modelId,
                                                                title: AgentJobRegistry.childSessionTitle(title),
@@ -193,7 +193,7 @@ enum ScheduledJobRunner {
             child.sessionSource = sourceTag
             child.memoryEnabled = false
             child.suppressGeneralCompletionNotification = true
-            let outcome = child.submitProgrammaticPrompt(text, origin: .job(jobId: job.id), silent: true)
+            let outcome = child.submitProgrammaticPrompt(text, origin: ProgrammaticPromptOrigin.job(jobId: job.id), silent: true)
             logger.info("[Sched] FIRE \(job.logLabel) → child \(session.id.prefix(8)) of \(parentSid.prefix(8)) outcome=\(String(describing: outcome))")
             guard outcome == .sent else {
                 registry.recordFire(job.id, sessionId: session.id, ok: false)

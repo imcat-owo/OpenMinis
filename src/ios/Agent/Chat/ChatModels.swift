@@ -415,7 +415,6 @@ enum AssistantBlockKind: Equatable {
     case readImageTool(path: String)
     case memoryTool(action: String)
     case askUserTool
-    case delegateTool(title: String)
     case info
 
     /// Tool-call kinds — everything `ToolCapsuleView` renders. The message
