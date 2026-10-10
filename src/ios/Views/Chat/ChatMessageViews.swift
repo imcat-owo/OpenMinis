@@ -225,6 +225,8 @@ struct ChatMessageRow: View {
     /// The tool block whose detail sheet is currently presented.
     /// Lifted out of ToolCapsuleView so ForEach item changes don't reset it.
     @State private var detailBlock: AssistantBlock?
+    /// The message whose turn summary drawer is currently presented.
+    @State private var turnSheetMessage: ChatMessage?
 
     /// All text block contents joined, for "Copy All".
     private var fullReplyText: String {
@@ -511,9 +513,11 @@ struct ChatMessageRow: View {
             }
             .padding(.top, 2)
 
-            ForEach(message.blocks) { block in
-                AssistantBlockView(
-                    block: block,
+            ForEach(TurnSummarySegments.segments(for: message.blocks)) { segment in
+                switch segment {
+                case .single(let block):
+                    AssistantBlockView(
+                        block: block,
                     message: message,
                     isActiveMessage: isActiveMessage,
                     commandStartTime: commandStartTime,
@@ -543,6 +547,14 @@ struct ChatMessageRow: View {
                     highlightedBlockId: $highlightedBlockId,
                     detailBlock: $detailBlock
                 )
+                case .thinkingTools(let blocks):
+                    TurnSummaryRow(
+                        message: message,
+                        memberIDs: blocks.map(\.id),
+                        isWorking: isActiveMessage,
+                        onTap: { turnSheetMessage = message }
+                    )
+                }
             }
 
             // Typing indicator — "request out, nothing back yet", evaluated per
@@ -659,6 +671,18 @@ struct ChatMessageRow: View {
                           toolSnapshots: toolSnapshots, browserPool: browserPool,
                           onBrowserTakeover: onBrowserTakeover,
                           onTakeoverDone: onTakeoverDone)
+        }
+        .sheet(item: $turnSheetMessage) { msg in
+            // Commit A placeholder — replaced by TurnDetailSheet in commit C.
+            Text(msg.turnSummary ?? TurnSummarySegments.fallbackSummary(
+                for: msg.blocks.filter { $0.kind == .thinking || $0.kind.isToolKind }
+            ))
+            .font(MinisThemeShape.fontFamily.font(size: FontSettings.shared.scaledMessage(14)))
+            .foregroundStyle(ChatColors.secondaryText)
+            .padding(20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .presentationDetents([.fraction(2/3), .large])
+            .presentationDragIndicator(.visible)
         }
     }
 

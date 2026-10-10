@@ -60,6 +60,12 @@ final class ChatMessage: Identifiable, ObservableObject {
     @Published var isCompactedHistory = false
     /// True when this compact divider is still loading (LLM generating summary).
     @Published var isCompactLoading = false
+    /// AI-generated one-line summary of this turn's thinking/tool activity.
+    /// Written by the turn-end hook (AI text on success, deterministic
+    /// fallback on failure); read by TurnSummaryRow. Nil while the turn is
+    /// still in progress, and for history reloaded from DB (rows fall back
+    /// to a deterministic per-block summary).
+    @Published var turnSummary: String?
     /// SF Symbol name for systemInfo rows (e.g. "brain.head.profile", "arrow.down.right.and.arrow.up.left").
     var systemIcon: String?
     /// LLM-generated compact summary (for display in info sheet on compact divider).
