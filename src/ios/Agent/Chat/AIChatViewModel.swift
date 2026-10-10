@@ -2107,7 +2107,6 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
     /// its normal completion notification. A sticky flag would silence the
     /// session forever. Not persisted; each intent sets it fresh.
     var suppressGeneralCompletionNotification: Bool = false
-    var helperConfig: HelperConfig?
     var helperWrapUpRequested: Bool = false
     var pendingSteerMessages: [String] = []
     var lastEffectiveModel: EffectiveModelRecord? = nil
@@ -6890,5 +6889,9 @@ enum LLMProviderError: LocalizedError {
         case .noCredentials: return "No API credentials available"
         }
     }
+}
+
+struct EffectiveModelRecord: Equatable {
+    var entryId: String? = nil
 }
 

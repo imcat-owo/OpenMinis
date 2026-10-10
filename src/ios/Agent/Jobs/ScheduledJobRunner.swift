@@ -179,51 +179,27 @@ enum ScheduledJobRunner {
             return ok ? sid : nil
 
         case .childOfCurrent(let parentSid, _):
-            // [T-agents-debug-only] Defence in depth behind the CLI check:
-            // a job armed while Agents was on must not spawn a helper after
-            // the switch went off (or in a Release build, where it is
-            // always off). Recorded as a failed fire; no child is created.
-            guard AgentToolSwitch.agents.isEnabled else {
-                logger.warning("[Sched] fire \(job.id.prefix(8)): child-of-current refused — Sub Agents are off (Settings › Sub Agents)")
-                registry.recordFire(job.id, sessionId: nil, ok: false)
-                return nil
-            }
             let (parentVM, parentFresh) = ViewModelCache.shared.getOrCreate(for: parentSid)
             if parentFresh { await parentVM.loadSession() }
-            guard let resolution = SubAgentModelResolver.resolve(subAgent: nil, parent: parentVM) else {
-                logger.warning("[Sched] fire \(job.id.prefix(8)): parent has no model")
-                registry.recordFire(job.id, sessionId: nil, ok: false)
-                return nil
-            }
+            let modelId = parentVM.modelId ?? "default"
             let title = job.label ?? job.title
-            let session = await ChatStore.shared.createSession(modelId: resolution.entry.model.id,
+            let session = await ChatStore.shared.createSession(modelId: modelId,
                                                                title: AgentJobRegistry.childSessionTitle(title),
                                                                source: sourceTag,
                                                                parentSessionId: parentSid,
                                                                parentToolUseId: nil)
-            ProviderConfigStore.shared.setBinding(
-                SessionModelBinding(sessionId: session.id, primarySource: resolution.source), for: session.id)
-            applyThinkingLevel(job, sessionId: session.id, entry: resolution.entry)
             let (child, _) = ViewModelCache.shared.getOrCreate(for: session.id)
             await child.loadSession()
             child.sessionSource = sourceTag
-            child.helperConfig = HelperConfig(parentSessionId: parentSid, parentToolUseId: "",
-                                              jobId: job.id, maxTurns: AIChatViewModel.helperMaxTurns,
-                                              title: title, modelOrigin: resolution.origin)
             child.memoryEnabled = false
             child.suppressGeneralCompletionNotification = true
-            child.browserTabPool = parentVM.browserTabPool
-            job.modelOrigin = resolution.origin.rawValue
-            // [T-agent-model-identity] A scheduled child has no parent block;
-            // the job carries its identity so the completion callback and
-            // the transcript page still say what it ran on.
-            job.modelIdentity = HelperModelIdentity.make(resolution: resolution)
             let outcome = child.submitProgrammaticPrompt(text, origin: .job(jobId: job.id), silent: true)
             logger.info("[Sched] FIRE \(job.logLabel) → child \(session.id.prefix(8)) of \(parentSid.prefix(8)) outcome=\(String(describing: outcome))")
             guard outcome == .sent else {
                 registry.recordFire(job.id, sessionId: session.id, ok: false)
                 return nil
             }
+            return session.id
             // The registry's loop-end observer closes the job and runs
             // `then: .followUpParent`; the insurance notification covers a
             // kill in between (design §8.6).

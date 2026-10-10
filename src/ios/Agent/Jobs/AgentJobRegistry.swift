@@ -20,6 +20,12 @@ import Foundation
 // hook wired to component A. Nothing registers a job yet — P1's
 // `delegate_task` and P2's `minis-scheduled` are the producers.
 
+struct HelperModelIdentity: Equatable, Codable {
+    var modelOrigin: String? = nil
+    func payload() -> [String: Any] { [:] }
+    mutating func merge(_ record: Any?) {}
+}
+
 /// Who created the job.
 enum AgentJobOrigin: String {
     /// The model called a tool (`delegate_task`).

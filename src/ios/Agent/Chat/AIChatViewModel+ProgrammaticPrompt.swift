@@ -233,3 +233,12 @@ struct ProgrammaticTurnState: Equatable, Sendable {
     /// Finished = nothing left to run for this prompt AND the loop is idle.
     var isFinished: Bool { !processing && !stillQueued }
 }
+
+extension AIChatViewModel {
+    nonisolated static func resolvedStatus(_ status: String, result: String) -> String {
+        if status == "completed" && result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "empty"
+        }
+        return status
+    }
+}
