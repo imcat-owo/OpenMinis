@@ -505,11 +505,12 @@ struct ChatMessageRow: View {
     private var assistantRow: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Assistant label
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 PersonAvatarView(kind: .assistant, size: 38)
                 AssistantSoulName()
                     .font(.body.weight(.semibold))
                     .foregroundStyle(ChatColors.primaryText)
+                WaggingCatIcon(isWorking: message.isThinkingOrToolWorking, size: 18)
             }
             .padding(.top, 2)
 

@@ -576,4 +576,40 @@ extension AIChatViewModel {
         return ordered
     }
 
+    /// Resolve the primary entry for the current foreground session, for utility
+    /// tasks like turn detail translation. Falls back to default group or any valid entry.
+    @MainActor
+    static func resolveActiveSessionEntry() -> ModelEntry? {
+        let store = ProviderConfigStore.shared
+        let sid = activeSessionId ?? ""
+        if !sid.isEmpty, let binding = store.binding(for: sid) {
+            switch binding.primarySource {
+            case .directEntry(let entryId, _):
+                if let entry = store.entry(for: entryId) { return entry }
+            case .group(let groupId, let resolvedEntryId):
+                if let entry = store.entry(for: resolvedEntryId),
+                   let inst = store.instance(for: entry.providerInstanceId),
+                   inst.isEnabled, inst.hasAnyCredential, !entry.isHidden {
+                    return entry
+                }
+                if let group = store.group(for: groupId),
+                   let freshEntryId = ModelGroupRouter.resolve(group: group, sessionId: sid, store: store),
+                   let entry = store.entry(for: freshEntryId) {
+                    return entry
+                }
+            }
+        }
+        if let defaultGid = store.defaultPrimaryGroupId,
+           let group = store.group(for: defaultGid),
+           let freshEntryId = ModelGroupRouter.resolve(group: group, sessionId: sid, store: store),
+           let entry = store.entry(for: freshEntryId) {
+            return entry
+        }
+        return store.modelEntries.first(where: {
+            guard let inst = store.instance(for: $0.providerInstanceId) else { return false }
+            return inst.isEnabled && inst.hasAnyCredential && !$0.isHidden
+        })
+    }
+
 }
+

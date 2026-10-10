@@ -1,14 +1,21 @@
 import SwiftUI
+#if canImport(Translation)
+import Translation
+#endif
 
 // MARK: - Turn Detail Sheet
 //
-// The turn drawer: native bottom sheet content, 1:1 from
-// thinking-drawer-mockup.html. Header has exactly ONE button top-left
-// (X at top level, ‹ when nested) + centered title. Body is a timeline
-// (gray dots + 1pt lines; thinking/tool rows tappable) or a detail page
-// (plain text: small gray label + content). Browser rows embed the existing
-// MinisLinkPreviewView; shell rows embed ShellOutputView. Sheet background
-// is the thinking card token. The X button is a white circle per the mockup.
+// The turn drawer: native bottom sheet content.
+// - Header: Left circle button (✕ at top level, ‹ when nested) + centered title
+//   + Right circle button (Translate menu: AI model translation or iOS native translation).
+// - Body:
+//   * If the turn is thinking-only (no tool calls executed), it directly renders
+//     the full thinking content without an extra nesting timeline tap.
+//   * If there are tool calls, renders the step-by-step timeline, tapping any row navigates in.
+// - Translation:
+//   * AI translation using the current conversation's model with streaming update.
+//   * Native iOS translation via Translation presentation.
+//   * Easy toggle between original and translated text.
 
 struct TurnDetailSheet: View {
     @ObservedObject var message: ChatMessage
@@ -16,27 +23,56 @@ struct TurnDetailSheet: View {
     var onExpandBrowser: ((URL) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
-    /// Navigation stack of detail blocks; empty = timeline top level.
+    /// Navigation stack of detail blocks; empty = top level.
     @State private var navStack: [AssistantBlock] = []
 
-    /// Thinking/tool blocks in turn order — everything the summary row
-    /// swallowed, all reachable here.
+    // Translation state
+    @State private var translatedContent: [UUID: String] = [:]
+    @State private var isTranslating = false
+    @State private var showOriginal = false
+    @State private var activeTranslatingBlockId: UUID?
+    @State private var presentSystemTranslation = false
+    @State private var systemTranslationText = ""
+    @State private var currentTargetLanguage = "中文"
+
+    /// Thinking/tool blocks in turn order.
     private var timelineBlocks: [AssistantBlock] {
         message.blocks.filter { $0.kind == .thinking || $0.kind.isToolKind }
     }
 
-    private var title: String {
+    /// Whether this turn only contains thinking process without any tool executions.
+    private var isThinkingOnly: Bool {
+        !timelineBlocks.isEmpty && timelineBlocks.allSatisfy { $0.kind == .thinking }
+    }
+
+    /// The active block currently on display.
+    private var activeDisplayBlock: AssistantBlock? {
         if let block = navStack.last {
+            return block
+        }
+        if isThinkingOnly {
+            return timelineBlocks.first
+        }
+        return nil
+    }
+
+    private var title: String {
+        if let block = activeDisplayBlock {
             return detailTitle(for: block)
         }
         return AppLocalized("Summary")
+    }
+
+    private var hasTranslationForActive: Bool {
+        guard let id = activeDisplayBlock?.id ?? timelineBlocks.first(where: { $0.kind == .thinking })?.id else { return false }
+        return translatedContent[id] != nil
     }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             ScrollView {
-                if let block = navStack.last {
+                if let block = activeDisplayBlock {
                     detailPage(for: block)
                 } else {
                     timeline
@@ -44,6 +80,9 @@ struct TurnDetailSheet: View {
             }
         }
         .background(thinkingBackground)
+        #if canImport(Translation)
+        .translationPresentation(isPresented: $presentSystemTranslation, text: systemTranslationText)
+        #endif
     }
 
     // MARK: - Header
@@ -79,10 +118,83 @@ struct TurnDetailSheet: View {
 
             Spacer()
 
-            // Balances the 38pt button so the title is truly centered.
-            Color.clear.frame(width: 38, height: 38)
+            translationMenu
         }
         .padding(.init(top: 6, leading: 14, bottom: 10, trailing: 14))
+    }
+
+    private var translationMenu: some View {
+        Menu {
+            Section(AppLocalized("AI Translation")) {
+                Button {
+                    startAITranslation(targetLang: "中文")
+                } label: {
+                    Label("中文 (简体)", systemImage: "character.bubble")
+                }
+                Button {
+                    startAITranslation(targetLang: "繁體中文")
+                } label: {
+                    Label("繁體中文", systemImage: "character.bubble")
+                }
+                Button {
+                    startAITranslation(targetLang: "English")
+                } label: {
+                    Label("English", systemImage: "character.bubble")
+                }
+                Button {
+                    startAITranslation(targetLang: "日本語")
+                } label: {
+                    Label("日本語", systemImage: "character.bubble")
+                }
+                Button {
+                    startAITranslation(targetLang: "한국어")
+                } label: {
+                    Label("한국어", systemImage: "character.bubble")
+                }
+            }
+
+            Section(AppLocalized("System Translation")) {
+                Button {
+                    triggerSystemTranslation()
+                } label: {
+                    Label(AppLocalized("iOS System Translation"), systemImage: "globe")
+                }
+            }
+
+            if hasTranslationForActive {
+                Divider()
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showOriginal.toggle()
+                    }
+                } label: {
+                    Label(showOriginal ? AppLocalized("Show Translation") : AppLocalized("Show Original"),
+                          systemImage: showOriginal ? "text.bubble" : "doc.text")
+                }
+            }
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(ChatColors.secondaryBg)
+                    .frame(width: 38, height: 38)
+                    .shadow(color: ChatColors.primaryText.opacity(0.08), radius: 5, x: 0, y: 1)
+
+                if isTranslating {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                } else if hasTranslationForActive && !showOriginal {
+                    Image(systemName: "character.bubble.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(ChatColors.accent)
+                } else {
+                    Image(systemName: "translate")
+                        .font(.system(size: 16))
+                        .foregroundStyle(ChatColors.primaryText)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("turnSheetTranslateButton")
     }
 
     private var thinkingBackground: some View {
@@ -192,7 +304,7 @@ struct TurnDetailSheet: View {
                     }
                 )
             } else {
-                plainDetail(label: AppLocalized("Browser"), content: block.toolDescription)
+                plainDetail(label: AppLocalized("Browser"), content: block.toolDescription, blockId: block.id)
             }
         case .shellTool:
             ShellOutputView(
@@ -203,20 +315,59 @@ struct TurnDetailSheet: View {
             )
             .padding(.horizontal, 8)
         case .thinking:
-            plainDetail(label: AppLocalized("Full thinking"), content: block.content)
+            plainDetail(label: AppLocalized("Full thinking"), content: block.content, blockId: block.id)
         default:
-            plainDetail(label: toolKindName(for: block.kind), content: block.content)
+            plainDetail(label: toolKindName(for: block.kind), content: block.content, blockId: block.id)
         }
     }
 
     /// Plain-text detail: small gray label + content. No cards, no panels.
-    private func plainDetail(label: String, content: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(MinisThemeShape.fontFamily.font(size: FontSettings.shared.scaledMessage(12)))
-                .foregroundStyle(ChatColors.secondaryText)
-            if !content.isEmpty {
-                Text(content)
+    private func plainDetail(label: String, content: String, blockId: UUID? = nil) -> some View {
+        let isTranslated = blockId.flatMap { translatedContent[$0] } != nil && !showOriginal
+        let displayContent = (blockId.flatMap { isTranslated ? translatedContent[$0] : nil }) ?? content
+
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text(label)
+                    .font(MinisThemeShape.fontFamily.font(size: FontSettings.shared.scaledMessage(12)))
+                    .foregroundStyle(ChatColors.secondaryText)
+
+                if let id = blockId, translatedContent[id] != nil {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showOriginal.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: showOriginal ? "doc.text" : "character.bubble.fill")
+                                .font(.system(size: 10))
+                            Text(showOriginal ? AppLocalized("Show Translation") : AppLocalized("Show Original"))
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .foregroundStyle(ChatColors.accent)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(ChatColors.accent.opacity(0.12))
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if isTranslating, let id = blockId, activeTranslatingBlockId == id {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .scaleEffect(0.6)
+                        .frame(width: 14, height: 14)
+                    Text(AppLocalized("Translating into \(currentTargetLanguage)…"))
+                        .font(.system(size: 12))
+                        .foregroundStyle(ChatColors.secondaryText)
+                }
+                .padding(.vertical, 2)
+            }
+
+            if !displayContent.isEmpty {
+                Text(displayContent)
                     .font(MinisThemeShape.fontFamily.font(size: FontSettings.shared.scaledMessage(14)))
                     .foregroundStyle(ChatColors.primaryText)
                     .lineSpacing(6)
@@ -225,6 +376,68 @@ struct TurnDetailSheet: View {
             }
         }
         .padding(.init(top: 10, leading: 22, bottom: 10, trailing: 22))
+    }
+
+    // MARK: - Translation Actions
+
+    private func startAITranslation(targetLang: String) {
+        guard let block = activeDisplayBlock ?? timelineBlocks.first(where: { $0.kind == .thinking }) else { return }
+        let rawContent = block.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawContent.isEmpty else { return }
+
+        currentTargetLanguage = targetLang
+        activeTranslatingBlockId = block.id
+        isTranslating = true
+        showOriginal = false
+
+        Task { @MainActor in
+            defer {
+                isTranslating = false
+                activeTranslatingBlockId = nil
+            }
+            guard let entry = AIChatViewModel.resolveActiveSessionEntry() else {
+                return
+            }
+            do {
+                let provider = await AIChatViewModel.makeAgentProvider(for: entry)
+                let prompt = """
+                Translate the following text into \(targetLang). \
+                Do NOT summarize, omit details, or add conversational filler. \
+                Output ONLY the raw translated text.
+
+                \(rawContent)
+                """
+                let messages = [AgentMessage(role: .user, parts: [.text(prompt)])]
+                let stream = try await provider.streamAgentMessage(
+                    messages: messages,
+                    systemPrompt: "You are a professional translator. Output only the verbatim translation without extra commentary.",
+                    tools: [],
+                    maxTokens: 8192,
+                    thinkingLevel: .off
+                )
+                var accumulated = ""
+                for try await event in stream {
+                    if case .textDelta(let delta) = event {
+                        accumulated += delta
+                        translatedContent[block.id] = accumulated
+                    }
+                }
+                let trimmed = accumulated.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    translatedContent[block.id] = trimmed
+                }
+            } catch {
+                AppLogger(category: "Translation").error("AI translation error: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func triggerSystemTranslation() {
+        guard let block = activeDisplayBlock ?? timelineBlocks.first(where: { $0.kind == .thinking }) else { return }
+        let text = block.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        systemTranslationText = text
+        presentSystemTranslation = true
     }
 
     // MARK: - Helpers

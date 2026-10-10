@@ -232,11 +232,12 @@ private struct BridgedAssistantHeaderV3: View {
     /// is threaded down the same way every other cell callback already is.
     var onOpenSoulSettings: (() -> Void)?
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             PersonAvatarView(kind: .assistant, size: 38)
             Text(soulMeta.name.isEmpty ? "我的小家" : soulMeta.name)
                 .font(.body.weight(.semibold))
                 .foregroundStyle(ChatColors.primaryText)
+            WaggingCatIcon(isWorking: message.isThinkingOrToolWorking, size: 18)
         }
         // [T-ios-assistant-header-open-soul] Hit area and tap, applied to the
         // icon+name HStack only — NOT to the full-width row below it.

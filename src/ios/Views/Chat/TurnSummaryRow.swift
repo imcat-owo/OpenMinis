@@ -100,9 +100,7 @@ struct TurnSummaryRow: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 10) {
-                Image(systemName: "clock")
-                    .font(.system(size: 21, weight: .light))
-                    .foregroundStyle(ChatColors.secondaryText)
+                WaggingCatIcon(isWorking: isWorking, size: 20, color: ChatColors.secondaryText)
                     .frame(width: 21, height: 21)
                 Text(text)
                     .font(MinisThemeShape.fontFamily.font(size: FontSettings.shared.scaledMessage(14)))
@@ -120,5 +118,109 @@ struct TurnSummaryRow: View {
         .padding(.bottom, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityIdentifier("turnSummaryRow")
+    }
+}
+
+// MARK: - Wagging Cat Icon & Shapes
+
+extension ChatMessage {
+    /// True while model is actively streaming, thinking, or running tool calls.
+    var isThinkingOrToolWorking: Bool {
+        if isAwaitingModelResponse { return true }
+        if blocks.contains(where: { $0.toolStatus == .running }) { return true }
+        if usage == nil, let last = blocks.last, last.kind == .thinking || last.kind.isToolKind {
+            return true
+        }
+        return false
+    }
+}
+
+struct CatBodyShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let sx = rect.width / 24.0
+        let sy = rect.height / 25.0
+        func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * sx + rect.minX, y: y * sy + rect.minY) }
+
+        p.move(to: pt(8.5, 7.0))
+        p.addCurve(to: pt(6.8, 7.8), control1: pt(7.8, 7.0), control2: pt(7.2, 7.3))
+        p.addLine(to: pt(5.2, 4.2))
+        p.addCurve(to: pt(4.0, 4.8), control1: pt(4.8, 3.3), control2: pt(3.6, 3.8))
+        p.addLine(to: pt(5.0, 8.5))
+        p.addCurve(to: pt(4.2, 14.5), control1: pt(3.8, 10.2), control2: pt(3.5, 12.5))
+        p.addCurve(to: pt(2.5, 20.0), control1: pt(3.2, 16.0), control2: pt(2.5, 18.0))
+        p.addCurve(to: pt(10.5, 24.0), control1: pt(2.5, 23.0), control2: pt(5.5, 24.0))
+        p.addCurve(to: pt(18.5, 20.0), control1: pt(15.5, 24.0), control2: pt(18.5, 23.0))
+        p.addCurve(to: pt(16.8, 14.5), control1: pt(18.5, 18.0), control2: pt(17.8, 16.0))
+        p.addCurve(to: pt(16.0, 8.5), control1: pt(17.5, 12.5), control2: pt(17.2, 10.2))
+        p.addLine(to: pt(17.0, 4.8))
+        p.addCurve(to: pt(15.8, 4.2), control1: pt(17.4, 3.8), control2: pt(16.2, 3.3))
+        p.addLine(to: pt(14.2, 7.8))
+        p.addCurve(to: pt(12.5, 7.0), control1: pt(13.8, 7.3), control2: pt(13.2, 7.0))
+        p.addCurve(to: pt(10.5, 7.4), control1: pt(11.8, 7.0), control2: pt(11.2, 7.2))
+        p.addCurve(to: pt(8.5, 7.0), control1: pt(9.8, 7.2), control2: pt(9.2, 7.0))
+        p.closeSubpath()
+        return p
+    }
+}
+
+struct CatTailShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let sx = rect.width / 24.0
+        let sy = rect.height / 25.0
+        func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * sx + rect.minX, y: y * sy + rect.minY) }
+
+        p.move(to: pt(16.0, 20.5))
+        p.addCurve(to: pt(21.0, 15.0), control1: pt(18.0, 20.5), control2: pt(21.0, 18.5))
+        p.addCurve(to: pt(17.8, 10.0), control1: pt(21.0, 12.5), control2: pt(19.5, 10.5))
+        p.addCurve(to: pt(16.6, 11.2), control1: pt(17.0, 9.7), control2: pt(16.3, 10.4))
+        p.addCurve(to: pt(18.0, 14.8), control1: pt(16.9, 12.0), control2: pt(18.0, 13.0))
+        p.addCurve(to: pt(15.0, 18.2), control1: pt(18.0, 16.5), control2: pt(16.5, 18.0))
+        p.closeSubpath()
+        return p
+    }
+}
+
+struct WaggingCatIcon: View {
+    var isWorking: Bool = false
+    var size: CGFloat = 18
+    var color: Color = ChatColors.primaryText
+
+    @State private var tailAngle: Double = 0
+
+    var body: some View {
+        ZStack {
+            CatBodyShape()
+                .fill(color)
+            CatTailShape()
+                .fill(color)
+                .rotationEffect(
+                    .degrees(isWorking ? tailAngle : 0),
+                    anchor: UnitPoint(x: 16.0 / 24.0, y: 20.0 / 25.0)
+                )
+        }
+        .frame(width: size, height: size * (25.0 / 24.0))
+        .onAppear {
+            updateWagging(working: isWorking)
+        }
+        .onChange(of: isWorking) { working in
+            updateWagging(working: working)
+        }
+    }
+
+    private func updateWagging(working: Bool) {
+        if working {
+            withAnimation(
+                .easeInOut(duration: 0.55)
+                .repeatForever(autoreverses: true)
+            ) {
+                tailAngle = -16
+            }
+        } else {
+            withAnimation(.easeOut(duration: 0.25)) {
+                tailAngle = 0
+            }
+        }
     }
 }
