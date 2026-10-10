@@ -39,7 +39,7 @@ private let _maxRenderedLineLength = 2000
 /// Shell tool output can legitimately contain ANSI color codes, NUL bytes,
 /// partial UTF-8 and absurdly long single lines — feeding that directly
 /// into `Text` / `NSAttributedString` can hang CoreText for many seconds.
-fileprivate func sanitizeForDisplay(_ text: String) -> String {
+func sanitizeForDisplay(_ text: String) -> String {
     guard !text.isEmpty else { return text }
 
     var out = String()
@@ -158,7 +158,7 @@ fileprivate func sanitizeForDisplay(_ text: String) -> String {
 }
 
 @MainActor
-fileprivate func attributedShellLine(_ text: String) -> AttributedString {
+func attributedShellLine(_ text: String) -> AttributedString {
     // Build the AttributedString from an NSAttributedString so we can use
     // absolute NSRange offsets from NSDataDetector directly. This avoids
     // ambiguity when the same URL appears twice in the same line.
@@ -345,7 +345,8 @@ struct ToolLiveSheet: View {
             }
         }
     }
-    @StateObject private var resourceMonitor = SystemResourceMonitor()
+    // NOTE: shell live CPU/mem monitoring moved to ShellOutputView (which owns
+    // its own SystemResourceMonitor).
 
     /// [T-ios-tool-result-lazy-render] Number of 40-line chunks currently
     /// revealed in the non-live (detail) text view. Large tool results
@@ -363,14 +364,14 @@ struct ToolLiveSheet: View {
     @State private var revealedForBlockId: UUID?
 
     /// Lines per chunk — must match chunkedLines' default.
-    private static let lazyRenderChunkLines = 40
+    static let lazyRenderChunkLines = 40
     /// Initial reveal: ~200 lines = 5 chunks.
-    private static let lazyRenderInitialChunks = 5
+    static let lazyRenderInitialChunks = 5
     /// Each subsequent batch: 200 more lines = 5 chunks.
-    private static let lazyRenderBatchChunks = 5
+    static let lazyRenderBatchChunks = 5
     /// Byte cap for the initial reveal — clamp the initial chunk count so a
     /// few very long lines (< 200 lines but > 10KB) still load incrementally.
-    private static let lazyRenderInitialByteCap = 10 * 1024
+    static let lazyRenderInitialByteCap = 10 * 1024
 
     init(toolBlocks: [AssistantBlock], initialIdx: Int, toolSnapshots: [ToolSnapshotItem] = [], browserPool: BrowserTabPool?,
          onBrowserTakeover: (() -> Void)? = nil, onTakeoverDone: (() -> Void)? = nil) {
@@ -449,12 +450,10 @@ struct ToolLiveSheet: View {
         .background(Color(UIColor.systemGroupedBackground))
         .onAppear {
             startBrowserTimer()
-            if isLive && isCurrentShell { resourceMonitor.start() }
             MinisOpenURLBroker.shared.toolSheetVisible = true
         }
         .onDisappear {
             stopBrowserTimer()
-            resourceMonitor.stop()
             MinisOpenURLBroker.shared.toolSheetVisible = false
         }
         // Auto-present an in-app browser preview when a shell tool emits an
@@ -472,9 +471,6 @@ struct ToolLiveSheet: View {
             guard MinisOpenURLBroker.isWebScheme(url.scheme) else { return }
             activeSheet = .linkPreview(url)
             MinisOpenURLBroker.shared.consume()
-        }
-        .onChange(of: isLive) { live in
-            if live && isCurrentShell { resourceMonitor.start() } else { resourceMonitor.stop() }
         }
         .onReceive(block.objectWillChange) { _ in
             blockUpdateTick += 1
@@ -521,10 +517,7 @@ struct ToolLiveSheet: View {
         }
     }
 
-    private var isCurrentShell: Bool {
-        if case .shellTool = block.kind { return true }
-        return false
-    }
+    // NOTE: isCurrentShell removed — shell live monitoring moved to ShellOutputView.
 
     // MARK: - Top nav bar: X + title + device icon
 
@@ -1566,7 +1559,7 @@ struct ToolLiveSheet: View {
     }
 
     /// Splits text into chunks of `chunkSize` lines for virtualized rendering.
-    private static func chunkedLines(_ text: String, chunkSize: Int = 40) -> [(id: Int, text: String)] {
+    static func chunkedLines(_ text: String, chunkSize: Int = 40) -> [(id: Int, text: String)] {
         let sanitized = sanitizeForDisplay(text)
         let allLines = sanitized.split(separator: "\n", omittingEmptySubsequences: false)
         return stride(from: 0, to: max(allLines.count, 1), by: chunkSize).map { i in
@@ -1579,7 +1572,7 @@ struct ToolLiveSheet: View {
     /// given chunk list: min(lazyRenderInitialChunks, count), further clamped so
     /// the revealed text stays under `lazyRenderInitialByteCap` — covers the case
     /// of a few very long lines that fit in < 5 chunks but exceed 10KB.
-    private static func initialRevealCount(_ chunks: [(id: Int, text: String)]) -> Int {
+    static func initialRevealCount(_ chunks: [(id: Int, text: String)]) -> Int {
         guard !chunks.isEmpty else { return 0 }
         var count = 0
         var bytes = 0
@@ -1631,7 +1624,7 @@ struct ToolLiveSheet: View {
     }
 
     /// Like chunkedLines but caps visible output at ~500 lines during live streaming.
-    private static func liveChunkedLines(_ text: String, chunkSize: Int = 40, maxLines: Int = 500) -> [(id: Int, text: String)] {
+    static func liveChunkedLines(_ text: String, chunkSize: Int = 40, maxLines: Int = 500) -> [(id: Int, text: String)] {
         let sanitized = sanitizeForDisplay(text)
         let allLines = sanitized.split(separator: "\n", omittingEmptySubsequences: false)
         let start = allLines.count > maxLines ? allLines.count - maxLines : 0
@@ -1660,60 +1653,13 @@ struct ToolLiveSheet: View {
             let cardMinHeight = cardWidth * 3.0 / 4.0
             ScrollViewReader { proxy in
             ScrollView {
-                if case .shellTool(let cmd) = block.kind {
-                    // Shell: command header + chunked output (cap at 500 lines while streaming)
-                    let allChunks = isLive
-                        ? Self.liveChunkedLines(block.content.isEmpty ? " " : block.content)
-                        : Self.chunkedLines(block.content.isEmpty ? " " : block.content)
-                    // [T-ios-tool-result-lazy-render] In the detail (non-live)
-                    // view reveal only an initial window and grow on scroll.
-                    let chunks = isLive ? allChunks : Array(allChunks.prefix(max(revealedChunkCount, 1)))
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("$ \(cmd)")
-                            .font(.system(size: 13, weight: .bold, design: .monospaced))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 14)
-                            .padding(.top, 14)
-
-                        ForEach(chunks, id: \.id) { chunk in
-                            Text(attributedShellLine(chunk.text))
-                                .font(.system(size: 13, design: .monospaced))
-                                .foregroundColor(accentColor)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 14)
-                        }
-
-                        if !isLive {
-                            loadMoreFooter(totalChunks: allChunks.count)
-                        }
-
-                        Color.clear.frame(height: 1).id("end")
-                    }
-                    .onAppear { if !isLive { resetRevealWindow(for: allChunks) } }
-                    .textSelection(.enabled)
-                    .padding(.bottom, isLive ? 24 : 14)
-                    .frame(maxWidth: .infinity, minHeight: cardMinHeight, alignment: .topLeading)
-                    .background(Color.black)
-                    .overlay(alignment: .bottom) {
-                        if isLive {
-                            HStack(spacing: 12) {
-                                Text(resourceMonitor.formattedCPU)
-                                    .foregroundStyle(ChatColors.success)
-                                Text(resourceMonitor.formattedMem())
-                                    .foregroundStyle(ChatColors.success)
-                            }
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 5)
-                            .background(Color(white: 0.08))
-                        }
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(ChatColors.toolBorder, lineWidth: 0.5))
-                    .padding(.horizontal, 12)
-                    .padding(.top, 12)
-                    .padding(.bottom, 16)
+                if case .shellTool = block.kind {
+                    ShellOutputView(
+                        block: block,
+                        isLive: isLive,
+                        accentColor: accentColor,
+                        cardMinHeight: cardMinHeight
+                    )
                 } else {
                     // Non-shell: header + chunked content card
                     VStack(alignment: .leading, spacing: 0) {
