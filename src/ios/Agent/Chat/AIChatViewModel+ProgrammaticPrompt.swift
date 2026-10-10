@@ -242,10 +242,10 @@ extension AIChatViewModel {
         return status
     }
 
-    static let helperMaxMinutes = 10
-    static let helperWrapUpGraceSeconds = 30
-    static func emptyResultNote(toolName: String) -> String { "" }
-    static func parseDelegateResult(_ content: String) -> (status: String, result: String) { ("done", content) }
+    static let helperMaxMinutes: Int = 10
+    static let helperWrapUpGraceSeconds: TimeInterval = 30.0
+    static func emptyResultNote(status: String) -> String { "" }
+    static func parseDelegateResult(_ content: String) -> [String: Any]? { nil }
     var delegationResultsAreMuted: Bool { false }
-    func executeDelegateTaskQueued(jobId: String) {}
+    func executeDelegateTaskQueued(args: [String: Any], toolUseId: String) async -> Bool { false }
 }
