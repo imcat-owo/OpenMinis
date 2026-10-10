@@ -978,6 +978,7 @@ extension CollectionViewMessageListV3 {
         // === Sheet Presenters ===
         private let sheetPresenter = ToolSheetPresenter()
         private let compactSummaryPresenter = CompactSummaryPresenter()
+        private let turnSheetPresenter = TurnSheetPresenter()
         private var sheetOverlayHost: UIHostingController<SheetOverlayView>?
 
         // === References ===
@@ -1040,6 +1041,9 @@ extension CollectionViewMessageListV3 {
                 case .assistantToolGroup:
                     // [chat-ui] Tool-group folding card reuses the block cell class.
                     return cv.dequeueConfiguredReusableCell(using: blockReg, for: indexPath, item: item)
+                case .assistantTurnSummary:
+                    // Turn summary row reuses the block cell class.
+                    return cv.dequeueConfiguredReusableCell(using: blockReg, for: indexPath, item: item)
                 case .assistantFooter:
                     return cv.dequeueConfiguredReusableCell(using: footerReg, for: indexPath, item: item)
                 }
@@ -1047,7 +1051,7 @@ extension CollectionViewMessageListV3 {
 
             // Install sheet overlay (outside UIHostingConfiguration cell tree)
             if sheetOverlayHost == nil {
-                let overlay = SheetOverlayView(toolPresenter: sheetPresenter, compactPresenter: compactSummaryPresenter)
+                let overlay = SheetOverlayView(toolPresenter: sheetPresenter, compactPresenter: compactSummaryPresenter, turnPresenter: turnSheetPresenter)
                 let host = UIHostingController(rootView: overlay)
                 host.view.backgroundColor = .clear
                 host.view.isUserInteractionEnabled = true
@@ -1304,6 +1308,40 @@ extension CollectionViewMessageListV3 {
                 cell.applyContentConfiguration(config)
                 cell.accessibilityIdentifier = "assistantToolGroupBlock"
 
+            case .assistantTurnSummary(let msgId, let groupKey):
+                // One floating summary row for a thinking/tool run. Member
+                // blocks are resolved against the CURRENT message.blocks (not
+                // a stale copy) so streaming growth is picked up on reconfigure.
+                guard let msgIdx = messageIndex[msgId], msgIdx < messages.count else {
+                    AppLogger(category: "SnapshotDiag").warning("[SnapshotDiag] configureCell MISS turnSummary msgId=\(msgId.uuidString.prefix(8))")
+                    return
+                }
+                let message = messages[msgIdx]
+                let memberIds = groupKey.split(separator: ",").compactMap { UUID(uuidString: String($0)) }
+                let memberBlocks = memberIds.compactMap { bid in message.blocks.first(where: { $0.id == bid }) }
+                guard !memberBlocks.isEmpty else {
+                    AppLogger(category: "SnapshotDiag").warning("[SnapshotDiag] configureCell turnSummary member miss msgId=\(msgId.uuidString.prefix(8)) members=\(memberIds.count)")
+                    return
+                }
+                let bridge = getOrCreateBridge(for: message, in: messages)
+                cell.backgroundColor = .clear
+                let config = UIHostingConfiguration {
+                    TurnSummaryRow(
+                        message: message,
+                        memberIDs: memberBlocks.map(\.id),
+                        isWorking: bridge.isActiveMessage,
+                        onTap: { bridge.turnSheetMessageId = message.id }
+                    )
+                    .frame(maxWidth: width > 0 ? width : nil, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .opacity(message.isCompactedHistory ? 0.5 : 1.0)
+                    .transaction { $0.disablesAnimations = true }
+                    .environmentObject(vm)
+                }.minSize(width: 0, height: 0).margins(.all, 0)
+                cell.applyContentConfiguration(config)
+                cell.accessibilityIdentifier = "assistantTurnSummaryRow"
+
             case .assistantFooter(let msgId):
                 guard let msgIdx = messageIndex[msgId], msgIdx < messages.count else { return }
                 let message = messages[msgIdx]
@@ -1444,6 +1482,8 @@ extension CollectionViewMessageListV3 {
 
         /// Subscriptions for bridge detailBlock → sheet presenter forwarding.
         private var bridgeSheetSubs: [UUID: AnyCancellable] = [:]
+        /// Subscriptions for bridge turnSheetMessageId → turn sheet presenter forwarding.
+        private var turnSheetSubs: [UUID: AnyCancellable] = [:]
 
         private func getOrCreateBridge(for message: ChatMessage, in messages: [ChatMessage]) -> CellStateBridgeV2 {
             if let existing = cellBridges[message.id] { return existing }
@@ -1469,6 +1509,22 @@ extension CollectionViewMessageListV3 {
                         )
                     }
                     // Dismiss is handled by sheetPresenter.onDismiss (set in attach)
+                }
+            // Forward turn summary taps to the VC-level turn sheet presenter
+            // (same pattern as detailBlock).
+            turnSheetSubs[message.id] = bridge.$turnSheetMessageId
+                .dropFirst()
+                .compactMap { $0 }
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] mid in
+                    guard let self, mid == message.id else { return }
+                    self.turnSheetPresenter.sheetData = TurnSheetPresenter.SheetData(
+                        id: message.id,
+                        message: message
+                    )
+                    self.turnSheetPresenter.onDismiss = { [weak bridge] in
+                        bridge?.turnSheetMessageId = nil
+                    }
                 }
             return bridge
         }
@@ -1782,7 +1838,8 @@ extension CollectionViewMessageListV3 {
                 // [chat-ui] Tool-group cards belong to the message's block span too.
                 let isBlockItem: Bool = {
                     switch item {
-                    case .assistantBlock(let mid, _), .assistantToolGroup(let mid, _): return mid == messageId
+                    case .assistantBlock(let mid, _), .assistantToolGroup(let mid, _),
+                         .assistantTurnSummary(let mid, _): return mid == messageId
                     default: return false
                     }
                 }()
@@ -2845,27 +2902,19 @@ extension CollectionViewMessageListV3 {
                     }
                 case .assistant:
                     newItems.append(.assistantHeader(message.id))
-                    // [chat-ui] Group consecutive tool-call blocks (>2) into one
-                    // folding card item; shorter runs stay as individual cells.
-                    var bi = message.blocks.startIndex
-                    while bi < message.blocks.endIndex {
-                        if message.blocks[bi].kind.isToolKind {
-                            var runEnd = bi
-                            while runEnd < message.blocks.endIndex,
-                                  message.blocks[runEnd].kind.isToolKind {
-                                runEnd = message.blocks.index(after: runEnd)
-                            }
-                            let run = Array(message.blocks[bi..<runEnd])
-                            if run.count > 2 {
-                                let groupKey = run.map { $0.id.uuidString }.joined(separator: ",")
-                                newItems.append(.assistantToolGroup(message.id, groupKey))
-                            } else {
-                                for b in run { newItems.append(.assistantBlock(message.id, b.id)) }
-                            }
-                            bi = runEnd
-                        } else {
-                            newItems.append(.assistantBlock(message.id, message.blocks[bi].id))
-                            bi = message.blocks.index(after: bi)
+                    // Turn summary rows: every maximal run of consecutive
+                    // thinking/tool blocks becomes exactly one
+                    // .assistantTurnSummary item, via the shared
+                    // TurnSummarySegments helper (same logic the SwiftUI
+                    // ChatMessageRow uses — one unified path). Text/info
+                    // blocks stay individual cells.
+                    for segment in TurnSummarySegments.segments(for: message.blocks) {
+                        switch segment {
+                        case .single(let block):
+                            newItems.append(.assistantBlock(message.id, block.id))
+                        case .thinkingTools(let blocks):
+                            let groupKey = blocks.map { $0.id.uuidString }.joined(separator: ",")
+                            newItems.append(.assistantTurnSummary(message.id, groupKey))
                         }
                     }
                     // Only emit a footer cell when it will actually render
@@ -3190,6 +3239,10 @@ extension CollectionViewMessageListV3 {
                         // [chat-ui] Folding card — same estimator as estimateItemHeight.
                         layout.setEstimatedHeight(Self.estimateItemHeight(item, messages: messages, width: cvWidth), at: i)
 
+                    case .assistantTurnSummary:
+                        // Turn summary row: fixed 44pt (8+8 padding + 14pt text + 10 bottom margin).
+                        layout.setEstimatedHeight(44, at: i)
+
                     case .wholeMessage(let msgId):
                         // [T-ios-user-msg-estimate-tail-jitter] Accurate TextKit
                         // precalc for USER message bubbles. The "stops then
@@ -3442,6 +3495,10 @@ extension CollectionViewMessageListV3 {
                             return groupKey.split(separator: ",")
                                 .compactMap { UUID(uuidString: String($0)) }
                                 .map { (msgId, $0) }
+                        case .assistantTurnSummary(let msgId, let groupKey):
+                            return groupKey.split(separator: ",")
+                                .compactMap { UUID(uuidString: String($0)) }
+                                .map { (msgId, $0) }
                         default: return []
                         }
                     }()
@@ -3517,7 +3574,8 @@ extension CollectionViewMessageListV3 {
                 for item in inserted {
                     // [chat-ui] Tool-group cards dirty their message's footer too.
                     switch item {
-                    case .assistantBlock(let msgId, _), .assistantToolGroup(let msgId, _):
+                    case .assistantBlock(let msgId, _), .assistantToolGroup(let msgId, _),
+                         .assistantTurnSummary(let msgId, _):
                         footerDirtyMessageIds.insert(msgId)
                     default: break
                     }
@@ -3824,7 +3882,8 @@ extension CollectionViewMessageListV3 {
             case .wholeMessage(let id): return id
             case .assistantHeader(let id): return id
             case .assistantFooter(let id): return id
-            case .assistantBlock(let mid, _), .assistantToolGroup(let mid, _): return mid
+            case .assistantBlock(let mid, _), .assistantToolGroup(let mid, _),
+                 .assistantTurnSummary(let mid, _): return mid
             }
         }
 
@@ -3934,6 +3993,10 @@ extension CollectionViewMessageListV3 {
                 // state key folds the expansion in so a toggle re-memoizes.
                 let state = item.toolGroupStateKey.flatMap { ToolGroupExpansion.isExpanded(stateKey: $0) } ?? false
                 return "g:\(mid.uuidString):\(groupKey):\(state ? "x" : "c")"
+            case .assistantTurnSummary(let mid, let groupKey):
+                // Membership + summary text; a newly arrived summary re-memoizes.
+                let summary = msg(mid)?.turnSummary ?? ""
+                return "ts:\(mid.uuidString):\(groupKey):\(summary.hashValue)"
             }
         }
 
@@ -4055,6 +4118,9 @@ extension CollectionViewMessageListV3 {
                 let expanded = item.toolGroupStateKey.map { ToolGroupExpansion.isExpanded(stateKey: $0) } ?? false
                 let visible = expanded ? memberCount : min(2, memberCount)
                 return 44 + CGFloat(visible) * 42
+            case .assistantTurnSummary:
+                // Turn summary row: fixed 44pt (8+8 padding + 14pt text + 10 bottom margin).
+                return 44
             case .assistantFooter:
                 return 4
             }
@@ -4199,6 +4265,7 @@ extension CollectionViewMessageListV3 {
             switch item {
             case .assistantBlock(let mid, _): return mid == messageId
             case .assistantToolGroup(let mid, _): return mid == messageId
+            case .assistantTurnSummary(let mid, _): return mid == messageId
             case .assistantFooter(let mid): return mid == messageId
             case .wholeMessage, .assistantHeader: return false
             }
@@ -5600,6 +5667,23 @@ private final class ToolSheetPresenter: ObservableObject {
     var onDismiss: (() -> Void)?
 }
 
+// MARK: - Turn Summary Sheet Presenter
+
+/// Same overlay pattern as ToolSheetPresenter — presents the turn summary
+/// drawer (native .sheet with 2/3 + large detents) outside the cell tree.
+/// SheetData carries the message; TurnDetailSheet (commit C) reads blocks +
+/// turnSummary straight off it. browserPool/onExpandBrowser are wired in
+/// commit C when the browser embed lands.
+private final class TurnSheetPresenter: ObservableObject {
+    struct SheetData: Identifiable {
+        let id: UUID
+        let message: ChatMessage
+    }
+
+    @Published var sheetData: SheetData?
+    var onDismiss: (() -> Void)?
+}
+
 // MARK: - Compact Summary Sheet Presenter
 
 /// Same overlay pattern as ToolSheetPresenter — presents the compact summary
@@ -5618,6 +5702,7 @@ private final class CompactSummaryPresenter: ObservableObject {
 private struct SheetOverlayView: View {
     @ObservedObject var toolPresenter: ToolSheetPresenter
     @ObservedObject var compactPresenter: CompactSummaryPresenter
+    @ObservedObject var turnPresenter: TurnSheetPresenter
 
     var body: some View {
         Color.clear
@@ -5637,6 +5722,18 @@ private struct SheetOverlayView: View {
                     toolPresenter.onDismiss?()
                 }
             }
+            .sheet(item: $turnPresenter.sheetData) { data in
+                // Commit A placeholder: shows the turn summary text. Replaced
+                // by TurnDetailSheet (timeline + detail pages) in commit C.
+                TurnSummaryPlaceholderSheet(message: data.message)
+                    .presentationDetents([.fraction(2/3), .large])
+                    .presentationDragIndicator(.visible)
+            }
+            .onChange(of: turnPresenter.sheetData?.id) { newVal in
+                if newVal == nil {
+                    turnPresenter.onDismiss?()
+                }
+            }
             .sheet(isPresented: Binding(
                 get: { compactPresenter.summary != nil },
                 set: { if !$0 { compactPresenter.summary = nil } }
@@ -5646,5 +5743,36 @@ private struct SheetOverlayView: View {
                     onRevert: compactPresenter.onRevert
                 )
             }
+    }
+}
+
+/// Commit A placeholder for the turn drawer sheet. Shows the summary text
+/// only. Deleted when TurnDetailSheet lands in commit C.
+private struct TurnSummaryPlaceholderSheet: View {
+    @ObservedObject var message: ChatMessage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(message.turnSummary ?? TurnSummarySegments.fallbackSummary(
+                for: message.blocks.filter { $0.kind == .thinking || $0.kind.isToolKind }
+            ))
+            .font(MinisThemeShape.fontFamily.font(size: FontSettings.shared.scaledMessage(14)))
+            .foregroundStyle(ChatColors.secondaryText)
+            Spacer()
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(
+            ZStack {
+                MinisThemeShape.thinkingFill
+                if let image = AppearanceStudio.shared.thinkingCardImage() {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .opacity(MinisThemeShape.thinkingCardOpacity)
+                }
+            }
+            .ignoresSafeArea()
+        )
     }
 }

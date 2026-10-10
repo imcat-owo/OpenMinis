@@ -29,6 +29,11 @@ enum MessageListItem: Hashable {
     /// groupKey is the member block IDs joined by "," (stable while the run
     /// only grows — blocks are append-only).
     case assistantToolGroup(UUID, String)  // (messageId, groupKey)
+    /// One floating summary row for a maximal run of consecutive
+    /// thinking/tool blocks (see TurnSummarySegments). groupKey is the member
+    /// block IDs joined by ",". Replaces per-block thinking/tool cells and
+    /// the assistantToolGroup folding card.
+    case assistantTurnSummary(UUID, String)  // (messageId, groupKey)
     /// Footer area: typing indicator, error, resume, usage.
     case assistantFooter(UUID)
 
@@ -37,7 +42,8 @@ enum MessageListItem: Hashable {
         switch self {
         case .wholeMessage(let id), .assistantHeader(let id),
              .assistantFooter(let id): return id
-        case .assistantBlock(let msgId, _), .assistantToolGroup(let msgId, _): return msgId
+        case .assistantBlock(let msgId, _), .assistantToolGroup(let msgId, _),
+             .assistantTurnSummary(let msgId, _): return msgId
         }
     }
 
@@ -60,6 +66,9 @@ enum MessageListItem: Hashable {
         switch self {
         case .assistantBlock(let m, let b): return m == mid && b == blockId
         case .assistantToolGroup(let m, let groupKey):
+            guard m == mid else { return false }
+            return groupKey.split(separator: ",").contains(where: { $0 == blockId.uuidString[...] })
+        case .assistantTurnSummary(let m, let groupKey):
             guard m == mid else { return false }
             return groupKey.split(separator: ",").contains(where: { $0 == blockId.uuidString[...] })
         default: return false
@@ -1209,6 +1218,9 @@ final class CellStateBridgeV2: ObservableObject {
     @Published var toolSnapshots: [ToolSnapshotItem] = []
     /// Tool detail sheet — owned by footer, triggered by block cells.
     @Published var detailBlock: AssistantBlock?
+    /// Turn summary sheet — set when a TurnSummaryRow is tapped; forwarded
+    /// to the VC-level TurnSheetPresenter (same pattern as detailBlock).
+    @Published var turnSheetMessageId: UUID?
     /// Token usage visibility — toggled by double-tap on block cells, read by footer.
     @Published var showUsage: Bool = false
     @Published var usageContentVisible: Bool = false
