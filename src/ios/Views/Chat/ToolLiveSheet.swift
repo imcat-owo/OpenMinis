@@ -312,6 +312,7 @@ struct ToolLiveSheet: View {
     var browserPool: BrowserTabPool?
     var onBrowserTakeover: (() -> Void)?
     var onTakeoverDone: (() -> Void)?
+    var onBack: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.chatSessionId) private var sessionId
 
@@ -374,13 +375,14 @@ struct ToolLiveSheet: View {
     static let lazyRenderInitialByteCap = 10 * 1024
 
     init(toolBlocks: [AssistantBlock], initialIdx: Int, toolSnapshots: [ToolSnapshotItem] = [], browserPool: BrowserTabPool?,
-         onBrowserTakeover: (() -> Void)? = nil, onTakeoverDone: (() -> Void)? = nil) {
+         onBrowserTakeover: (() -> Void)? = nil, onTakeoverDone: (() -> Void)? = nil, onBack: (() -> Void)? = nil) {
         self.toolBlocks = toolBlocks
         self._currentIdx = State(initialValue: initialIdx)
         self.toolSnapshots = toolSnapshots
         self.browserPool = browserPool
         self.onBrowserTakeover = onBrowserTakeover
         self.onTakeoverDone = onTakeoverDone
+        self.onBack = onBack
     }
 
     /// Get snapshot for the current block (matched by toolUseId).
@@ -524,8 +526,14 @@ struct ToolLiveSheet: View {
     private var sheetNavBar: some View {
         VStack(spacing: 0) {
             HStack {
-                Button { dismiss() } label: {
-                    Image(systemName: "xmark")
+                Button {
+                    if let onBack {
+                        onBack()
+                    } else {
+                        dismiss()
+                    }
+                } label: {
+                    Image(systemName: onBack != nil ? "chevron.left" : "xmark")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(ChatColors.primaryText)
                         .frame(width: 32, height: 32)

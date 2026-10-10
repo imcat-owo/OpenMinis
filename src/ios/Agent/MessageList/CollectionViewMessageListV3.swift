@@ -1527,7 +1527,10 @@ extension CollectionViewMessageListV3 {
                         id: message.id,
                         message: message,
                         browserPool: bridge.browserPool,
-                        onExpandBrowser: self.onExpandBrowser
+                        onExpandBrowser: self.onExpandBrowser,
+                        toolSnapshots: bridge.toolSnapshots,
+                        onBrowserTakeover: bridge.onBrowserTakeover,
+                        onTakeoverDone: bridge.onTakeoverDone
                     )
                     self.turnSheetPresenter.onDismiss = { [weak bridge] in
                         bridge?.turnSheetMessageId = nil
@@ -5687,6 +5690,9 @@ private final class TurnSheetPresenter: ObservableObject {
         let message: ChatMessage
         let browserPool: BrowserTabPool?
         let onExpandBrowser: ((URL) -> Void)?
+        var toolSnapshots: [ToolSnapshotItem] = []
+        var onBrowserTakeover: (() -> Void)? = nil
+        var onTakeoverDone: (() -> Void)? = nil
     }
 
     @Published var sheetData: SheetData?
@@ -5734,8 +5740,11 @@ private struct SheetOverlayView: View {
             .sheet(item: $turnPresenter.sheetData) { data in
                 TurnDetailSheet(
                     message: data.message,
+                    toolSnapshots: data.toolSnapshots,
                     browserPool: data.browserPool,
-                    onExpandBrowser: data.onExpandBrowser
+                    onExpandBrowser: data.onExpandBrowser,
+                    onBrowserTakeover: data.onBrowserTakeover,
+                    onTakeoverDone: data.onTakeoverDone
                 )
                 .presentationDetents([.fraction(2/3), .large])
                 .presentationDragIndicator(.visible)

@@ -354,11 +354,14 @@ final class AssistantBlock: Identifiable, ObservableObject {
         case .text, .thinking:
             return ""
         case .shellTool(let command):
-            if !command.isEmpty { return command }
+            if !command.isEmpty {
+                let firstLine = command.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? command
+                return firstLine.trimmingCharacters(in: .whitespaces)
+            }
             // Parse from content: "$ <command>\n..."
             if content.hasPrefix("$ ") {
                 let firstLine = content.prefix(while: { $0 != "\n" })
-                return String(firstLine.dropFirst(2))
+                return String(firstLine.dropFirst(2)).trimmingCharacters(in: .whitespaces)
             }
             return "Shell command"
         case .browserTool(let action):

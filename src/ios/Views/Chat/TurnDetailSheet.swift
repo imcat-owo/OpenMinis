@@ -19,12 +19,16 @@ import Translation
 
 struct TurnDetailSheet: View {
     @ObservedObject var message: ChatMessage
+    var toolSnapshots: [ToolSnapshotItem] = []
     var browserPool: BrowserTabPool?
     var onExpandBrowser: ((URL) -> Void)?
+    var onBrowserTakeover: (() -> Void)?
+    var onTakeoverDone: (() -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     /// Navigation stack of detail blocks; empty = top level.
     @State private var navStack: [AssistantBlock] = []
+    @State private var selectedToolIndex: Int = 0
 
     // Translation state
     @State private var translatedContent: [UUID: String] = [:]
@@ -38,6 +42,11 @@ struct TurnDetailSheet: View {
     /// Thinking/tool blocks in turn order.
     private var timelineBlocks: [AssistantBlock] {
         message.blocks.filter { $0.kind == .thinking || $0.kind.isToolKind }
+    }
+
+    /// Tool blocks in this message with a toolStatus.
+    private var toolBlocks: [AssistantBlock] {
+        message.blocks.filter { $0.toolStatus != nil }
     }
 
     /// Whether this turn only contains thinking process without any tool executions.
@@ -69,13 +78,36 @@ struct TurnDetailSheet: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            ScrollView {
-                if let block = activeDisplayBlock {
-                    detailPage(for: block)
+        Group {
+            if let block = activeDisplayBlock {
+                if block.kind == .thinking {
+                    VStack(spacing: 0) {
+                        header
+                        ScrollView {
+                            detailPage(for: block)
+                        }
+                    }
                 } else {
-                    timeline
+                    ToolLiveSheet(
+                        toolBlocks: toolBlocks,
+                        initialIdx: selectedToolIndex,
+                        toolSnapshots: toolSnapshots,
+                        browserPool: browserPool,
+                        onBrowserTakeover: onBrowserTakeover,
+                        onTakeoverDone: onTakeoverDone,
+                        onBack: {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                navStack.removeLast()
+                            }
+                        }
+                    )
+                }
+            } else {
+                VStack(spacing: 0) {
+                    header
+                    ScrollView {
+                        timeline
+                    }
                 }
             }
         }
@@ -118,7 +150,12 @@ struct TurnDetailSheet: View {
 
             Spacer()
 
-            translationMenu
+            if activeDisplayBlock?.kind == .thinking || timelineBlocks.contains(where: { $0.kind == .thinking }) {
+                translationMenu
+            } else {
+                Color.clear
+                    .frame(width: 38, height: 38)
+            }
         }
         .padding(.init(top: 6, leading: 14, bottom: 10, trailing: 14))
     }
@@ -213,62 +250,135 @@ struct TurnDetailSheet: View {
     // MARK: - Timeline
 
     private var timeline: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(timelineBlocks.enumerated()), id: \.element.id) { idx, block in
+        VStack(spacing: 8) {
+            ForEach(timelineBlocks, id: \.id) { block in
                 timelineRow(for: block)
-                if idx < timelineBlocks.count - 1 {
-                    // 1pt connecting line, aligned under the dot.
-                    Rectangle()
-                        .fill(ChatColors.secondaryText.opacity(0.25))
-                        .frame(width: 1, height: 16)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.leading, 3 + 4)
-                }
             }
         }
-        .padding(.init(top: 4, leading: 20, bottom: 4, trailing: 20))
+        .padding(.init(top: 8, leading: 16, bottom: 20, trailing: 16))
     }
 
     private func timelineRow(for block: AssistantBlock) -> some View {
         Button {
-            navStack.append(block)
-        } label: {
-            HStack(alignment: .top, spacing: 12) {
-                if block.kind == .thinking {
-                    Circle()
-                        .fill(ChatColors.secondaryText)
-                        .frame(width: 8, height: 8)
-                        .padding(.top, 7)
-                } else {
-                    toolIcon(for: block.kind)
-                        .font(.system(size: 20, weight: .light))
-                        .foregroundStyle(ChatColors.secondaryText)
-                        .frame(width: 20, height: 20)
-                        .padding(.top, 2)
+            if block.kind == .thinking {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    navStack.append(block)
                 }
-                Text(timelineText(for: block))
-                    .font(MinisThemeShape.fontFamily.font(size: FontSettings.shared.scaledMessage(14.5)))
-                    .foregroundStyle(block.kind == .thinking ? ChatColors.primaryText : ChatColors.secondaryText)
-                    .lineSpacing(4)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text("›")
-                    .font(.system(size: 19, weight: .light))
-                    .foregroundStyle(ChatColors.secondaryText)
+            } else {
+                if let idx = toolBlocks.firstIndex(where: { $0.id == block.id }) {
+                    selectedToolIndex = idx
+                } else {
+                    selectedToolIndex = 0
+                }
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    navStack.append(block)
+                }
             }
-            .padding(.vertical, 10)
+        } label: {
+            if block.kind == .thinking {
+                thinkingPillRow(for: block)
+            } else {
+                toolPillRow(for: block)
+            }
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("turnTimelineRow")
     }
 
-    private func timelineText(for block: AssistantBlock) -> String {
-        if block.kind == .thinking {
-            let firstLine = block.content.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? ""
-            let short = firstLine.count > 60 ? String(firstLine.prefix(60)) + "…" : firstLine
-            if short.isEmpty { return AppLocalized("Thought for a while") }
-            return AppLocalized("Thinking: \(short)")
+    private func thinkingPillRow(for block: AssistantBlock) -> some View {
+        HStack(spacing: 8) {
+            Image("ThinkingIcon")
+                .resizable()
+                .renderingMode(.template)
+                .frame(width: 14, height: 14)
+                .foregroundStyle(MinisThemeShape.thinkingAccent)
+
+            Text(AppLocalized("Deep Thinking"))
+                .font(MinisThemeShape.fontFamily.font(size: FontSettings.shared.scaledMessage(13.5), weight: .semibold))
+                .foregroundStyle(MinisThemeShape.thinkingAccent)
+
+            Spacer()
+
+            let count = max(block.content.count, block.thinkingContentBuffer.count)
+            if count > 0 {
+                Text(count > 1000 ? "\(count / 1000)K" : "\(count)")
+                    .font(.system(size: 11.5, weight: .medium, design: .monospaced))
+                    .foregroundStyle(MinisThemeShape.thinkingAccent.opacity(0.7))
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(MinisThemeShape.thinkingAccent.opacity(0.5))
         }
-        return block.toolDescription.isEmpty ? toolKindName(for: block.kind) : block.toolDescription
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(MinisThemeShape.thinkingAccent.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(MinisThemeShape.thinkingAccent.opacity(0.2), lineWidth: 0.5)
+        )
+    }
+
+    private func toolPillRow(for block: AssistantBlock) -> some View {
+        HStack(spacing: 8) {
+            toolIcon(for: block.kind)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(toolColor(for: block))
+                .frame(width: 18, alignment: .center)
+
+            Text(timelineTitle(for: block))
+                .font(MinisThemeShape.fontFamily.font(size: FontSettings.shared.scaledMessage(13.5), weight: .medium))
+                .foregroundStyle(ChatColors.primaryText)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let dur = block.toolDuration {
+                Text(MinisStepTimestampFormatter.duration(seconds: dur, stillRunning: false))
+                    .font(.system(size: 11.5, weight: .regular, design: .monospaced))
+                    .foregroundStyle(ChatColors.tertiaryText)
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .regular))
+                .foregroundStyle(ChatColors.secondaryText.opacity(0.6))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(ChatColors.toolBg)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(ChatColors.toolBorder, lineWidth: 0.5)
+        )
+    }
+
+    private func timelineTitle(for block: AssistantBlock) -> String {
+        if let summary = block.toolSummary, !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let desc = block.toolDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        if desc.isEmpty {
+            return toolKindName(for: block.kind)
+        }
+        let firstLine = desc.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? desc
+        return firstLine.trimmingCharacters(in: .whitespaces)
+    }
+
+    private func toolColor(for block: AssistantBlock) -> Color {
+        switch block.toolStatus {
+        case .failed:
+            return ChatColors.destructive
+        case .running, .streaming:
+            return ChatColors.accent
+        default:
+            return ChatColors.success
+        }
     }
 
     // MARK: - Detail pages

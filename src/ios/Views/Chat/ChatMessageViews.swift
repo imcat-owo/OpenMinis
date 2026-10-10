@@ -676,8 +676,11 @@ struct ChatMessageRow: View {
         .sheet(item: $turnSheetMessage) { msg in
             TurnDetailSheet(
                 message: msg,
+                toolSnapshots: toolSnapshots,
                 browserPool: browserPool,
-                onExpandBrowser: nil
+                onExpandBrowser: nil,
+                onBrowserTakeover: onBrowserTakeover,
+                onTakeoverDone: onTakeoverDone
             )
             .presentationDetents([.fraction(2/3), .large])
             .presentationDragIndicator(.visible)

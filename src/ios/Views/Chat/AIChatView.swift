@@ -2925,39 +2925,13 @@ struct AIChatView: View {
 
     @ViewBuilder
     private var floatingToolPreview: some View {
-        let allToolBlocks = vm.messages
-            .filter { $0.role == .assistant && !$0.isCompactedHistory }
-            .flatMap { $0.blocks.filter { $0.toolStatus != nil } }
-        if !allToolBlocks.isEmpty {
-            FloatingToolBar(toolBlocks: allToolBlocks, toolSnapshots: vm.toolSnapshots, browserPool: vm.browserTabPool, onBrowserTakeover: {
-                vm.browserTakeoverActive = true
-            }, onTakeoverDone: {
-                vm.resumeFromBrowserTakeover()
-            })
-                .frame(maxWidth: maxContentWidth)
-                .padding(.horizontal, 12)
-                // [T-ios-geometry-observer-crash] onGeometryChange replaces the
-                // GeometryReader+onAppear+onChange scaffold: writing state from
-                // onChange(of: geo.*) inside the geometry-observer path re-drives
-                // layout and trips a precondition on the iOS 18 async renderer
-                // (ViewGraphGeometryObservers.needsUpdate SIGTRAP). The action
-                // also fires with the initial value, covering the old onAppear.
-                .onGeometryChange(for: CGFloat.self) { proxy in
-                    proxy.size.height
-                } action: { newH in
-                    floatingBarHeight = newH
-                }
-                .onDisappear {
-                    floatingBarHeight = 0
-                }
-        }
+        // Suppressed: banner above input bar removed per user request.
+        EmptyView()
     }
 
     /// Whether the floating tool preview is visible.
     private var hasAnyToolBlocks: Bool {
-        vm.messages.contains(where: {
-            $0.role == .assistant && !$0.isCompactedHistory && $0.blocks.contains { $0.toolStatus != nil }
-        })
+        false
     }
 
     // MARK: - Floating Speech Button
@@ -4817,7 +4791,7 @@ struct AIChatView: View {
 
     /// Whether the floating tool preview is visible.
     private var hasFloatingPreview: Bool {
-        hasAnyToolBlocks
+        false
     }
 
     /// Max content width — unconstrained in compact (portrait iPhone),
