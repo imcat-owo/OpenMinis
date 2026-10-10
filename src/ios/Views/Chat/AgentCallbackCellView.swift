@@ -59,7 +59,7 @@ extension AgentCallback {
         // route to the same three renderers.
         let finishedStatus: String = {
             guard status == "done" else { return status }
-            return AIChatViewModel.resolvedStatus(
+            return HelperRunner.resolvedStatus(
                 "completed", result: body.trimmingCharacters(in: .whitespacesAndNewlines))
         }()
         var obj: [String: Any] = [
@@ -141,7 +141,7 @@ struct AgentCallbackCellView: View {
         // would otherwise have painted it the same blue as a running agent.
         if callback.kind == .scheduled { return .orange }
         switch callback.status {
-        case "running": return HelperAccent.color
+        case "running": return .blue
         case "done": return .green
         case "cancelled", "timeout": return .yellow
         default: return .red

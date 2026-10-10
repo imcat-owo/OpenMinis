@@ -341,6 +341,8 @@ final class AssistantBlock: Identifiable, ObservableObject {
     var toolInputArgs: String?
     /// Streaming file content for file_write tool (live content as it arrives).
     @Published var streamingFileContent: String?
+    /// Child session ID for helper delegate_task tool blocks.
+    @Published var helperChildSessionId: String? = nil
     /// Whether a thinking block is expanded (persisted across cell reuse).
     @Published var isThinkingExpanded: Bool = false
     /// True once the user has manually tapped this thinking block's header.
@@ -413,6 +415,7 @@ enum AssistantBlockKind: Equatable {
     case readImageTool(path: String)
     case memoryTool(action: String)
     case askUserTool
+    case delegateTool(title: String)
     case info
 
     /// Tool-call kinds — everything `ToolCapsuleView` renders. The message

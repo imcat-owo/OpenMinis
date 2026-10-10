@@ -91,7 +91,7 @@ struct AssistantBlockView: View {
             )
             .padding(.vertical, 2)
         case .shellTool, .fileReadTool, .fileWriteTool, .fileEditTool,
-             .browserTool, .readImageTool, .memoryTool, .askUserTool:
+             .browserTool, .readImageTool, .memoryTool, .askUserTool, .delegateTool:
             // [chat-ui] One unified tool case — icon + browserPool plumbed from
             // the shared helpers above. Identical behavior to the eight
             // per-kind cases this replaces (only shell/browser got browserPool).
@@ -174,6 +174,7 @@ struct AssistantBlockView: View {
         case .readImageTool: return "photo"
         case .memoryTool: return "brain.head.profile"
         case .askUserTool: return "questionmark.circle"
+        case .delegateTool: return "person.2"
         case .text, .thinking, .info: return "wrench.and.screwdriver"
         }
     }
@@ -409,6 +410,7 @@ struct ToolCapsuleView: View {
         case .readImageTool: toolName = "read_image"
         case .memoryTool:    toolName = "memory"
         case .askUserTool:   toolName = "ask_user_input_v0"
+        case .delegateTool:  toolName = "delegate_task"
         case .text, .thinking, .info: toolName = "unknown"
         }
 

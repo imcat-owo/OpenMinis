@@ -2109,6 +2109,8 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
     var suppressGeneralCompletionNotification: Bool = false
     static let helperMaxTurns = 200
     var helperConfig: HelperConfig?
+    var pendingSteerMessages: [String] = []
+    var lastEffectiveModel: EffectiveModelRecord? = nil
     nonisolated static func resolvedStatus(_ status: String, result: String) -> String {
         HelperRunner.resolvedStatus(status, result: result)
     }
