@@ -241,4 +241,11 @@ extension AIChatViewModel {
         }
         return status
     }
+
+    static let helperMaxMinutes = 10
+    static let helperWrapUpGraceSeconds = 30
+    static func emptyResultNote(toolName: String) -> String { "" }
+    static func parseDelegateResult(_ content: String) -> (status: String, result: String) { ("done", content) }
+    var delegationResultsAreMuted: Bool { false }
+    func executeDelegateTaskQueued(jobId: String) {}
 }

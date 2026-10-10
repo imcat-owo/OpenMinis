@@ -22,6 +22,8 @@ import Foundation
 
 struct HelperModelIdentity: Equatable, Codable {
     var modelOrigin: String? = nil
+    init(modelOrigin: String? = nil) { self.modelOrigin = modelOrigin }
+    init(payload: [String: Any]) { self.modelOrigin = payload["model_origin"] as? String }
     func payload() -> [String: Any] { [:] }
     mutating func merge(_ record: Any?) {}
 }
