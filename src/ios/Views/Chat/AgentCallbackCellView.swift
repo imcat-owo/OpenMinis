@@ -59,7 +59,7 @@ extension AgentCallback {
         // route to the same three renderers.
         let finishedStatus: String = {
             guard status == "done" else { return status }
-            return HelperRunner.resolvedStatus(
+            return AIChatViewModel.resolvedStatus(
                 "completed", result: body.trimmingCharacters(in: .whitespacesAndNewlines))
         }()
         var obj: [String: Any] = [

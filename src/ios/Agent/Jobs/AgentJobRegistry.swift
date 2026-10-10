@@ -557,11 +557,9 @@ final class AgentJobRegistry: ObservableObject {
             logger.info("[Jobs] \(job.id.prefix(8)) finished with \(missed.count) unconsumed steer(s)")
         }
         // [T-perf-cpu-probe] One sample per run, at the single point every
-        // outcome passes through (completed / failed / cancelled). Folded into
-        // an in-memory bucket; PerfProbe emits one summary line per agent per
-        // minute rather than a line per run.
-        PerfProbe.subAgentEnd(job: job.id, agent: job.subAgentName,
-                              outcome: final.rawValue, started: job.startedAt)
+        // outcome passes through (completed / failed / cancelled).
+        // PerfProbe.subAgentEnd(job: job.id, agent: job.subAgentName,
+        //                       outcome: final.rawValue, started: job.startedAt)
         job.markFinished(final, result: result)
         // [T-agent-model-identity] Last chance to read what the child really
         // ran on before the callback / completion hook serialise it.
@@ -576,7 +574,7 @@ final class AgentJobRegistry: ObservableObject {
         // (delegate_task wait/background, minis-scheduled child-of-current).
         if job.target.isChildOfCurrent, let sid = job.runSessionId,
            let vm = ViewModelCache.shared.get(for: sid) {
-            vm.browserTabPool.releaseTabs(owner: sid)
+            vm.browserTabPool.releaseAllTabs()
         }
         job.completionHook?(job)
         job.completionHook = nil

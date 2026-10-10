@@ -1034,6 +1034,7 @@ actor ChatStore {
 
     @discardableResult
     func createSession(modelId: String, title: String? = nil, source: String? = nil,
+                       parentSessionId: String? = nil, parentToolUseId: String? = nil,
                        personaId: String? = nil) -> ChatSession {
         invalidateSessionListCache()
         let now = Date()

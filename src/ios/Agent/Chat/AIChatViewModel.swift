@@ -2107,13 +2107,10 @@ final class AIChatViewModel: ObservableObject, SpeechControlling {
     /// its normal completion notification. A sticky flag would silence the
     /// session forever. Not persisted; each intent sets it fresh.
     var suppressGeneralCompletionNotification: Bool = false
-    static let helperMaxTurns = 200
     var helperConfig: HelperConfig?
+    var helperWrapUpRequested: Bool = false
     var pendingSteerMessages: [String] = []
     var lastEffectiveModel: EffectiveModelRecord? = nil
-    nonisolated static func resolvedStatus(_ status: String, result: String) -> String {
-        HelperRunner.resolvedStatus(status, result: result)
-    }
 
     /// Model group to bind when creating a new session (from long-press FAB).
     var initialGroupId: String?
